@@ -41,7 +41,7 @@ dev = [
 ]
 
 [project.scripts]
-policy-export-formatter = "adoc_export_import.cli:main"
+adoc-export-import = "adoc_export_import.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/adoc-export-import"

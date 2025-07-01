@@ -6,15 +6,15 @@ import pytest
 import tempfile
 import json
 from pathlib import Path
-from adoc_export_import import JSONStringReplacer
+from adoc_export_import import PolicyExportFormatter
 
 
-class TestJSONStringReplacer:
-    """Test cases for JSONStringReplacer class."""
+class TestPolicyExportFormatter:
+    """Test cases for PolicyExportFormatter class."""
 
     def test_replace_in_value_string(self):
         """Test string replacement in simple string values."""
-        replacer = JSONStringReplacer(
+        replacer = PolicyExportFormatter(
             input_dir="/tmp/test",
             search_string="old",
             replace_string="new"
@@ -30,7 +30,7 @@ class TestJSONStringReplacer:
 
     def test_replace_in_value_dict(self):
         """Test string replacement in dictionary values."""
-        replacer = JSONStringReplacer(
+        replacer = PolicyExportFormatter(
             input_dir="/tmp/test",
             search_string="old",
             replace_string="new"
@@ -57,7 +57,7 @@ class TestJSONStringReplacer:
 
     def test_replace_in_value_list(self):
         """Test string replacement in list values."""
-        replacer = JSONStringReplacer(
+        replacer = PolicyExportFormatter(
             input_dir="/tmp/test",
             search_string="old",
             replace_string="new"
@@ -72,7 +72,7 @@ class TestJSONStringReplacer:
     def test_invalid_input_directory(self):
         """Test initialization with invalid input directory."""
         with pytest.raises(FileNotFoundError):
-            JSONStringReplacer(
+            PolicyExportFormatter(
                 input_dir="/nonexistent/directory",
                 search_string="old",
                 replace_string="new"
@@ -82,7 +82,7 @@ class TestJSONStringReplacer:
         """Test initialization with empty search string."""
         with tempfile.TemporaryDirectory() as temp_dir:
             with pytest.raises(ValueError, match="Search string cannot be empty"):
-                JSONStringReplacer(
+                PolicyExportFormatter(
                     input_dir=temp_dir,
                     search_string="",
                     replace_string="new"
@@ -92,7 +92,7 @@ class TestJSONStringReplacer:
         """Test initialization with None replace string."""
         with tempfile.TemporaryDirectory() as temp_dir:
             with pytest.raises(ValueError, match="Replace string cannot be None"):
-                JSONStringReplacer(
+                PolicyExportFormatter(
                     input_dir=temp_dir,
                     search_string="old",
                     replace_string=None

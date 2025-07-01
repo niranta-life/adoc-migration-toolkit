@@ -9,7 +9,7 @@ __version__ = "1.0.0"
 __author__ = "Your Name"
 __email__ = "your.email@example.com"
 
-from .core import JSONStringReplacer, main
+from .core import PolicyExportFormatter, main
 from .api_client import AcceldataAPIClient, create_api_client
 
-__all__ = ["JSONStringReplacer", "main", "AcceldataAPIClient", "create_api_client"] 
+__all__ = ["PolicyExportFormatter", "main", "AcceldataAPIClient", "create_api_client"] 

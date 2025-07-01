@@ -23,8 +23,9 @@ import zipfile
 import tempfile
 import shutil
 import os
+import csv
 from pathlib import Path
-from typing import Any, Dict, List, Union, Optional
+from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
 
 # Configure logging with professional formatting
@@ -129,11 +130,86 @@ class PolicyExportFormatter:
             "errors": []
         }
         
+        # Initialize data quality policy extraction tracking
+        self.extracted_assets: Set[str] = set()
+        
         self.logger.info("PolicyExportFormatter initialized successfully")
         self.logger.info(f"Input directory: {self.input_dir}")
         self.logger.info(f"Output directory: {self.output_dir}")
         self.logger.info(f"Search string: '{self.search_string}'")
         self.logger.info(f"Replace string: '{self.replace_string}'")
+    
+    def extract_data_quality_assets(self, data: Any) -> None:
+        """Extract uid and backingAssetId from non-segmented data quality policies.
+        
+        Args:
+            data: The JSON data to process
+        """
+        try:
+            if isinstance(data, list):
+                # Process array of policy definitions
+                for policy in data:
+                    if isinstance(policy, dict):
+                        self._extract_from_policy(policy)
+            elif isinstance(data, dict):
+                # Process single policy definition
+                self._extract_from_policy(data)
+        except Exception as e:
+            self.logger.error(f"Error extracting data quality assets: {e}")
+            self.stats["errors"].append(f"Data quality extraction error: {e}")
+    
+    def _extract_from_policy(self, policy: Dict[str, Any]) -> None:
+        """Extract assets from a single policy definition.
+        
+        Args:
+            policy: The policy definition dictionary
+        """
+        try:
+            # Check if this is a non-segmented policy
+            is_segmented = policy.get("isSegmented", True)
+            
+            if not is_segmented:
+                # Extract backing assets
+                backing_assets = policy.get("backingAssets", [])
+                
+                for asset in backing_assets:
+                    if isinstance(asset, dict):
+                        uid = asset.get("uid")
+                        
+                        if uid is not None:
+                            self.extracted_assets.add(uid)
+                            self.logger.debug(f"Extracted asset uid: {uid}")
+        except Exception as e:
+            self.logger.error(f"Error extracting from policy: {e}")
+            self.stats["errors"].append(f"Policy extraction error: {e}")
+    
+    def write_extracted_assets_csv(self) -> None:
+        """Write extracted assets to CSV file."""
+        if not self.extracted_assets:
+            self.logger.info("No assets extracted, skipping CSV creation")
+            return
+        
+        csv_file = self.output_dir / "extracted_assets.csv"
+        
+        try:
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['source-env', 'target-env'])
+                
+                # Sort by uid for consistent output
+                sorted_assets = sorted(self.extracted_assets)
+                
+                for uid in sorted_assets:
+                    # Apply the same string replacement logic to create target-env
+                    target_env = uid.replace(self.search_string, self.replace_string)
+                    writer.writerow([uid, target_env])
+            
+            self.logger.info(f"Extracted {len(self.extracted_assets)} unique assets to {csv_file}")
+            
+        except Exception as e:
+            error_msg = f"Failed to write CSV file {csv_file}: {e}"
+            self.logger.error(error_msg)
+            self.stats["errors"].append(error_msg)
     
     def replace_in_value(self, value: Any) -> Any:
         """Recursively replace substrings in a value with error handling.
@@ -199,7 +275,13 @@ class PolicyExportFormatter:
                 with open(json_file_path, 'r', encoding='latin-1') as file:
                     data = json.load(file)
             
-            # Process the data
+            # Check if this is a data quality policy definitions file
+            file_name = json_file_path.name
+            if file_name.startswith("data_quality_policy_definitions"):
+                self.logger.info(f"Processing data quality policy definitions file: {file_name}")
+                self.extract_data_quality_assets(data)
+            
+            # Process the data (existing functionality)
             modified_data = self.replace_in_value(data)
             
             # Determine output file path
@@ -346,7 +428,13 @@ class PolicyExportFormatter:
                 with open(json_file_path, 'r', encoding='latin-1') as file:
                     data = json.load(file)
             
-            # Process the data
+            # Check if this is a data quality policy definitions file
+            file_name = json_file_path.name
+            if file_name.startswith("data_quality_policy_definitions"):
+                self.logger.info(f"Processing data quality policy definitions file in ZIP: {file_name}")
+                self.extract_data_quality_assets(data)
+            
+            # Process the data (existing functionality)
             modified_data = self.replace_in_value(data)
             
             # Write the modified data back to the same location in temp directory
@@ -467,6 +555,9 @@ class PolicyExportFormatter:
                 else:
                     failed += 1
             
+            # Write extracted assets CSV at the end
+            self.write_extracted_assets_csv()
+            
             stats = {
                 "total_files": total_files,
                 "json_files": len(json_files),
@@ -475,6 +566,7 @@ class PolicyExportFormatter:
                 "failed": failed,
                 "files_investigated": self.stats["files_investigated"],
                 "changes_made": self.stats["changes_made"],
+                "extracted_assets": len(self.extracted_assets),
                 "errors": self.stats["errors"]
             }
             
@@ -493,6 +585,7 @@ class PolicyExportFormatter:
                 "failed": 1,
                 "files_investigated": self.stats["files_investigated"],
                 "changes_made": self.stats["changes_made"],
+                "extracted_assets": len(self.extracted_assets),
                 "errors": self.stats["errors"]
             }
 
@@ -589,6 +682,9 @@ Features:
         print(f"Changes made:        {stats['changes_made']}")
         print(f"Successful:          {stats['successful']}")
         print(f"Failed:              {stats['failed']}")
+        
+        if stats.get('extracted_assets', 0) > 0:
+            print(f"Assets extracted:    {stats['extracted_assets']}")
         
         if stats['errors']:
             print(f"\nErrors encountered:  {len(stats['errors'])}")

@@ -10,6 +10,8 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+test_data/
+test_data_import_ready/
 develop-eggs/
 data/
 dist/
