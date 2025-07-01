@@ -75,8 +75,8 @@ def create_asset_export_parser(subparsers):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m adoc_export_import asset-export --csv-file=data/output/extracted_assets.csv --env-file=config.env
-  python -m adoc_export_import asset-export --csv-file=data/output/extracted_assets.csv --env-file=config.env --verbose
+  python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env
+  python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env --verbose
 
 Features:
   - Reads UIDs from CSV file (first column)
@@ -121,6 +121,8 @@ Interactive Commands:
   GET /catalog-server/api/assets?uid=123
   PUT /catalog-server/api/assets {"key": "value"}
   GET /catalog-server/api/assets?uid=123 --target-auth --target-tenant
+  segments-export data/output/segmented_spark_uids.csv
+  segments-export data/output/segmented_spark_uids.csv --target-auth --target-tenant
   exit
 
 Features:
@@ -275,6 +277,17 @@ def run_formatter(args):
         if stats.get('extracted_assets', 0) > 0:
             print(f"Assets extracted:    {stats['extracted_assets']}")
         
+        if stats.get('all_assets', 0) > 0:
+            print(f"All assets found:    {stats['all_assets']}")
+        
+        # Display policy statistics if any policies were processed
+        if stats.get('total_policies_processed', 0) > 0:
+            print(f"\nPolicy Statistics:")
+            print(f"  Total policies processed: {stats['total_policies_processed']}")
+            print(f"  Segmented SPARK policies: {stats['segmented_spark_policies']}")
+            print(f"  Segmented JDBC_SQL policies: {stats['segmented_jdbc_policies']}")
+            print(f"  Non-segmented policies: {stats['non_segmented_policies']}")
+        
         if stats['errors']:
             print(f"\nErrors encountered:  {len(stats['errors'])}")
             for error in stats['errors'][:5]:  # Show first 5 errors
@@ -427,6 +440,186 @@ def parse_api_command(command: str) -> tuple:
     return method, endpoint, json_payload, use_target_auth, use_target_tenant
 
 
+def parse_segments_export_command(command: str) -> tuple:
+    """Parse a segments-export command string into components.
+    
+    Args:
+        command: Command string like "segments-export <csv_file> [--target-auth] [--target-tenant]"
+        
+    Returns:
+        Tuple of (csv_file, use_target_auth, use_target_tenant)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'segments-export':
+        return None, False, False
+    
+    if len(parts) < 2:
+        raise ValueError("CSV file path is required for segments-export command")
+    
+    csv_file = parts[1]
+    use_target_auth = False
+    use_target_tenant = False
+    
+    # Check for flags
+    if '--target-auth' in parts:
+        use_target_auth = True
+        parts.remove('--target-auth')
+    
+    if '--target-tenant' in parts:
+        use_target_tenant = True
+        parts.remove('--target-tenant')
+    
+    return csv_file, use_target_auth, use_target_tenant
+
+
+def execute_segments_export(csv_file: str, client, use_target_auth: bool, use_target_tenant: bool, logger: logging.Logger):
+    """Execute the segments-export command.
+    
+    Args:
+        csv_file: Path to the CSV file containing UIDs
+        client: API client instance
+        use_target_auth: Whether to use target authentication
+        use_target_tenant: Whether to use target tenant
+        logger: Logger instance
+    """
+    try:
+        # Read UIDs from CSV file
+        uids = read_csv_uids(csv_file, logger)
+        
+        if not uids:
+            logger.warning("No UIDs found in CSV file")
+            return
+        
+        print(f"\nProcessing {len(uids)} UIDs from CSV file: {csv_file}")
+        print("="*80)
+        
+        for i, uid in enumerate(uids, 1):
+            print(f"\n[{i}/{len(uids)}] Processing UID: {uid}")
+            print("-" * 60)
+            
+            try:
+                # Step 1: Get asset details by UID
+                print(f"Getting asset details for UID: {uid}")
+                asset_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets?uid={uid}",
+                    method='GET',
+                    use_target_auth=use_target_auth,
+                    use_target_tenant=use_target_tenant
+                )
+                
+                # Step 2: Extract the top-level "id" field
+                if not asset_response or 'data' not in asset_response:
+                    print(f"❌ No 'data' field found in asset response for UID: {uid}")
+                    continue
+                
+                data_array = asset_response['data']
+                if not data_array or len(data_array) == 0:
+                    print(f"❌ Empty 'data' array in asset response for UID: {uid}")
+                    continue
+                
+                first_asset = data_array[0]
+                if 'id' not in first_asset:
+                    print(f"❌ No 'id' field found in first asset for UID: {uid}")
+                    continue
+                
+                asset_id = first_asset['id']
+                print(f"Extracted asset ID: {asset_id}")
+                
+                # Step 3: Get segments for the asset
+                print(f"Getting segments for asset ID: {asset_id}")
+                segments_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets/{asset_id}/segments",
+                    method='GET',
+                    use_target_auth=use_target_auth,
+                    use_target_tenant=use_target_tenant
+                )
+                
+                # Step 4: Display formatted segments JSON
+                print("Segments Response:")
+                print(json.dumps(segments_response, indent=2, ensure_ascii=False))
+                
+            except Exception as e:
+                logger.error(f"Failed to process UID {uid}: {e}")
+                print(f"❌ Error processing UID {uid}: {e}")
+        
+        print("\n" + "="*80)
+        print("SEGMENTS EXPORT COMPLETED")
+        print("="*80)
+        
+    except Exception as e:
+        logger.error(f"Error in segments-export: {e}")
+        print(f"❌ Error: {e}")
+
+
+def setup_autocomplete():
+    """Setup autocomplete for the interactive session."""
+    # Available commands and their completions
+    commands = [
+        'GET',
+        'PUT', 
+        'segments-export',
+        'exit',
+        'quit',
+        'q'
+    ]
+    
+    # Common endpoints for completion
+    endpoints = [
+        '/catalog-server/api/assets',
+        '/catalog-server/api/assets?uid=',
+        '/catalog-server/api/assets/',
+        '/catalog-server/api/health'
+    ]
+    
+    # Flags for completion
+    flags = [
+        '--target-auth',
+        '--target-tenant'
+    ]
+    
+    def completer(text, state):
+        """Completer function for readline."""
+        options = []
+        
+        # Get the current line and cursor position
+        line = readline.get_line_buffer()
+        words = line.split()
+        
+        if not words:
+            # If no words, suggest commands
+            options = [cmd for cmd in commands if cmd.lower().startswith(text.lower())]
+        elif len(words) == 1:
+            # First word - suggest commands
+            options = [cmd for cmd in commands if cmd.lower().startswith(text.lower())]
+        elif len(words) == 2:
+            if words[0].upper() in ['GET', 'PUT']:
+                # Second word for GET/PUT - suggest endpoints
+                options = [endpoint for endpoint in endpoints if endpoint.startswith(text)]
+            elif words[0].lower() == 'segments-export':
+                # Second word for segments-export - suggest CSV files
+                # This is a simple suggestion - could be enhanced to scan directory
+                options = ['data/samples_import_ready/segmented_spark_uids.csv', 'data/samples/assets.csv']
+        elif len(words) >= 2:
+            # Additional words - suggest flags
+            if text.startswith('--'):
+                options = [flag for flag in flags if flag.startswith(text)]
+            elif words[0].upper() == 'PUT' and len(words) == 3:
+                # Third word for PUT - suggest JSON payload start
+                options = ['{"', '{']
+        
+        # Return the option at the requested state index
+        if state < len(options):
+            return options[state]
+        else:
+            return None
+    
+    # Set the completer function
+    readline.set_completer(completer)
+    
+    # Enable tab completion
+    readline.parse_and_bind('tab: complete')
+
+
 def run_rest_api(args):
     """Run the interactive REST API client."""
     try:
@@ -462,6 +655,9 @@ def run_rest_api(args):
         # Set history file for future sessions
         readline.set_history_length(1000)  # Keep last 1000 commands
         
+        # Setup autocomplete
+        setup_autocomplete()
+        
         print("\n" + "="*80)
         print("INTERACTIVE ADOC REST API CLIENT")
         print("="*80)
@@ -472,9 +668,11 @@ def run_rest_api(args):
         print("\nCommands:")
         print("  GET <endpoint> [--target-auth] [--target-tenant]")
         print("  PUT <endpoint> <json_payload> [--target-auth] [--target-tenant]")
+        print("  segments-export <csv_file> [--target-auth] [--target-tenant]")
         print("  exit")
         print("="*80)
         print("Use ↑/↓ arrow keys to navigate command history")
+        print("Use TAB key for command autocomplete")
         print("="*80)
         
         while True:
@@ -489,7 +687,14 @@ def run_rest_api(args):
                     print("Goodbye!")
                     break
                 
-                # Parse the command
+                # Check if it's a segments-export command
+                if command.lower().startswith('segments-export'):
+                    csv_file, use_target_auth, use_target_tenant = parse_segments_export_command(command)
+                    if csv_file:
+                        execute_segments_export(csv_file, client, use_target_auth, use_target_tenant, logger)
+                    continue
+                
+                # Parse the command for GET/PUT requests
                 method, endpoint, json_payload, use_target_auth, use_target_tenant = parse_api_command(command)
                 
                 if method is None:

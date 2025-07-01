@@ -92,6 +92,8 @@ Interactive Commands:
 ADOC> GET /catalog-server/api/assets?uid=123
 ADOC> PUT /catalog-server/api/assets {"name": "test", "value": 123}
 ADOC> GET /catalog-server/api/assets?uid=123 --target-auth --target-tenant
+ADOC> segments-export data/output/segmented_spark_uids.csv
+ADOC> segments-export data/output/segmented_spark_uids.csv --target-auth --target-tenant
 ADOC> exit
 ```
 
@@ -99,6 +101,8 @@ ADOC> exit
 - Command history with up/down arrow key navigation
 - History persists between sessions (stored in `~/.adoc_history`)
 - Supports up to 1000 commands in history
+- **Segments Export**: Read CSV file, get asset details, extract ID, and fetch segments
+- **Tab Completion**: Press TAB to autocomplete commands, endpoints, and flags
 
 ### Examples
 
@@ -119,10 +123,30 @@ python -m adoc_export_import formatter --input data/samples --source-env-string 
 
 ```bash
 # Export assets from CSV file
-python -m adoc_export_import asset-export --csv-file data/output/extracted_assets.csv --env-file config.env
+python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env
 
 # Export with verbose logging
-python -m adoc_export_import asset-export --csv-file data/output/extracted_assets.csv --env-file config.env --verbose
+python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env --verbose
+```
+
+#### REST API Examples
+
+```bash
+# Start interactive REST API client
+python -m adoc_export_import rest-api --env-file=config.env
+
+# Start with verbose logging
+python -m adoc_export_import rest-api --env-file=config.env --verbose
+```
+
+Interactive Commands:
+```
+ADOC> GET /catalog-server/api/assets?uid=123
+ADOC> PUT /catalog-server/api/assets {"name": "test", "value": 123}
+ADOC> GET /catalog-server/api/assets?uid=123 --target-auth --target-tenant
+ADOC> segments-export data/output/segmented_spark_uids.csv
+ADOC> segments-export data/output/segmented_spark_uids.csv --target-auth --target-tenant
+ADOC> exit
 ```
 
 ### Environment Configuration

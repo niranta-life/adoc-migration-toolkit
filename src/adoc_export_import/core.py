@@ -127,11 +127,17 @@ class PolicyExportFormatter:
             "changes_made": 0,
             "json_files_processed": 0,
             "zip_files_processed": 0,
-            "errors": []
+            "errors": [],
+            # Policy type statistics
+            "segmented_spark_policies": 0,
+            "segmented_jdbc_policies": 0,
+            "non_segmented_policies": 0,
+            "total_policies_processed": 0
         }
         
         # Initialize data quality policy extraction tracking
         self.extracted_assets: Set[str] = set()
+        self.all_asset_uids: Set[str] = set()  # Track all UIDs without filtering
         
         self.logger.info("PolicyExportFormatter initialized successfully")
         self.logger.info(f"Input directory: {self.input_dir}")
@@ -146,17 +152,83 @@ class PolicyExportFormatter:
             data: The JSON data to process
         """
         try:
+            # Reset per-file statistics
+            file_stats = {
+                "segmented_spark_policies": 0,
+                "segmented_jdbc_policies": 0,
+                "non_segmented_policies": 0,
+                "total_policies_processed": 0
+            }
+            
             if isinstance(data, list):
                 # Process array of policy definitions
                 for policy in data:
                     if isinstance(policy, dict):
+                        # Extract all UIDs without filtering
+                        self._extract_all_assets_from_policy(policy)
+                        # Extract filtered UIDs
                         self._extract_from_policy(policy)
+                        # Update file stats based on the policy type
+                        is_segmented = policy.get("isSegmented", False)
+                        engine_type = policy.get("engineType", "")
+                        file_stats["total_policies_processed"] += 1
+                        
+                        if is_segmented and engine_type == "SPARK":
+                            file_stats["segmented_spark_policies"] += 1
+                        elif is_segmented and engine_type == "JDBC_SQL":
+                            file_stats["segmented_jdbc_policies"] += 1
+                        elif not is_segmented:
+                            file_stats["non_segmented_policies"] += 1
             elif isinstance(data, dict):
                 # Process single policy definition
+                # Extract all UIDs without filtering
+                self._extract_all_assets_from_policy(data)
+                # Extract filtered UIDs
                 self._extract_from_policy(data)
+                # Update file stats
+                is_segmented = data.get("isSegmented", False)
+                engine_type = data.get("engineType", "")
+                file_stats["total_policies_processed"] += 1
+                
+                if is_segmented and engine_type == "SPARK":
+                    file_stats["segmented_spark_policies"] += 1
+                elif is_segmented and engine_type == "JDBC_SQL":
+                    file_stats["segmented_jdbc_policies"] += 1
+                elif not is_segmented:
+                    file_stats["non_segmented_policies"] += 1
+            
+            # Log per-file statistics
+            if file_stats["total_policies_processed"] > 0:
+                self.logger.info(f"File Policy Statistics:")
+                self.logger.info(f"  Total policies processed: {file_stats['total_policies_processed']}")
+                self.logger.info(f"  Segmented SPARK policies: {file_stats['segmented_spark_policies']}")
+                self.logger.info(f"  Segmented JDBC_SQL policies: {file_stats['segmented_jdbc_policies']}")
+                self.logger.info(f"  Non-segmented policies: {file_stats['non_segmented_policies']}")
+                
         except Exception as e:
             self.logger.error(f"Error extracting data quality assets: {e}")
             self.stats["errors"].append(f"Data quality extraction error: {e}")
+    
+    def _extract_all_assets_from_policy(self, policy: Dict[str, Any]) -> None:
+        """Extract all asset UIDs from a policy without any filtering constraints.
+        
+        Args:
+            policy: The policy definition dictionary
+        """
+        try:
+            # Extract backing assets from all policies regardless of type
+            backing_assets = policy.get("backingAssets", [])
+            
+            for asset in backing_assets:
+                if isinstance(asset, dict):
+                    uid = asset.get("uid")
+                    
+                    if uid is not None:
+                        self.all_asset_uids.add(uid)
+                        self.logger.debug(f"Added to all assets: {uid}")
+        except Exception as e:
+            self.logger.error(f"Error extracting all assets from policy: {e}")
+            self.stats["errors"].append(f"All assets extraction error: {e}")
     
     def _extract_from_policy(self, policy: Dict[str, Any]) -> None:
         """Extract assets from a single policy definition.
@@ -165,10 +237,35 @@ class PolicyExportFormatter:
             policy: The policy definition dictionary
         """
         try:
-            # Check if this is a non-segmented policy
-            is_segmented = policy.get("isSegmented", True)
+            # Check if this is a segmented policy with SPARK engine
+            is_segmented = policy.get("isSegmented", False)
+            engine_type = policy.get("engineType", "")
+            policy_name = policy.get("name", "unknown")
             
-            if not is_segmented:
+            # Track statistics
+            self.stats["total_policies_processed"] += 1
+            
+            # Extract UIDs only when:
+            # isSegmented=true AND engineType=SPARK
+            should_extract = False
+            
+            if is_segmented and engine_type == "SPARK":
+                should_extract = True
+                self.stats["segmented_spark_policies"] += 1
+                self.logger.debug(f"Extracting from segmented SPARK policy: {policy_name}")
+            elif is_segmented and engine_type == "JDBC_SQL":
+                self.stats["segmented_jdbc_policies"] += 1
+                self.logger.debug(f"Skipping segmented JDBC_SQL policy: {policy_name}")
+                return
+            elif not is_segmented:
+                self.stats["non_segmented_policies"] += 1
+                self.logger.debug(f"Skipping non-segmented policy: {policy_name}")
+                return
+            else:
+                self.logger.debug(f"Skipping policy (isSegmented={is_segmented}, engineType={engine_type}): {policy_name}")
+                return
+            
+            if should_extract:
                 # Extract backing assets
                 backing_assets = policy.get("backingAssets", [])
                 
@@ -189,7 +286,7 @@ class PolicyExportFormatter:
             self.logger.info("No assets extracted, skipping CSV creation")
             return
         
-        csv_file = self.output_dir / "extracted_assets.csv"
+        csv_file = self.output_dir / "segmented_spark_uids.csv"
         
         try:
             with open(csv_file, 'w', newline='', encoding='utf-8') as f:
@@ -205,6 +302,34 @@ class PolicyExportFormatter:
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.extracted_assets)} unique assets to {csv_file}")
+            
+        except Exception as e:
+            error_msg = f"Failed to write CSV file {csv_file}: {e}"
+            self.logger.error(error_msg)
+            self.stats["errors"].append(error_msg)
+    
+    def write_all_assets_csv(self) -> None:
+        """Write all asset UIDs to CSV file without filtering constraints."""
+        if not self.all_asset_uids:
+            self.logger.info("No assets found, skipping asset_uids.csv creation")
+            return
+        
+        csv_file = self.output_dir / "asset_uids.csv"
+        
+        try:
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['source-env', 'target-env'])
+                
+                # Sort by uid for consistent output
+                sorted_assets = sorted(self.all_asset_uids)
+                
+                for uid in sorted_assets:
+                    # Apply the same string replacement logic to create target-env
+                    target_env = uid.replace(self.search_string, self.replace_string)
+                    writer.writerow([uid, target_env])
+            
+            self.logger.info(f"Extracted {len(self.all_asset_uids)} unique assets to {csv_file}")
             
         except Exception as e:
             error_msg = f"Failed to write CSV file {csv_file}: {e}"
@@ -557,6 +682,7 @@ class PolicyExportFormatter:
             
             # Write extracted assets CSV at the end
             self.write_extracted_assets_csv()
+            self.write_all_assets_csv()
             
             stats = {
                 "total_files": total_files,
@@ -567,7 +693,13 @@ class PolicyExportFormatter:
                 "files_investigated": self.stats["files_investigated"],
                 "changes_made": self.stats["changes_made"],
                 "extracted_assets": len(self.extracted_assets),
-                "errors": self.stats["errors"]
+                "all_assets": len(self.all_asset_uids),
+                "errors": self.stats["errors"],
+                # Policy statistics
+                "total_policies_processed": self.stats["total_policies_processed"],
+                "segmented_spark_policies": self.stats["segmented_spark_policies"],
+                "segmented_jdbc_policies": self.stats["segmented_jdbc_policies"],
+                "non_segmented_policies": self.stats["non_segmented_policies"]
             }
             
             self.logger.info(f"Processing complete: {successful} successful, {failed} failed")
@@ -586,7 +718,13 @@ class PolicyExportFormatter:
                 "files_investigated": self.stats["files_investigated"],
                 "changes_made": self.stats["changes_made"],
                 "extracted_assets": len(self.extracted_assets),
-                "errors": self.stats["errors"]
+                "all_assets": len(self.all_asset_uids),
+                "errors": self.stats["errors"],
+                # Policy statistics
+                "total_policies_processed": self.stats["total_policies_processed"],
+                "segmented_spark_policies": self.stats["segmented_spark_policies"],
+                "segmented_jdbc_policies": self.stats["segmented_jdbc_policies"],
+                "non_segmented_policies": self.stats["non_segmented_policies"]
             }
 
 
