@@ -217,6 +217,10 @@ class AcceldataAPIClient:
                 if json_payload is None:
                     raise ValueError("JSON payload is required for PUT requests")
                 response = self.session.put(url, headers=headers, json=json_payload)
+            elif method.upper() == 'POST':
+                if json_payload is None:
+                    raise ValueError("JSON payload is required for POST requests")
+                response = self.session.post(url, headers=headers, json=json_payload)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
