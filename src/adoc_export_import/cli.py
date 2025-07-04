@@ -11,9 +11,12 @@ import json
 import logging
 import readline
 import os
+import pickle
 from pathlib import Path
+from datetime import datetime
 from .core import PolicyExportFormatter, setup_logging
 from .api_client import create_api_client
+from .guided_migration import GuidedMigration, MigrationState
 
 
 def create_formatter_parser(subparsers):
@@ -830,6 +833,10 @@ def setup_autocomplete():
         'asset-profile-import',
         'asset-config-export',
         'set-output-dir',
+        'guided-migration',
+        'resume-migration',
+        'delete-migration',
+        'list-migrations',
         'help',
         'exit',
         'quit',
@@ -882,6 +889,10 @@ def setup_autocomplete():
             elif words[0].lower() == 'set-output-dir':
                 # Second word for set-output-dir - suggest directory paths
                 options = ['data/output', 'data/custom_output', 'output', 'exports', 'data/exports', 'data/samples_import_ready']
+            elif words[0].lower() in ['guided-migration', 'resume-migration', 'delete-migration']:
+                # Second word for migration commands - suggest migration names
+                # This could be enhanced to scan actual migration files
+                options = ['prod-to-dev', 'test-migration', 'my-migration', 'migration-1']
         elif len(words) >= 2:
             # Additional words - suggest flags
             if text.startswith('--'):
@@ -965,67 +976,6 @@ def run_interactive(args):
         # Setup autocomplete
         setup_autocomplete()
         
-        print("\n" + "="*80)
-        print("INTERACTIVE ADOC REST API CLIENT")
-        print("="*80)
-        print(f"Host: {client.host}")
-        print(f"Source Tenant: {client.tenant}")
-        if hasattr(client, 'target_tenant') and client.target_tenant:
-            print(f"Target Tenant: {client.target_tenant}")
-        print("\nCommands:")
-        print("  segments-export <csv_file> [--output-file <file>] [--quiet]")
-        print("  segments-import <csv_file> [--dry-run]")
-        print("  asset-profile-export <csv_file> [--output-file <file>] [--quiet] [--verbose]")
-        print("  asset-profile-import <csv_file> [--dry-run] [--quiet] [--verbose]")
-        print("  asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]")
-        print("  set-output-dir <directory>")
-        print("  help")
-        print("  exit")
-        print("="*80)
-        print("Use ↑/↓ arrow keys to navigate command history")
-        print("Use TAB key for command autocomplete")
-        print("Type 'help' for detailed command information")
-        print("\nEnvironment Behavior:")
-        print("  segments-export: Always exports from source environment")
-        print("  segments-import: Always imports to target environment")
-        print("  asset-profile-export: Always exports from source environment")
-        print("  asset-profile-import: Always imports to target environment")
-        print("  asset-config-export: Always exports from source environment")
-        print("\nSegments Export Options:")
-        print("  --output-file <file>  Specify output file (default: uses global output directory or <csv_dir>_import_ready/<csv_name>_segments_output.csv)")
-        print("  --quiet               Suppress console output (only show summary)")
-        print("  Note: Required for SPARK segmented assets (not available in standard import)")
-        print("        Optional for JDBC_SQL segmented assets (already in standard import)")
-        print("\nSegments Import Options:")
-        print("  --dry-run             Preview changes without making actual API calls")
-        print("  --quiet               Suppress console output (default)")
-        print("  --verbose             Show detailed output including request headers")
-        print("  Note: Reads CSV file generated from segments-export")
-        print("        Targets UIDs with segments present and SPARK engine")
-        print("\nAsset Profile Export Options:")
-        print("  --output-file <file>  Specify output file (default: uses global output directory or <csv_dir>_import_ready/asset-profiles-export.csv)")
-        print("  --quiet               Suppress console output (only show summary)")
-        print("  --verbose             Show detailed output including request headers and responses")
-        print("\nAsset Profile Import Options:")
-        print("  --dry-run             Preview changes without making actual API calls")
-        print("  --quiet               Suppress console output (default)")
-        print("  --verbose             Show detailed output including request headers and responses")
-        print("  --dry-run --verbose   Show detailed preview of all API calls, headers, and payloads")
-        print("\nAsset Config Export Options:")
-        print("  --output-file <file>  Specify output file (default: uses global output directory or <csv_dir>_import_ready/asset-config-export.csv)")
-        print("  --quiet               Suppress console output, show only summary (default)")
-        print("  --verbose             Show detailed output including headers and responses")
-        print("  Note: Reads UIDs from first column, gets asset ID, then fetches config")
-        print("        Outputs compressed JSON response with target-env UID")
-        print("\nGlobal Output Directory:")
-        print("  set-output-dir <dir>  Set global output directory for all export commands")
-        print("  --output-file         Overrides global output directory when specified")
-        print("\nOutput Format:")
-        print("  CSV file with columns: target-env, profile_json, config_json")
-        print("  JSON content is properly quoted for CSV compatibility")
-        print("  File is verified for correct CSV reading after creation")
-        print("="*80)
-        
         while True:
             try:
                 # Get user input
@@ -1083,6 +1033,32 @@ def run_interactive(args):
                     directory = parse_set_output_dir_command(command)
                     if directory:
                         set_global_output_directory(directory, logger)
+                    continue
+                
+                # Check if it's a guided-migration command
+                if command.lower().startswith('guided-migration'):
+                    migration_name = parse_guided_migration_command(command)
+                    if migration_name:
+                        execute_guided_migration(migration_name, client, logger)
+                    continue
+                
+                # Check if it's a resume-migration command
+                if command.lower().startswith('resume-migration'):
+                    migration_name = parse_resume_migration_command(command)
+                    if migration_name:
+                        execute_resume_migration(migration_name, client, logger)
+                    continue
+                
+                # Check if it's a delete-migration command
+                if command.lower().startswith('delete-migration'):
+                    migration_name = parse_delete_migration_command(command)
+                    if migration_name:
+                        execute_delete_migration(migration_name, logger)
+                    continue
+                
+                # Check if it's a list-migrations command
+                if parse_list_migrations_command(command):
+                    execute_list_migrations(logger)
                     continue
                 
                 # Parse the command for GET/PUT requests
@@ -2372,6 +2348,82 @@ def parse_set_output_dir_command(command: str) -> str:
     return directory
 
 
+def parse_guided_migration_command(command: str) -> str:
+    """Parse a guided-migration command string into components.
+    
+    Args:
+        command: Command string like "guided-migration <name>"
+        
+    Returns:
+        str: Migration name or None if invalid
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'guided-migration':
+        return None
+    
+    if len(parts) < 2:
+        raise ValueError("Migration name is required for guided-migration command")
+    
+    # Join remaining parts in case name contains spaces
+    name = ' '.join(parts[1:])
+    return name
+
+
+def parse_resume_migration_command(command: str) -> str:
+    """Parse a resume-migration command string into components.
+    
+    Args:
+        command: Command string like "resume-migration <name>"
+        
+    Returns:
+        str: Migration name or None if invalid
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'resume-migration':
+        return None
+    
+    if len(parts) < 2:
+        raise ValueError("Migration name is required for resume-migration command")
+    
+    # Join remaining parts in case name contains spaces
+    name = ' '.join(parts[1:])
+    return name
+
+
+def parse_delete_migration_command(command: str) -> str:
+    """Parse a delete-migration command string into components.
+    
+    Args:
+        command: Command string like "delete-migration <name>"
+        
+    Returns:
+        str: Migration name or None if invalid
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'delete-migration':
+        return None
+    
+    if len(parts) < 2:
+        raise ValueError("Migration name is required for delete-migration command")
+    
+    # Join remaining parts in case name contains spaces
+    name = ' '.join(parts[1:])
+    return name
+
+
+def parse_list_migrations_command(command: str) -> bool:
+    """Parse a list-migrations command string.
+    
+    Args:
+        command: Command string like "list-migrations"
+        
+    Returns:
+        bool: True if command is valid, False otherwise
+    """
+    parts = command.strip().split()
+    return parts and parts[0].lower() == 'list-migrations'
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -2420,12 +2472,16 @@ For help on a specific command:
 
 def show_interactive_help():
     """Display help information for all available interactive commands."""
+    # ANSI escape codes for formatting
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
+    
     print("\n" + "="*80)
-    print("INTERACTIVE ADOC REST API CLIENT - COMMAND HELP")
+    print("ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP")
     print("="*80)
     
-    print("\n📊 SEGMENTS COMMANDS:")
-    print("  segments-export <csv_file> [--output-file <file>] [--quiet]")
+    print(f"\n{BOLD}📊 SEGMENTS COMMANDS:{RESET}")
+    print(f"  {BOLD}segments-export{RESET} <csv_file> [--output-file <file>] [--quiet]")
     print("    Description: Export segments from source environment to CSV file")
     print("    Arguments:")
     print("      csv_file: Path to CSV file with source-env and target-env mappings")
@@ -2443,7 +2499,7 @@ def show_interactive_help():
     print("      • Only processes assets that have segments defined")
     print("      • Skips assets without segments (logged as info)")
     
-    print("\n  segments-import <csv_file> [--dry-run] [--quiet] [--verbose]")
+    print(f"\n  {BOLD}segments-import{RESET} <csv_file> [--dry-run] [--quiet] [--verbose]")
     print("    Description: Import segments to target environment from CSV file")
     print("    Arguments:")
     print("      csv_file: Path to CSV file with target-env and segments_json")
@@ -2462,8 +2518,8 @@ def show_interactive_help():
     print("      • Validates CSV format and JSON content")
     print("      • Processes only assets that have valid segments configuration")
     
-    print("\n🔧 ASSET PROFILE COMMANDS:")
-    print("  asset-profile-export <csv_file> [--output-file <file>] [--quiet] [--verbose]")
+    print(f"\n{BOLD}🔧 ASSET PROFILE COMMANDS:{RESET}")
+    print(f"  {BOLD}asset-profile-export{RESET} <csv_file> [--output-file <file>] [--quiet] [--verbose]")
     print("    Description: Export asset profiles from source environment to CSV file")
     print("    Arguments:")
     print("      csv_file: Path to CSV file with source-env and target-env mappings")
@@ -2474,7 +2530,7 @@ def show_interactive_help():
     print("      asset-profile-export data/samples_import_ready/asset_uids.csv")
     print("      asset-profile-export uids.csv --output-file profiles.csv --verbose")
     
-    print("\n  asset-profile-import <csv_file> [--dry-run] [--quiet] [--verbose]")
+    print(f"\n  {BOLD}asset-profile-import{RESET} <csv_file> [--dry-run] [--quiet] [--verbose]")
     print("    Description: Import asset profiles to target environment from CSV file")
     print("    Arguments:")
     print("      csv_file: Path to CSV file with target-env and profile_json")
@@ -2485,8 +2541,8 @@ def show_interactive_help():
     print("      asset-profile-import data/samples_import_ready/asset-profiles-export.csv")
     print("      asset-profile-import profiles.csv --dry-run --verbose")
     
-    print("\n🔍 ASSET CONFIGURATION COMMANDS:")
-    print("  asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]")
+    print(f"\n{BOLD}🔍 ASSET CONFIGURATION COMMANDS:{RESET}")
+    print(f"  {BOLD}asset-config-export{RESET} <csv_file> [--output-file <file>] [--quiet] [--verbose]")
     print("    Description: Export asset configurations from source environment to CSV file")
     print("    Arguments:")
     print("      csv_file: Path to CSV file with UIDs in the first column")
@@ -2505,8 +2561,8 @@ def show_interactive_help():
     print("      • Shows HTTP headers and response objects in verbose mode")
     print("      • Output format: target-env, config_json (compressed)")
     
-    print("\n🛠️ UTILITY COMMANDS:")
-    print("  set-output-dir <directory>")
+    print(f"\n{BOLD}🛠️ UTILITY COMMANDS:{RESET}")
+    print(f"  {BOLD}set-output-dir{RESET} <directory>")
     print("    Description: Set global output directory for all export commands")
     print("    Arguments:")
     print("      directory: Path to the output directory")
@@ -2514,40 +2570,66 @@ def show_interactive_help():
     print("      set-output-dir /path/to/my/output")
     print("      set-output-dir data/custom_output")
     
-    print("\n  help")
+    print(f"\n{BOLD}🚀 GUIDED MIGRATION COMMANDS:{RESET}")
+    print(f"  {BOLD}guided-migration{RESET} <name>")
+    print("    Description: Start a new guided migration session")
+    print("    Arguments:")
+    print("      name: Unique name for the migration session")
+    print("    Examples:")
+    print("      guided-migration prod-to-dev")
+    print("      guided-migration test-migration")
+    print("    Features:")
+    print("      • Step-by-step guidance through the complete migration process")
+    print("      • State management - can pause and resume at any time")
+    print("      • Validation of prerequisites at each step")
+    print("      • Detailed help and instructions for each step")
+    print("      • Automatic file path management")
+    
+    print(f"\n  {BOLD}resume-migration{RESET} <name>")
+    print("    Description: Resume an existing guided migration session")
+    print("    Arguments:")
+    print("      name: Name of the existing migration session")
+    print("    Examples:")
+    print("      resume-migration prod-to-dev")
+    print("    Features:")
+    print("      • Continues from where you left off")
+    print("      • Shows current progress and completed steps")
+    print("      • Validates prerequisites before continuing")
+    
+    print(f"\n  {BOLD}delete-migration{RESET} <name>")
+    print("    Description: Delete a migration state file")
+    print("    Arguments:")
+    print("      name: Name of the migration session to delete")
+    print("    Examples:")
+    print("      delete-migration prod-to-dev")
+    print("    Features:")
+    print("      • Confirms deletion to prevent accidental loss")
+    print("      • Shows migration details before deletion")
+    
+    print(f"\n  {BOLD}list-migrations{RESET}")
+    print("    Description: List all available migration sessions")
+    print("    Examples:")
+    print("      list-migrations")
+    print("    Features:")
+    print("      • Shows all migration names and their status")
+    print("      • Displays creation date and current step")
+    print("      • Shows completion progress")
+    
+    print(f"\n  {BOLD}help{RESET}")
     print("    Description: Show this help information")
     print("    Example: help")
     
-    print("\n  exit, quit, q")
+    print(f"\n  {BOLD}exit, quit, q{RESET}")
     print("    Description: Exit the interactive client")
     print("    Examples: exit, quit, q")
     
-    print("\n📋 COMMON ENDPOINTS:")
-    print("  /catalog-server/api/health")
-    print("    Description: Check API health status")
-    
-    print("  /catalog-server/api/assets?uid=<uid>")
-    print("    Description: Get asset details by UID")
-    
-    print("  /catalog-server/api/assets/<asset-id>/metadata")
-    print("    Description: Get asset metadata by ID")
-    
-    print("  /catalog-server/api/assets/<asset-id>/segments")
-    print("    Description: Get asset segments by ID")
-    
-    print("  /catalog-server/api/profile/<asset-id>/config")
-    print("    Description: Get or update asset profile configuration")
-    
-    print("  /catalog-server/api/connections")
-    print("    Description: List available connections")
-    
-    print("\n🔧 ENVIRONMENT BEHAVIOR:")
+    print(f"\n{BOLD}🔧 ENVIRONMENT BEHAVIOR:{RESET}")
     print("  • segments-export: Always exports from source environment")
     print("  • segments-import: Always imports to target environment")
     print("  • asset-profile-export: Always exports from source environment")
     print("  • asset-profile-import: Always imports to target environment")
     print("  • asset-config-export: Always exports from source environment")
-    print("\n💡 TIPS:")
+    print(f"\n{BOLD}💡 TIPS:{RESET}")
     print("  • Use TAB key for command autocomplete")
     print("  • Use ↑/↓ arrow keys to navigate command history")
     print("  • Type part of an endpoint and press TAB to see suggestions")
@@ -2556,7 +2638,7 @@ def show_interactive_help():
     print("  • Check log files for detailed error information")
     print("  • Set output directory once with set-output-dir to avoid specifying --output-file repeatedly")
     
-    print("\n📁 FILE LOCATIONS:")
+    print(f"\n{BOLD}📁 FILE LOCATIONS:{RESET}")
     print("  • Input CSV files: data/samples_import_ready/")
     print("  • Output CSV files: *_import_ready/ directories (or custom output directory)")
     print("  • Log files: policy_export_formatter_*.log")
@@ -2636,6 +2718,492 @@ def get_output_file_path(csv_file: str, default_filename: str, custom_output_fil
     else:
         import_ready_dir = csv_path.parent / f"{csv_path.parent.name}_import_ready"
         return import_ready_dir / default_filename
+
+
+def execute_guided_migration(migration_name: str, client, logger: logging.Logger):
+    """Execute a guided migration session.
+    
+    Args:
+        migration_name: Name of the migration session
+        client: API client instance
+        logger: Logger instance
+    """
+    guided_migration = GuidedMigration(logger)
+    
+    # Check if migration already exists
+    existing_state = guided_migration.load_state(migration_name)
+    if existing_state:
+        print(f"\n⚠️  Migration '{migration_name}' already exists!")
+        print(f"Created: {existing_state.created_at}")
+        print(f"Current step: {existing_state.current_step + 1}")
+        print(f"Completed steps: {len(existing_state.completed_steps)}")
+        
+        response = input("\nDo you want to:\n1. Resume the existing migration\n2. Start a new migration (overwrites existing)\n3. Cancel\nEnter choice (1-3): ").strip()
+        
+        if response == '1':
+            return execute_resume_migration(migration_name, client, logger)
+        elif response == '2':
+            # Delete existing state and start fresh
+            guided_migration.delete_state(migration_name)
+            print(f"Deleted existing migration '{migration_name}'")
+        else:
+            print("Cancelled.")
+            return
+    
+    # Create new migration state
+    state = MigrationState(migration_name)
+    guided_migration.save_state(state)
+    
+    print(f"\n🚀 Starting guided migration: {migration_name}")
+    print("="*80)
+    
+    # Start the migration loop
+    execute_migration_loop(guided_migration, state, client, logger)
+
+
+def execute_resume_migration(migration_name: str, client, logger: logging.Logger):
+    """Resume an existing guided migration session.
+    
+    Args:
+        migration_name: Name of the migration session
+        client: API client instance
+        logger: Logger instance
+    """
+    guided_migration = GuidedMigration(logger)
+    
+    # Load existing state
+    state = guided_migration.load_state(migration_name)
+    if not state:
+        print(f"❌ Migration '{migration_name}' not found!")
+        print("Available migrations:")
+        migrations = guided_migration.list_migrations()
+        if migrations:
+            for migration in migrations:
+                print(f"  - {migration}")
+        else:
+            print("  No migrations found")
+        return
+    
+    print(f"\n🔄 Resuming migration: {migration_name}")
+    print(f"Created: {state.created_at}")
+    print(f"Current step: {state.current_step + 1}")
+    print(f"Completed steps: {len(state.completed_steps)}")
+    print("="*80)
+    
+    # Resume the migration loop
+    execute_migration_loop(guided_migration, state, client, logger)
+
+
+def execute_migration_loop(guided_migration: GuidedMigration, state: MigrationState, client, logger: logging.Logger):
+    """Execute the main migration loop.
+    
+    Args:
+        guided_migration: Guided migration instance
+        state: Migration state
+        client: API client instance
+        logger: Logger instance
+    """
+    while state.current_step < len(guided_migration.STEPS):
+        step_info = guided_migration.get_current_step_info(state)
+        
+        print(f"\n📋 Step {step_info['id']}: {step_info['title']}")
+        print(f"Description: {step_info['description']}")
+        print("-" * 60)
+        
+        # Validate prerequisites
+        is_valid, errors = guided_migration.validate_step_prerequisites(step_info['name'], state)
+        if not is_valid:
+            print("❌ Prerequisites not met:")
+            for error in errors:
+                print(f"  - {error}")
+            print("\nPlease fix the issues above and try again.")
+            break
+        
+        # Show step-specific help
+        help_text = guided_migration.get_step_help(step_info['name'])
+        print("Help:")
+        print(help_text)
+        
+        # Handle step-specific logic
+        if step_info['name'] == 'setup':
+            success = handle_setup_step(guided_migration, state, logger)
+        elif step_info['name'] == 'export_policies':
+            success = handle_export_policies_step(guided_migration, state, logger)
+        elif step_info['name'] == 'process_formatter':
+            success = handle_process_formatter_step(guided_migration, state, logger)
+        elif step_info['name'] == 'export_profiles':
+            success = handle_export_profiles_step(guided_migration, state, client, logger)
+        elif step_info['name'] == 'import_profiles':
+            success = handle_import_profiles_step(guided_migration, state, client, logger)
+        elif step_info['name'] == 'export_configs':
+            success = handle_export_configs_step(guided_migration, state, client, logger)
+        elif step_info['name'] == 'import_configs':
+            success = handle_import_configs_step(guided_migration, state, client, logger)
+        elif step_info['name'] == 'handle_segments':
+            success = handle_segments_step(guided_migration, state, client, logger)
+        elif step_info['name'] == 'completion':
+            success = handle_completion_step(guided_migration, state, logger)
+        else:
+            print(f"❌ Unknown step: {step_info['name']}")
+            break
+        
+        if success:
+            # Mark step as completed and move to next
+            state.completed_steps.append(step_info['name'])
+            state.current_step += 1
+            guided_migration.save_state(state)
+            print(f"✅ Step {step_info['id']} completed successfully!")
+        else:
+            print(f"❌ Step {step_info['id']} failed. You can resume later.")
+            break
+        
+        # Ask if user wants to continue
+        if state.current_step < len(guided_migration.STEPS):
+            response = input("\nContinue to next step? (y/n/exit): ").strip().lower()
+            if response in ['n', 'no', 'exit']:
+                print("Migration paused. You can resume later with 'resume-migration' command.")
+                break
+    
+    if state.current_step >= len(guided_migration.STEPS):
+        print("\n🎉 Migration completed successfully!")
+        print("You can delete the migration state with 'delete-migration' command.")
+
+
+def handle_setup_step(guided_migration: GuidedMigration, state: MigrationState, logger: logging.Logger) -> bool:
+    """Handle the setup step."""
+    print("\n🔧 Migration Setup")
+    print("Please provide the following information:")
+    
+    try:
+        # Get source environment string
+        source_string = input("Source environment string (e.g., PROD_DB): ").strip()
+        if not source_string:
+            print("❌ Source environment string is required")
+            return False
+        state.data['source_env_string'] = source_string
+        
+        # Get target environment string
+        target_string = input("Target environment string (e.g., DEV_DB): ").strip()
+        if not target_string:
+            print("❌ Target environment string is required")
+            return False
+        state.data['target_env_string'] = target_string
+        
+        # Get input directory
+        input_dir = input("Input directory path (containing ZIP files): ").strip()
+        if not input_dir:
+            print("❌ Input directory is required")
+            return False
+        
+        input_path = Path(input_dir)
+        if not input_path.exists():
+            print(f"❌ Input directory does not exist: {input_dir}")
+            return False
+        
+        state.data['input_directory'] = str(input_path.resolve())
+        
+        # Get output directory (optional)
+        output_dir = input("Output directory path (optional, press Enter for default): ").strip()
+        if output_dir:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            state.data['output_directory'] = str(output_path.resolve())
+        
+        print("\n✅ Setup completed successfully!")
+        print(f"Source: {source_string}")
+        print(f"Target: {target_string}")
+        print(f"Input: {state.data['input_directory']}")
+        if 'output_directory' in state.data:
+            print(f"Output: {state.data['output_directory']}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Setup failed: {e}")
+        return False
+
+
+def handle_export_policies_step(guided_migration: GuidedMigration, state: MigrationState, logger: logging.Logger) -> bool:
+    """Handle the export policies step."""
+    print("\n📤 Export Policies from Source Environment")
+    print("This is a manual step that must be completed using the Acceldata UI.")
+    print("\nSteps:")
+    print("1. Navigate to your source Acceldata environment")
+    print("2. Go to the Policies section")
+    print("3. Select the policies you want to migrate")
+    print("4. Export them as ZIP files")
+    print("5. Download the ZIP files to your local machine")
+    print("6. Place them in the input directory configured in the setup step")
+    
+    input_dir = state.data.get('input_directory', '')
+    if input_dir:
+        print(f"\nInput directory: {input_dir}")
+        zip_files = list(Path(input_dir).glob('*.zip'))
+        if zip_files:
+            print(f"Found {len(zip_files)} ZIP files:")
+            for zip_file in zip_files:
+                print(f"  - {zip_file.name}")
+        else:
+            print("No ZIP files found. Please export policies and place them in the input directory.")
+    
+    response = input("\nHave you completed the policy export? (y/n): ").strip().lower()
+    return response in ['y', 'yes']
+
+
+def handle_process_formatter_step(guided_migration: GuidedMigration, state: MigrationState, logger: logging.Logger) -> bool:
+    """Handle the process formatter step."""
+    print("\n🔄 Processing ZIP Files with Formatter")
+    
+    input_dir = state.data.get('input_directory')
+    source_string = state.data.get('source_env_string')
+    target_string = state.data.get('target_env_string')
+    output_dir = state.data.get('output_directory')
+    
+    print(f"Input directory: {input_dir}")
+    print(f"Source string: {source_string}")
+    print(f"Target string: {target_string}")
+    if output_dir:
+        print(f"Output directory: {output_dir}")
+    
+    response = input("\nProceed with formatter processing? (y/n): ").strip().lower()
+    if response not in ['y', 'yes']:
+        return False
+    
+    try:
+        # Execute the formatter step
+        success, message = guided_migration.execute_step('process_formatter', state)
+        if success:
+            print(f"✅ {message}")
+            return True
+        else:
+            print(f"❌ {message}")
+            return False
+    except Exception as e:
+        print(f"❌ Formatter processing failed: {e}")
+        return False
+
+
+def handle_export_profiles_step(guided_migration: GuidedMigration, state: MigrationState, client, logger: logging.Logger) -> bool:
+    """Handle the export profiles step."""
+    print("\n📤 Export Asset Profiles")
+    
+    asset_uids_file = state.data.get('asset_uids_file')
+    if not asset_uids_file:
+        print("❌ Asset UIDs file not found. Please run the formatter step first.")
+        return False
+    
+    print(f"Asset UIDs file: {asset_uids_file}")
+    
+    response = input("\nProceed with profile export? (y/n): ").strip().lower()
+    if response not in ['y', 'yes']:
+        return False
+    
+    try:
+        # Execute the export profiles step
+        success, message = guided_migration.execute_step('export_profiles', state, client)
+        if success:
+            print(f"✅ {message}")
+            return True
+        else:
+            print(f"❌ {message}")
+            return False
+    except Exception as e:
+        print(f"❌ Profile export failed: {e}")
+        return False
+
+
+def handle_import_profiles_step(guided_migration: GuidedMigration, state: MigrationState, client, logger: logging.Logger) -> bool:
+    """Handle the import profiles step."""
+    print("\n📥 Import Asset Profiles")
+    
+    profiles_file = state.data.get('profiles_export_file')
+    if not profiles_file:
+        print("❌ Asset profiles export file not found. Please run the export profiles step first.")
+        return False
+    
+    print(f"Profiles file: {profiles_file}")
+    
+    dry_run = input("\nRun in dry-run mode first? (y/n): ").strip().lower() in ['y', 'yes']
+    
+    response = input(f"\nProceed with profile import{' (dry-run)' if dry_run else ''}? (y/n): ").strip().lower()
+    if response not in ['y', 'yes']:
+        return False
+    
+    try:
+        # Execute the import profiles step
+        success, message = guided_migration.execute_step('import_profiles', state, client)
+        if success:
+            print(f"✅ {message}")
+            return True
+        else:
+            print(f"❌ {message}")
+            return False
+    except Exception as e:
+        print(f"❌ Profile import failed: {e}")
+        return False
+
+
+def handle_export_configs_step(guided_migration: GuidedMigration, state: MigrationState, client, logger: logging.Logger) -> bool:
+    """Handle the export configs step."""
+    print("\n📤 Export Asset Configurations")
+    
+    asset_uids_file = state.data.get('asset_uids_file')
+    if not asset_uids_file:
+        print("❌ Asset UIDs file not found. Please run the formatter step first.")
+        return False
+    
+    print(f"Asset UIDs file: {asset_uids_file}")
+    
+    response = input("\nProceed with configuration export? (y/n): ").strip().lower()
+    if response not in ['y', 'yes']:
+        return False
+    
+    try:
+        # Execute the export configs step
+        success, message = guided_migration.execute_step('export_configs', state, client)
+        if success:
+            print(f"✅ {message}")
+            return True
+        else:
+            print(f"❌ {message}")
+            return False
+    except Exception as e:
+        print(f"❌ Configuration export failed: {e}")
+        return False
+
+
+def handle_import_configs_step(guided_migration: GuidedMigration, state: MigrationState, client, logger: logging.Logger) -> bool:
+    """Handle the import configs step."""
+    print("\n📥 Import Asset Configurations")
+    
+    configs_file = state.data.get('configs_export_file')
+    if not configs_file:
+        print("❌ Asset configs export file not found. Please run the export configs step first.")
+        return False
+    
+    print(f"Configs file: {configs_file}")
+    print("Note: This command will be implemented in a future update.")
+    
+    response = input("\nProceed with configuration import? (y/n): ").strip().lower()
+    if response not in ['y', 'yes']:
+        return False
+    
+    try:
+        # Execute the import configs step
+        success, message = guided_migration.execute_step('import_configs', state, client)
+        if success:
+            print(f"✅ {message}")
+            return True
+        else:
+            print(f"❌ {message}")
+            return False
+    except Exception as e:
+        print(f"❌ Configuration import failed: {e}")
+        return False
+
+
+def handle_segments_step(guided_migration: GuidedMigration, state: MigrationState, client, logger: logging.Logger) -> bool:
+    """Handle the segments step."""
+    print("\n🔗 Handle Segmented Assets")
+    
+    segments_file = state.data.get('segmented_spark_uids_file')
+    if not segments_file:
+        print("❌ Segmented SPARK UIDs file not found. Please run the formatter step first.")
+        return False
+    
+    print(f"Segments file: {segments_file}")
+    
+    response = input("\nProceed with segments handling? (y/n): ").strip().lower()
+    if response not in ['y', 'yes']:
+        return False
+    
+    try:
+        # Execute the segments step
+        success, message = guided_migration.execute_step('handle_segments', state, client)
+        if success:
+            print(f"✅ {message}")
+            return True
+        else:
+            print(f"❌ {message}")
+            return False
+    except Exception as e:
+        print(f"❌ Segments handling failed: {e}")
+        return False
+
+
+def handle_completion_step(guided_migration: GuidedMigration, state: MigrationState, logger: logging.Logger) -> bool:
+    """Handle the completion step."""
+    print("\n🎉 Migration Complete!")
+    print("Congratulations! Your migration has been completed successfully.")
+    
+    print("\nFinal steps:")
+    print("1. Verify that all assets have been migrated correctly")
+    print("2. Test the migrated policies in the target environment")
+    print("3. Clean up temporary files if needed")
+    print("4. Delete migration state file if no longer needed")
+    
+    print(f"\nYou can delete the migration state with: delete-migration {state.name}")
+    
+    return True
+
+
+def execute_delete_migration(migration_name: str, logger: logging.Logger):
+    """Delete a migration state.
+    
+    Args:
+        migration_name: Name of the migration session
+        logger: Logger instance
+    """
+    guided_migration = GuidedMigration(logger)
+    
+    # Check if migration exists
+    state = guided_migration.load_state(migration_name)
+    if not state:
+        print(f"❌ Migration '{migration_name}' not found!")
+        return
+    
+    print(f"\n🗑️  Delete Migration: {migration_name}")
+    print(f"Created: {state.created_at}")
+    print(f"Current step: {state.current_step + 1}")
+    print(f"Completed steps: {len(state.completed_steps)}")
+    
+    response = input("\nAre you sure you want to delete this migration? (y/n): ").strip().lower()
+    if response not in ['y', 'yes']:
+        print("Deletion cancelled.")
+        return
+    
+    if guided_migration.delete_state(migration_name):
+        print(f"✅ Migration '{migration_name}' deleted successfully!")
+    else:
+        print(f"❌ Failed to delete migration '{migration_name}'")
+
+
+def execute_list_migrations(logger: logging.Logger):
+    """List all available migrations.
+    
+    Args:
+        logger: Logger instance
+    """
+    guided_migration = GuidedMigration(logger)
+    
+    migrations = guided_migration.list_migrations()
+    
+    print("\n📋 Available Migrations")
+    print("="*40)
+    
+    if not migrations:
+        print("No migrations found.")
+        return
+    
+    for migration in migrations:
+        state = guided_migration.load_state(migration)
+        if state:
+            step_info = guided_migration.get_current_step_info(state)
+            print(f"Name: {migration}")
+            print(f"Created: {state.created_at}")
+            print(f"Current step: {step_info['title']}")
+            print(f"Completed: {len(state.completed_steps)}/{len(guided_migration.STEPS)} steps")
+            print("-" * 40)
 
 
 if __name__ == "__main__":

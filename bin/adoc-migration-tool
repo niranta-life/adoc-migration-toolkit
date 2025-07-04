@@ -1,0 +1,323 @@
+#!/bin/bash
+
+# ADOC Migration Tool
+# A professional shell script for running the ADOC Export-Import Interactive Toolkit
+#
+# Author: ADOC Migration Team
+# Version: 1.0.0
+# License: MIT
+
+set -euo pipefail
+
+# Script configuration
+SCRIPT_NAME="adoc-migration-tool"
+SCRIPT_VERSION="1.0.0"
+DEFAULT_CONFIG_FILE="config/config.env"
+PYTHON_MODULE="adoc_export_import"
+
+# Check if terminal supports colors
+if [[ -t 1 ]] && [[ -n "${TERM:-}" ]] && [[ "${TERM:-}" != "dumb" ]]; then
+    # Colors for output
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    PURPLE='\033[0;35m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m' # No Color
+else
+    # No colors
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    PURPLE=''
+    CYAN=''
+    BOLD=''
+    NC=''
+fi
+
+# Function to print colored output
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_header() {
+    echo -e "${BOLD}${PURPLE}$1${NC}"
+}
+
+# Function to display help
+show_help() {
+    echo -e "${BOLD}ADOC Migration Tool${NC} - Interactive Toolkit for ADOC Export-Import Operations"
+    echo
+    echo -e "${BOLD}Usage:${NC}"
+    echo "    $SCRIPT_NAME [OPTIONS]"
+    echo
+    echo -e "${BOLD}Options:${NC}"
+    echo "    -c, --config FILE     Specify configuration file (default: config/config.env)"
+    echo "    -h, --help           Show this help message"
+    echo "    -v, --version        Show version information"
+    echo "    --check-env          Check environment configuration without starting the tool"
+    echo
+    echo -e "${BOLD}Description:${NC}"
+    echo "    This tool provides an interactive interface for managing ADOC policy migrations,"
+    echo "    including export/import operations, guided migrations, and asset management."
+    echo
+    echo -e "${BOLD}Features:${NC}"
+    echo "    • Interactive command-line interface"
+    echo "    • Guided migration workflows"
+    echo "    • Asset profile and configuration management"
+    echo "    • Segments export/import operations"
+    echo "    • Environment validation and testing"
+    echo
+    echo -e "${BOLD}Examples:${NC}"
+    echo "    $SCRIPT_NAME                    # Use default config file"
+    echo "    $SCRIPT_NAME -c my-config.env   # Use custom config file"
+    echo "    $SCRIPT_NAME --check-env        # Validate environment configuration"
+    echo
+    echo -e "${BOLD}Configuration:${NC}"
+    echo "    The tool expects a configuration file with the following environment variables:"
+    echo "    • AD_HOST - Acceldata host URL"
+    echo "    • AD_SOURCE_ACCESS_KEY - Source environment access key"
+    echo "    • AD_SOURCE_SECRET_KEY - Source environment secret key"
+    echo "    • AD_SOURCE_TENANT - Source environment tenant"
+    echo "    • AD_TARGET_ACCESS_KEY - Target environment access key (optional)"
+    echo "    • AD_TARGET_SECRET_KEY - Target environment secret key (optional)"
+    echo "    • AD_TARGET_TENANT - Target environment tenant (optional)"
+    echo
+    echo -e "${BOLD}Exit Codes:${NC}"
+    echo "    0 - Success"
+    echo "    1 - Configuration error"
+    echo "    2 - Python module not found"
+    echo "    3 - Invalid arguments"
+    echo "    4 - Environment validation failed"
+    echo
+}
+
+# Function to display version
+show_version() {
+    echo "$SCRIPT_NAME version $SCRIPT_VERSION"
+    echo "ADOC Export-Import Interactive Toolkit"
+    echo "Copyright (c) 2024 ADOC Migration Team"
+}
+
+# Function to check if Python module is available
+check_python_module() {
+    if ! python -c "import $PYTHON_MODULE" 2>/dev/null; then
+        print_error "Python module '$PYTHON_MODULE' not found."
+        print_info "Please ensure the module is installed and available in your Python environment."
+        print_info "You can install it using: pip install -e ."
+        return 1
+    fi
+    return 0
+}
+
+# Function to validate configuration file
+validate_config_file() {
+    local config_file="$1"
+    
+    if [[ ! -f "$config_file" ]]; then
+        print_error "Configuration file not found: $config_file"
+        return 1
+    fi
+    
+    if [[ ! -r "$config_file" ]]; then
+        print_error "Configuration file is not readable: $config_file"
+        return 1
+    fi
+    
+    # Check for required environment variables (both source and target)
+    local required_vars=(
+        "AD_HOST"
+        "AD_SOURCE_ACCESS_KEY"
+        "AD_SOURCE_SECRET_KEY"
+        "AD_SOURCE_TENANT"
+        "AD_TARGET_ACCESS_KEY"
+        "AD_TARGET_SECRET_KEY"
+        "AD_TARGET_TENANT"
+    )
+    local missing_vars=()
+    
+    for var in "${required_vars[@]}"; do
+        if ! grep -q "^${var}=" "$config_file"; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+        print_error "Missing required environment variables in $config_file:"
+        for var in "${missing_vars[@]}"; do
+            echo "  - $var"
+        done
+        return 1
+    fi
+    
+    print_success "Configuration file validated: $config_file"
+    return 0
+}
+
+# Function to check environment configuration
+check_environment() {
+    local config_file="$1"
+    
+    print_header "Environment Configuration Check"
+    echo
+    
+    # Validate config file
+    if ! validate_config_file "$config_file"; then
+        return 1
+    fi
+    
+    # Check Python module
+    if ! check_python_module; then
+        return 1
+    fi
+    
+    # Test connection using the tool
+    print_info "Testing connection to ADOC environment..."
+    if python -m "$PYTHON_MODULE" interactive --env-file "$config_file" --help >/dev/null 2>&1; then
+        print_success "Environment configuration is valid"
+        return 0
+    else
+        print_error "Failed to initialize the migration tool"
+        return 1
+    fi
+}
+
+# Function to find config file
+find_config_file() {
+    local config_file="$1"
+    
+    # If config file is specified and exists, use it
+    if [[ -n "$config_file" && -f "$config_file" ]]; then
+        echo "$config_file"
+        return 0
+    fi
+    
+    # If config file is specified but doesn't exist, show error
+    if [[ -n "$config_file" && ! -f "$config_file" ]]; then
+        print_error "Specified configuration file not found: $config_file"
+        return 1
+    fi
+    
+    # If no config file specified, try to find config file in common locations
+    local possible_locations=(
+        "config/config.env"
+        "./config/config.env"
+        "../config/config.env"
+        "$HOME/.adoc/config.env"
+        "/etc/adoc/config.env"
+    )
+    
+    for location in "${possible_locations[@]}"; do
+        if [[ -f "$location" ]]; then
+            echo "$location"
+            return 0
+        fi
+    done
+    
+    print_error "No configuration file found. Please specify one with -c option or ensure config/config.env exists."
+    print_info "You can copy config/config.env.example to config/config.env and update the values."
+    return 1
+}
+
+# Function to run the migration tool
+run_migration_tool() {
+    local config_file="$1"
+    
+    print_header "Starting ADOC Migration Tool"
+    echo
+    
+    # Validate environment
+    if ! check_environment "$config_file"; then
+        print_error "Environment validation failed. Please check your configuration."
+        exit 1
+    fi
+    
+    print_success "Starting interactive migration tool..."
+    echo
+    
+    # Run the Python module
+    exec python -m "$PYTHON_MODULE" interactive --env-file "$config_file"
+}
+
+# Main script logic
+main() {
+    local config_file=""
+    local check_env_only=false
+    
+    # Parse command line arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -c|--config)
+                config_file="$2"
+                shift 2
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -v|--version)
+                show_version
+                exit 0
+                ;;
+            --check-env)
+                check_env_only=true
+                shift
+                ;;
+            -* )
+                print_error "Unknown option: $1"
+                echo "Use --help for usage information."
+                exit 3
+                ;;
+            * )
+                print_error "Unexpected argument: $1"
+                echo "Use --help for usage information."
+                exit 3
+                ;;
+        esac
+    done
+    
+    # Find configuration file
+    local found_config_file
+    if ! found_config_file=$(find_config_file "$config_file"); then
+        exit 1
+    fi
+    config_file="$found_config_file"
+    if [[ -z "$config_file" || ! -f "$config_file" ]]; then
+        print_error "No valid configuration file found."
+        exit 1
+    fi
+    print_info "Found configuration file: $config_file"
+    
+    # Check if only environment validation is requested
+    if [[ "$check_env_only" == true ]]; then
+        if check_environment "$config_file"; then
+            exit 0
+        else
+            exit 4
+        fi
+    fi
+    
+    # Run the migration tool
+    run_migration_tool "$config_file"
+}
+
+# Handle script interruption
+trap 'print_error "Script interrupted by user"; exit 130' INT TERM
+
+# Run main function with all arguments
+main "$@" 
