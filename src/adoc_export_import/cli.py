@@ -117,17 +117,17 @@ Features:
     return asset_export_parser
 
 
-def create_rest_api_parser(subparsers):
-    """Create the rest-api subcommand parser."""
-    rest_api_parser = subparsers.add_parser(
-        'rest-api',
+def create_interactive_parser(subparsers):
+    """Create the interactive subcommand parser."""
+    interactive_parser = subparsers.add_parser(
+        'interactive',
         help='Interactive REST API client for making API calls',
         description='Interactive REST API Client - Make API calls with configurable endpoints and authentication',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m adoc_export_import rest-api --env-file=config.env
-  python -m adoc_export_import rest-api --env-file=config.env --verbose
+  python -m adoc_export_import interactive --env-file=config.env
+  python -m adoc_export_import interactive --env-file=config.env --verbose
 
 Interactive Commands:
   GET /catalog-server/api/assets?uid=123
@@ -148,24 +148,24 @@ Features:
         """
     )
     
-    rest_api_parser.add_argument(
+    interactive_parser.add_argument(
         "--env-file", 
         required=True,
         help="Path to environment file containing AD_HOST, AD_SOURCE_ACCESS_KEY, AD_SOURCE_SECRET_KEY, AD_SOURCE_TENANT"
     )
-    rest_api_parser.add_argument(
+    interactive_parser.add_argument(
         "--log-level", "-l",
         choices=["ERROR", "WARNING", "INFO", "DEBUG"],
         default="ERROR",
         help="Set logging level (default: ERROR)"
     )
-    rest_api_parser.add_argument(
+    interactive_parser.add_argument(
         "--verbose", "-v", 
         action="store_true", 
         help="Enable verbose logging (overrides --log-level)"
     )
     
-    return rest_api_parser
+    return interactive_parser
 
 
 def validate_formatter_arguments(args):
@@ -261,6 +261,47 @@ def read_csv_uids(csv_file: str, logger: logging.Logger) -> list:
                     logger.warning(f"Row {row_num}: Insufficient columns (need at least 2)")
         
         logger.info(f"Read {len(uids)} environment mappings from CSV file: {csv_file}")
+        return uids
+        
+    except Exception as e:
+        logger.error(f"Error reading CSV file {csv_file}: {e}")
+        raise
+
+
+def read_csv_uids_single_column(csv_file: str, logger: logging.Logger) -> list:
+    """Read UIDs from the first column of CSV file.
+    
+    Args:
+        csv_file: Path to the CSV file
+        logger: Logger instance
+        
+    Returns:
+        List of UIDs from the first column of the CSV file
+    """
+    uids = []
+    
+    try:
+        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            
+            # Skip header row
+            header = next(reader, None)
+            if header:
+                logger.info(f"CSV header: {header}")
+            
+            # Read UIDs from first column
+            for row_num, row in enumerate(reader, start=2):  # Start at 2 since we skipped header
+                if row and len(row) >= 1:
+                    uid = row[0].strip()
+                    if uid:  # Skip empty values
+                        uids.append(uid)
+                        logger.debug(f"Row {row_num}: Found UID: {uid}")
+                    else:
+                        logger.warning(f"Row {row_num}: Empty UID value")
+                else:
+                    logger.warning(f"Row {row_num}: No columns found")
+        
+        logger.info(f"Read {len(uids)} UIDs from CSV file: {csv_file}")
         return uids
         
     except Exception as e:
@@ -787,6 +828,7 @@ def setup_autocomplete():
         'segments-import',
         'asset-profile-export',
         'asset-profile-import',
+        'asset-config-export',
         'set-output-dir',
         'help',
         'exit',
@@ -833,8 +875,8 @@ def setup_autocomplete():
             # First word - suggest commands
             options = [cmd for cmd in commands if cmd.lower().startswith(text.lower())]
         elif len(words) == 2:
-            if words[0].lower() in ['segments-export', 'segments-import', 'asset-profile-export', 'asset-profile-import']:
-                # Second word for segments-export/segments-import/asset-profile-export/asset-profile-import - suggest CSV files
+            if words[0].lower() in ['segments-export', 'segments-import', 'asset-profile-export', 'asset-profile-import', 'asset-config-export']:
+                # Second word for segments-export/segments-import/asset-profile-export/asset-profile-import/asset-config-export - suggest CSV files
                 # This is a simple suggestion - could be enhanced to scan directory
                 options = ['data/samples_import_ready/segmented_spark_uids.csv', 'data/samples_import_ready/asset_uids.csv', 'data/samples_import_ready/asset-profiles-export.csv', 'data/samples/assets.csv', 'segments_output.csv']
             elif words[0].lower() == 'set-output-dir':
@@ -847,14 +889,17 @@ def setup_autocomplete():
             elif words[0].upper() == 'PUT' and len(words) == 3:
                 # Third word for PUT - suggest JSON payload start
                 options = ['{"', '{']
-            elif words[0].lower() in ['segments-export', 'segments-import', 'asset-profile-export', 'asset-profile-import'] and len(words) >= 3:
-                # For segments-export/segments-import/asset-profile-export/asset-profile-import, suggest flags after CSV file
+            elif words[0].lower() in ['segments-export', 'segments-import', 'asset-profile-export', 'asset-profile-import', 'asset-config-export'] and len(words) >= 3:
+                # For segments-export/segments-import/asset-profile-export/asset-profile-import/asset-config-export, suggest flags after CSV file
                 if text.startswith('--'):
                     if words[0].lower() == 'segments-export':
                         # segments-export supports --output-file and --quiet
                         options = [flag for flag in flags if flag.startswith(text) and flag in ['--output-file', '--quiet']]
                     elif words[0].lower() == 'asset-profile-export':
                         # asset-profile-export supports --output-file, --quiet, and --verbose
+                        options = [flag for flag in flags if flag.startswith(text) and flag in ['--output-file', '--quiet', '--verbose']]
+                    elif words[0].lower() == 'asset-config-export':
+                        # asset-config-export supports --output-file, --quiet, and --verbose
                         options = [flag for flag in flags if flag.startswith(text) and flag in ['--output-file', '--quiet', '--verbose']]
                     elif words[0].lower() == 'asset-profile-import':
                         # asset-profile-import supports --dry-run, --quiet, and --verbose
@@ -866,6 +911,8 @@ def setup_autocomplete():
                     # After --output-file, suggest output file names
                     if words[0].lower() == 'asset-profile-export':
                         options = ['data/output/output_import_ready/asset-profiles-export.csv', 'asset-profiles-export.csv', 'output.csv']
+                    elif words[0].lower() == 'asset-config-export':
+                        options = ['data/output/output_import_ready/asset-config-export.csv', 'asset-config-export.csv', 'output.csv']
                     else:
                         options = ['data/output/output_import_ready/segments_output.csv', 'my_segments.csv', 'output.csv']
         
@@ -888,7 +935,7 @@ def setup_autocomplete():
         print("Tab completion may not work on this system.")
 
 
-def run_rest_api(args):
+def run_interactive(args):
     """Run the interactive REST API client."""
     try:
         # Setup logging
@@ -930,6 +977,7 @@ def run_rest_api(args):
         print("  segments-import <csv_file> [--dry-run]")
         print("  asset-profile-export <csv_file> [--output-file <file>] [--quiet] [--verbose]")
         print("  asset-profile-import <csv_file> [--dry-run] [--quiet] [--verbose]")
+        print("  asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]")
         print("  set-output-dir <directory>")
         print("  help")
         print("  exit")
@@ -942,6 +990,7 @@ def run_rest_api(args):
         print("  segments-import: Always imports to target environment")
         print("  asset-profile-export: Always exports from source environment")
         print("  asset-profile-import: Always imports to target environment")
+        print("  asset-config-export: Always exports from source environment")
         print("\nSegments Export Options:")
         print("  --output-file <file>  Specify output file (default: uses global output directory or <csv_dir>_import_ready/<csv_name>_segments_output.csv)")
         print("  --quiet               Suppress console output (only show summary)")
@@ -962,11 +1011,17 @@ def run_rest_api(args):
         print("  --quiet               Suppress console output (default)")
         print("  --verbose             Show detailed output including request headers and responses")
         print("  --dry-run --verbose   Show detailed preview of all API calls, headers, and payloads")
+        print("\nAsset Config Export Options:")
+        print("  --output-file <file>  Specify output file (default: uses global output directory or <csv_dir>_import_ready/asset-config-export.csv)")
+        print("  --quiet               Suppress console output, show only summary (default)")
+        print("  --verbose             Show detailed output including headers and responses")
+        print("  Note: Reads UIDs from first column, gets asset ID, then fetches config")
+        print("        Outputs compressed JSON response with target-env UID")
         print("\nGlobal Output Directory:")
         print("  set-output-dir <dir>  Set global output directory for all export commands")
         print("  --output-file         Overrides global output directory when specified")
         print("\nOutput Format:")
-        print("  CSV file with columns: target-env, profile_json")
+        print("  CSV file with columns: target-env, profile_json, config_json")
         print("  JSON content is properly quoted for CSV compatibility")
         print("  File is verified for correct CSV reading after creation")
         print("="*80)
@@ -1014,6 +1069,13 @@ def run_rest_api(args):
                     csv_file, dry_run, quiet_mode, verbose_mode = parse_asset_profile_import_command(command)
                     if csv_file:
                         execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's an asset-config-export command
+                if command.lower().startswith('asset-config-export'):
+                    csv_file, output_file, quiet_mode, verbose_mode = parse_asset_config_export_command(command)
+                    if csv_file:
+                        execute_asset_config_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
                     continue
                 
                 # Check if it's a set-output-dir command
@@ -1977,6 +2039,318 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
         logger.error(error_msg)
 
 
+def parse_asset_config_export_command(command: str) -> tuple:
+    """Parse an asset-config-export command string into components.
+    
+    Args:
+        command: Command string like "asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]"
+        
+    Returns:
+        Tuple of (csv_file, output_file, quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'asset-config-export':
+        return None, None, False, False
+    
+    if len(parts) < 2:
+        raise ValueError("CSV file path is required for asset-config-export command")
+    
+    csv_file = parts[1]
+    output_file = None
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags and options
+    i = 2
+    while i < len(parts):
+        if parts[i] == '--output-file' and i + 1 < len(parts):
+            output_file = parts[i + 1]
+            parts.pop(i)  # Remove --output-file
+            parts.pop(i)  # Remove the file path
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        else:
+            i += 1
+    
+    # Generate default output file if not provided
+    if not output_file:
+        output_file = get_output_file_path(csv_file, "asset-config-export.csv")
+    
+    return csv_file, output_file, quiet_mode, verbose_mode
+
+
+def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the asset-config-export command.
+    
+    Args:
+        csv_file: Path to the CSV file containing UIDs in the first column
+        client: API client instance
+        logger: Logger instance
+        output_file: Path to output file for writing results
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Read UIDs from the first column of CSV file
+        uids = read_csv_uids_single_column(csv_file, logger)
+        
+        if not uids:
+            logger.warning("No UIDs found in CSV file")
+            return
+        
+        # Generate default output file if not provided
+        if not output_file:
+            output_file = get_output_file_path(csv_file, "asset-config-export.csv")
+        
+        if not quiet_mode:
+            print(f"\nProcessing {len(uids)} asset config exports from CSV file: {csv_file}")
+            print(f"Output will be written to: {output_file}")
+            if GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Open output file for writing
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        successful = 0
+        failed = 0
+        total_assets_processed = 0
+        
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['target-env', 'config_json'])
+            
+            for i, uid in enumerate(uids, 1):
+                if not quiet_mode:
+                    print(f"\n[{i}/{len(uids)}] Processing UID: {uid}")
+                    print("-" * 60)
+                else:
+                    print(f"Processing [{i}/{len(uids)}] UID: {uid}")
+                
+                try:
+                    # Step 1: Get asset details by UID to extract the asset ID
+                    if not quiet_mode:
+                        print(f"Getting asset details for UID: {uid}")
+                    
+                    # Show headers in verbose mode
+                    if verbose_mode:
+                        print("\nGET Request Headers:")
+                        print(f"  Endpoint: /catalog-server/api/assets?uid={uid}")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(client, 'tenant') and client.tenant:
+                            print(f"  X-Tenant: {client.tenant}")
+                    
+                    asset_response = client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets?uid={uid}",
+                        method='GET'
+                    )
+                    
+                    # Show response in verbose mode
+                    if verbose_mode:
+                        print("\nAsset Response:")
+                        print(json.dumps(asset_response, indent=2, ensure_ascii=False))
+                    
+                    # Step 2: Extract the asset ID from the response
+                    if not asset_response or 'data' not in asset_response:
+                        error_msg = f"No 'data' field found in asset response for UID: {uid}"
+                        if not quiet_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        failed += 1
+                        continue
+                    
+                    data_array = asset_response['data']
+                    if not data_array or len(data_array) == 0:
+                        error_msg = f"Empty 'data' array in asset response for UID: {uid}"
+                        if not quiet_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        failed += 1
+                        continue
+                    
+                    first_asset = data_array[0]
+                    if 'id' not in first_asset:
+                        error_msg = f"No 'id' field found in first asset for UID: {uid}"
+                        if not quiet_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        failed += 1
+                        continue
+                    
+                    asset_id = first_asset['id']
+                    if not quiet_mode:
+                        print(f"Extracted asset ID: {asset_id}")
+                    
+                    # Step 3: Get asset configuration using the asset ID
+                    if not quiet_mode:
+                        print(f"Getting asset configuration for asset ID: {asset_id}")
+                    
+                    # Show headers in verbose mode
+                    if verbose_mode:
+                        print("\nGET Request Headers:")
+                        print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/config")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(client, 'tenant') and client.tenant:
+                            print(f"  X-Tenant: {client.tenant}")
+                    
+                    config_response = client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets/{asset_id}/config",
+                        method='GET'
+                    )
+                    
+                    # Show response in verbose mode
+                    if verbose_mode:
+                        print("\nConfig Response:")
+                        print(json.dumps(config_response, indent=2, ensure_ascii=False))
+                    
+                    # Step 4: Write compressed JSON response to CSV
+                    if not quiet_mode:
+                        print(f"Writing asset configuration to CSV")
+                    
+                    # Write the compressed JSON response to CSV
+                    config_json = json.dumps(config_response, ensure_ascii=False, separators=(',', ':'))
+                    writer.writerow([uid, config_json])
+                    
+                    if not quiet_mode:
+                        print(f"✅ Written to file: {uid}")
+                        if not verbose_mode:  # Only show response if not in verbose mode (to avoid duplication)
+                            print("Config Response:")
+                            print(json.dumps(config_response, indent=2, ensure_ascii=False))
+                    else:
+                        print(f"✅ [{i}/{len(uids)}] {uid}: Config exported successfully")
+                    
+                    successful += 1
+                    total_assets_processed += 1
+                    
+                except Exception as e:
+                    error_msg = f"Failed to process UID {uid}: {e}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    else:
+                        print(f"❌ [{i}/{len(uids)}] {uid}: {error_msg}")
+                    logger.error(error_msg)
+                    failed += 1
+        
+        # Verify the CSV file can be read correctly
+        if not quiet_mode:
+            print("\nVerifying CSV file can be read correctly...")
+        
+        try:
+            with open(output_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader)
+                row_count = 0
+                validation_errors = []
+                
+                # Validate header
+                if len(header) != 2:
+                    validation_errors.append(f"Invalid header: expected 2 columns, got {len(header)}")
+                elif header[0] != 'target-env' or header[1] != 'config_json':
+                    validation_errors.append(f"Invalid header: expected ['target-env', 'config_json'], got {header}")
+                
+                # Validate each row
+                for row_num, row in enumerate(reader, start=2):
+                    row_count += 1
+                    
+                    # Check column count
+                    if len(row) != 2:
+                        validation_errors.append(f"Row {row_num}: Expected 2 columns, got {len(row)}")
+                        continue
+                    
+                    target_env, config_json_str = row
+                    
+                    # Check for empty values
+                    if not target_env.strip():
+                        validation_errors.append(f"Row {row_num}: Empty target-env value")
+                    
+                    if not config_json_str.strip():
+                        validation_errors.append(f"Row {row_num}: Empty config_json value")
+                        continue
+                    
+                    # Verify JSON is parsable
+                    try:
+                        config_data = json.loads(config_json_str)
+                        
+                        # Additional validation: check if it's a valid config response
+                        if not isinstance(config_data, dict):
+                            validation_errors.append(f"Row {row_num}: config_json is not a valid JSON object")
+                        elif not config_data:  # Empty object
+                            validation_errors.append(f"Row {row_num}: config_json is empty")
+                        
+                    except json.JSONDecodeError as e:
+                        validation_errors.append(f"Row {row_num}: Invalid JSON in config_json - {e}")
+                    except Exception as e:
+                        validation_errors.append(f"Row {row_num}: Error parsing config_json - {e}")
+                
+                # Report validation results
+                if not quiet_mode:
+                    if validation_errors:
+                        print(f"❌ CSV validation failed with {len(validation_errors)} errors:")
+                        for error in validation_errors[:10]:  # Show first 10 errors
+                            print(f"   - {error}")
+                        if len(validation_errors) > 10:
+                            print(f"   ... and {len(validation_errors) - 10} more errors")
+                        logger.error(f"CSV validation failed: {len(validation_errors)} errors found")
+                    else:
+                        print(f"✅ CSV validation successful: {row_count} data rows read")
+                        print(f"   Header: {header}")
+                        print(f"   Expected columns: target-env, config_json")
+                        print(f"   All JSON entries are valid and parseable")
+                        logger.info(f"CSV validation successful: {row_count} rows validated")
+                
+        except FileNotFoundError:
+            error_msg = f"Output file not found: {output_path}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+        except PermissionError:
+            error_msg = f"Permission denied reading output file: {output_path}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+        except Exception as e:
+            error_msg = f"CSV verification failed: {e}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+        
+        # Print summary
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("ASSET CONFIG EXPORT COMPLETED")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total UIDs processed: {len(uids)}")
+            print(f"Successful: {successful}")
+            print(f"Failed: {failed}")
+            print(f"Total assets processed: {total_assets_processed}")
+            print("="*80)
+        else:
+            print(f"✅ Asset config export completed: {successful} successful, {failed} failed")
+            print(f"Output written to: {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error in asset-config-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+
+
 def parse_set_output_dir_command(command: str) -> str:
     """Parse a set-output-dir command string into components.
     
@@ -2008,7 +2382,7 @@ def main():
 Available commands:
   formatter     Format policy export files by replacing substrings
   asset-export  Export asset details by reading UIDs from CSV file
-  rest-api      Interactive REST API client for making API calls
+  interactive   Interactive REST API client for making API calls
 
 For help on a specific command:
   python -m adoc_export_import <command> --help
@@ -2024,7 +2398,7 @@ For help on a specific command:
     # Add subcommands
     create_formatter_parser(subparsers)
     create_asset_export_parser(subparsers)
-    create_rest_api_parser(subparsers)
+    create_interactive_parser(subparsers)
     
     args = parser.parse_args()
     
@@ -2036,8 +2410,8 @@ For help on a specific command:
         return run_formatter(args)
     elif args.command == 'asset-export':
         return run_asset_export(args)
-    elif args.command == 'rest-api':
-        return run_rest_api(args)
+    elif args.command == 'interactive':
+        return run_interactive(args)
     else:
         print(f"Unknown command: {args.command}")
         parser.print_help()
@@ -2111,6 +2485,26 @@ def show_interactive_help():
     print("      asset-profile-import data/samples_import_ready/asset-profiles-export.csv")
     print("      asset-profile-import profiles.csv --dry-run --verbose")
     
+    print("\n🔍 ASSET CONFIGURATION COMMANDS:")
+    print("  asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]")
+    print("    Description: Export asset configurations from source environment to CSV file")
+    print("    Arguments:")
+    print("      csv_file: Path to CSV file with UIDs in the first column")
+    print("      --output-file: Specify custom output file (optional)")
+    print("      --quiet: Suppress console output, show only summary (default)")
+    print("      --verbose: Show detailed output including headers and responses")
+    print("    Examples:")
+    print("      asset-config-export data/samples_import_ready/asset_uids.csv")
+    print("      asset-config-export uids.csv --output-file configs.csv --verbose")
+    print("    Behavior:")
+    print("      • Reads UIDs from the first column of the CSV file")
+    print("      • Makes REST call to '/catalog-server/api/assets?uid=<uid>' to get asset ID")
+    print("      • Uses asset ID to call '/catalog-server/api/assets/<id>/config'")
+    print("      • Writes compressed JSON response to CSV with target-env UID")
+    print("      • Shows status for each UID in quiet mode")
+    print("      • Shows HTTP headers and response objects in verbose mode")
+    print("      • Output format: target-env, config_json (compressed)")
+    
     print("\n🛠️ UTILITY COMMANDS:")
     print("  set-output-dir <directory>")
     print("    Description: Set global output directory for all export commands")
@@ -2152,7 +2546,7 @@ def show_interactive_help():
     print("  • segments-import: Always imports to target environment")
     print("  • asset-profile-export: Always exports from source environment")
     print("  • asset-profile-import: Always imports to target environment")
-    
+    print("  • asset-config-export: Always exports from source environment")
     print("\n💡 TIPS:")
     print("  • Use TAB key for command autocomplete")
     print("  • Use ↑/↓ arrow keys to navigate command history")

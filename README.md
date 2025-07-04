@@ -1,324 +1,686 @@
-# ADOC Export Import
+# ADOC Export Import Tool
 
-A professional tool for replacing substrings in JSON files and ZIP archives, and exporting asset details via API calls. This tool is designed to process policy export files with comprehensive error handling and logging.
+A comprehensive tool for migrating Acceldata policies and configurations between environments. This tool processes policy export ZIP files, extracts asset configurations, and provides interactive commands for managing asset profiles and configurations.
 
-## Features
+## Overview
 
-- **JSON Processing**: Recursively processes JSON files and replaces substrings throughout the data structure
-- **ZIP Archive Support**: Handles ZIP files containing JSON data, maintaining file structure and count
-- **Asset Export**: Reads UIDs from CSV files and exports asset details via REST API calls
-- **Interactive REST API Client**: Interactive command-line tool for making API calls with configurable authentication
-- **Comprehensive Logging**: Professional logging with both file and console output
-- **Error Handling**: Robust error handling with detailed error reporting
-- **Batch Processing**: Processes entire directories of files efficiently
-- **Statistics**: Provides detailed statistics about processing results
+The ADOC Export Import Tool automates the complex process of migrating policies and asset configurations from one Acceldata environment to another. It handles the translation of environment-specific strings, extracts specialized configurations for segmented assets, and provides interactive commands for profile and configuration management.
 
-## Installation
-
-This project uses [uv](https://github.com/astral-sh/uv) for dependency management and packaging.
-
-### Prerequisites
+## Prerequisites
 
 - Python 3.8 or higher
 - uv (install from https://github.com/astral-sh/uv)
+- Access to source and target Acceldata environments
+- Policy export ZIP files from the source environment
 
-### Setup
+## Installation
 
-1. Clone the repository:
+1. **Clone the repository:**
 ```bash
 git clone <repository-url>
 cd adoc-export-import
 ```
 
-2. Install dependencies and setup the environment:
+2. **Install dependencies:**
 ```bash
 uv sync
 ```
 
-3. Activate the virtual environment:
+3. **Activate the virtual environment:**
 ```bash
 source .venv/bin/activate  # On Unix/macOS
 # or
 .venv\Scripts\activate     # On Windows
 ```
 
-## Usage
-
-### Command Line Interface
-
-The tool provides three main commands:
-
-#### Formatter Command
-
-Processes JSON files and ZIP archives by replacing substrings:
-
-```bash
-# Basic usage
-python -m adoc_export_import formatter --input <input_directory> --source-env-string <search_string> --target-env-string <replace_string>
-
-# With custom output directory
-python -m adoc_export_import formatter --input <input_directory> --source-env-string <search_string> --target-env-string <replace_string> --output-dir <output_directory>
-
-# With verbose logging
-python -m adoc_export_import formatter --input <input_directory> --source-env-string <search_string> --target-env-string <replace_string> --verbose
-```
-
-#### Asset Export Command
-
-Exports asset details by reading UIDs from CSV files and making API calls:
-
-```bash
-# Basic usage
-python -m adoc_export_import asset-export --csv-file <csv_file> --env-file <env_file>
-
-# With verbose logging
-python -m adoc_export_import asset-export --csv-file <csv_file> --env-file <env_file> --verbose
-```
-
-#### REST API Command
-
-Interactive REST API client for making API calls:
-
-```bash
-# Basic usage
-python -m adoc_export_import rest-api --env-file <env_file>
-
-# With verbose logging
-python -m adoc_export_import rest-api --env-file <env_file> --verbose
-```
-
-Interactive Commands:
-```
-ADOC> GET /catalog-server/api/assets?uid=123
-ADOC> PUT /catalog-server/api/assets {"name": "test", "value": 123}
-ADOC> GET /catalog-server/api/assets/<asset-id>/metadata
-ADOC> segments-export data/output/segmented_spark_uids.csv
-ADOC> segments-export data/output/segmented_spark_uids.csv --output-file my_segments.csv --quiet
-ADOC> segments-import segments_output.csv --dry-run
-ADOC> segments-import segments_output.csv
-ADOC> exit
-```
-
-**Features:**
-- Command history with up/down arrow key navigation
-- History persists between sessions (stored in `~/.adoc_history`)
-- Supports up to 1000 commands in history
-- **Segments Export**: Read CSV file, get asset details, extract ID, and fetch segments from source environment
-- **Segments Import**: Import segments from CSV file to target assets
-- **Tab Completion**: Press TAB to autocomplete commands, endpoints, and flags
-- **Dynamic Endpoints**: Support for endpoints with placeholders like `<asset-id>`
-- **Predictable Environment Behavior**: GET/PUT use source, export uses source, import uses target
-- **Consistent Output**: Export files are placed in `_import_ready` directories by default
-
-#### Segments Import
-
-The `segments-import` command allows you to import segments from a CSV file generated by `segments-export` into target assets. This is useful for migrating segments between environments.
-
-**Process:**
-1. Reads a CSV file with columns: `target-env`, `segments_json`
-2. For each row, makes a GET request to `/catalog-server/api/assets?uid=<target-env>` using target authentication to get asset details
-3. Extracts the asset ID from the response
-4. Parses the segments JSON and prepares it for import (removes IDs to create new segments)
-5. Makes a PUT request to `/catalog-server/api/assets/<id>/segments` with the prepared segments data using target authentication
-
-**Options:**
-- `--dry-run`: Preview changes without making actual API calls
-
-**Example:**
-```bash
-# Preview import without making changes
-ADOC> segments-import segments_output.csv --dry-run
-
-# Import segments to target environment
-ADOC> segments-import segments_output.csv
-```
-
-**CSV Format:**
-The input CSV should have the following structure:
-```csv
-target-env,segments_json
-"Snowflake_pipelines.CPG_SALES.PUBLIC.SALES_TRANS_2","{""assetSegments"":{""assetId"":2253819,""segments"":[{""conditions"":[{""id"":2974,""condition"":""CUSTOM"",""value"":""Platinum|Bronze|Silver|Gold"",""columnId"":2253824}],""id"":3170,""name"":""cardtier"",""linkedPolicyCount"":0,""createdAt"":1751272850831,""updatedAt"":1751272850831}],""isSegmented"":true}}"
-```
-
-**Features:**
-- Command history with up/down arrow key navigation
-- History persists between sessions (stored in `~/.adoc_history`)
-- Supports up to 1000 commands in history
-- **Segments Export**: Read CSV file, get asset details, extract ID, and fetch segments from source environment
-- **Segments Import**: Import segments from CSV file to target assets
-- **Tab Completion**: Press TAB to autocomplete commands, endpoints, and flags
-- **Dynamic Endpoints**: Support for endpoints with placeholders like `<asset-id>`
-- **Predictable Environment Behavior**: GET/PUT use source, export uses source, import uses target
-
-### Examples
-
-#### Formatter Examples
-
-```bash
-# Replace database connection strings
-python -m adoc_export_import formatter --input data/samples --source-env-string "PROD_DB" --target-env-string "DEV_DB"
-
-# Replace with custom output directory
-python -m adoc_export_import formatter --input data/samples --source-env-string "old" --target-env-string "new" --output-dir data/output
-
-# Verbose processing
-python -m adoc_export_import formatter --input data/samples --source-env-string "COMM_APAC_ETL_PROD_DB" --target-env-string "NEW_DB_NAME" --verbose
-```
-
-#### Asset Export Examples
-
-```bash
-# Export assets from CSV file
-python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env
-
-# Export with verbose logging
-python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env --verbose
-```
-
-#### REST API Examples
-
-```bash
-# Start interactive REST API client
-python -m adoc_export_import rest-api --env-file=config.env
-
-# Start with verbose logging
-python -m adoc_export_import rest-api --env-file=config.env --verbose
-```
-
-Interactive Commands:
-```
-ADOC> GET /catalog-server/api/assets?uid=123
-ADOC> PUT /catalog-server/api/assets {"name": "test", "value": 123}
-ADOC> GET /catalog-server/api/assets/<asset-id>/metadata
-ADOC> segments-export data/output/segmented_spark_uids.csv
-ADOC> segments-export data/output/segmented_spark_uids.csv --output-file my_segments.csv --quiet
-ADOC> segments-import segments_output.csv --dry-run
-ADOC> segments-import segments_output.csv
-ADOC> exit
-```
-
-### Environment Configuration
-
-For the asset-export command, create a `config.env` file with the following variables:
-
+4. **Configure environment variables:**
+Create a `config.env` file with your environment credentials:
 ```bash
 # Host URL for the Acceldata environment
-AD_HOST=https://se-demo.acceldata.app
+AD_HOST=https://your-acceldata-instance.com
 
-# Access keys and secret keys for authentication
-AD_SOURCE_ACCESS_KEY=your_source_access_key_here
-AD_SOURCE_SECRET_KEY=your_source_secret_key_here
-AD_TARGET_ACCESS_KEY=your_target_access_key_here
-AD_TARGET_SECRET_KEY=your_target_secret_key_here
+# Source environment credentials
+AD_SOURCE_ACCESS_KEY=your_source_access_key
+AD_SOURCE_SECRET_KEY=your_source_secret_key
+AD_SOURCE_TENANT=your_source_tenant
 
-# Tenant names
-AD_SOURCE_TENANT=your_source_tenant_here
-AD_TARGET_TENANT=your_target_tenant_here
+# Target environment credentials (for import operations)
+AD_TARGET_ACCESS_KEY=your_target_access_key
+AD_TARGET_SECRET_KEY=your_target_secret_key
+AD_TARGET_TENANT=your_target_tenant
 ```
 
-### Programmatic Usage
+## Complete Migration Workflow
 
-You can also use the tool programmatically:
+### Step 1: Export Policies from Source Environment
 
-```python
-from adoc_export_import import PolicyExportFormatter, create_api_client
-import logging
+**Action Required:** Use the Acceldata UI to export policies from your source environment.
 
-# Setup logging
-logger = logging.getLogger(__name__)
+1. Navigate to the Acceldata UI in your source environment
+2. Go to the Policies section
+3. Select the policies you want to migrate
+4. Export them as ZIP files
+5. Download the ZIP files to your local machine
 
-# Create formatter instance
-formatter = PolicyExportFormatter(
-    input_dir="data/samples",
-    search_string="PROD_DB",
-    replace_string="DEV_DB",
-    output_dir="data/output",
-    logger=logger
-)
+**Output:** Policy export ZIP files containing JSON configurations
 
-# Process the directory
-stats = formatter.process_directory()
-print(f"Processed {stats['total_files']} files with {stats['changes_made']} changes")
+### Step 2: Process ZIP Files with Formatter
 
-# Create API client for asset export
-client = create_api_client(env_file="config.env", logger=logger)
+**Purpose:** Translate environment strings and extract asset information
 
-# Get asset details
-asset_data = client.get_asset_by_uid("your_uid_here")
-print(asset_data)
+```bash
+python -m adoc_export_import formatter \
+  --input data/policy_exports \
+  --source-env-string "PROD_DB" \
+  --target-env-string "DEV_DB" \
+  --verbose
 ```
 
-## Project Structure
+**What this does:**
+- Reads policy export ZIP files from the input directory
+- Extracts JSON files while maintaining structure
+- Replaces source environment strings with target environment strings
+- Generates import-ready ZIP files
+- Creates specialized CSV files for asset management
+
+**Output:**
+- `*_import_ready/` directories with translated ZIP files
+- `segmented_spark_uids.csv` - UIDs of segmented SPARK assets
+- `asset_uids.csv` - All asset UIDs for profile/configuration management
+
+**Important Notes:**
+- Environment strings must match exactly (case-sensitive)
+- Example: If your source uses "PROD_DB" and target uses "DEV_DB", specify exactly these strings
+- The formatter identifies assets that need special handling during import
+
+### Step 3: Start Interactive Mode
+
+**Purpose:** Access interactive commands for asset management
+
+```bash
+python -m adoc_export_import interactive --env-file config.env
+```
+
+This opens an interactive session where you can run specialized commands.
+
+### Step 4: Export Asset Profiles
+
+**Purpose:** Extract profile configurations from source environment
+
+```bash
+ADOC> asset-profile-export data/samples_import_ready/asset_uids.csv --verbose
+```
+
+**What this does:**
+- Reads UIDs from the `asset_uids.csv` file generated in Step 2
+- Makes API calls to get profile configurations for each asset
+- Exports profile configurations to CSV format
+
+**Output:** `asset-profiles-export.csv` file with profile configurations
+
+### Step 5: Import Asset Profiles
+
+**Purpose:** Import profile configurations to target environment
+
+```bash
+ADOC> asset-profile-import data/samples_import_ready/asset-profiles-export.csv --dry-run --verbose
+```
+
+**What this does:**
+- Reads profile configurations from the CSV file generated in Step 4
+- Imports profile configurations to the target environment
+- Supports dry-run mode to preview changes before applying
+
+**Options:**
+- `--dry-run`: Preview changes without applying them
+- `--verbose`: Show detailed API calls and responses
+- `--quiet`: Minimal output (default)
+
+### Step 6: Export Asset Configurations
+
+**Purpose:** Extract detailed asset configurations from source environment
+
+```bash
+ADOC> asset-config-export data/samples_import_ready/asset_uids.csv --verbose
+```
+
+**What this does:**
+- Reads UIDs from the `asset_uids.csv` file
+- Makes API calls to get asset details and extract asset IDs
+- Fetches detailed configurations using asset IDs
+- Exports compressed JSON configurations to CSV
+
+**Output:** `asset-config-export.csv` file with detailed configurations
+
+### Step 7: Import Asset Configurations
+
+**Purpose:** Import detailed configurations to target environment
+
+```bash
+ADOC> asset-config-import data/samples_import_ready/asset-config-export.csv --dry-run --verbose
+```
+
+**Note:** This command will be implemented in a future update.
+
+### Step 8: Handle Segmented Assets (if applicable)
+
+**Purpose:** Import segment configurations for SPARK assets
+
+```bash
+ADOC> segments-export data/samples_import_ready/segmented_spark_uids.csv --verbose
+```
+
+**What this does:**
+- Reads UIDs of segmented SPARK assets from the CSV generated in Step 2
+- Exports segment configurations that aren't included in standard imports
+
+**Output:** `segments_output.csv` file with segment configurations
+
+```bash
+ADOC> segments-import data/samples_import_ready/segments_output.csv --dry-run --verbose
+```
+
+**What this does:**
+- Imports segment configurations to target environment
+- Required for SPARK assets with segmentation
+- Optional for JDBC_SQL assets (already handled by standard import)
+
+## Command Reference
+
+### Formatter Command
+
+```bash
+python -m adoc_export_import formatter \
+  --input <input_directory> \
+  --source-env-string <source_string> \
+  --target-env-string <target_string> \
+  [--output-dir <output_directory>] \
+  [--verbose] \
+  [--log-level <level>]
+```
+
+**Arguments:**
+- `--input`: Directory containing policy export ZIP files
+- `--source-env-string`: Exact string to replace (e.g., "PROD_DB")
+- `--target-env-string`: String to replace with (e.g., "DEV_DB")
+- `--output-dir`: Custom output directory (optional)
+- `--verbose`: Enable detailed logging
+- `--log-level`: Set logging level (ERROR, WARNING, INFO, DEBUG)
+
+### Interactive Mode
+
+```bash
+python -m adoc_export_import interactive --env-file config.env [--verbose]
+```
+
+**Available Commands:**
+- `asset-profile-export <csv_file> [--output-file <file>] [--quiet] [--verbose]`
+- `asset-profile-import <csv_file> [--dry-run] [--quiet] [--verbose]`
+- `asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]`
+- `segments-export <csv_file> [--output-file <file>] [--quiet]`
+- `segments-import <csv_file> [--dry-run] [--quiet] [--verbose]`
+- `set-output-dir <directory>`: Set global output directory
+- `help`: Show detailed help
+- `exit`: Exit interactive mode
+
+## File Structure
 
 ```
-adoc-export-import/
-├── src/
-│   └── adoc_export_import/
-│       ├── __init__.py
-│       ├── core.py              # Main functionality (policy_export_formatter.py)
-│       ├── cli.py               # Command line interface
-│       └── api_client.py        # API client for asset export
+project/
 ├── data/
-│   ├── samples/                 # Sample input files
-│   ├── samples_import_ready/    # Sample output files
-│   └── output/                  # Output directory
-├── tests/                       # Test files
-├── docs/                        # Documentation
-├── config.env.example           # Example environment configuration
-├── pyproject.toml              # Project configuration
-└── README.md                   # This file
+│   ├── policy_exports/           # Input: Policy export ZIP files
+│   ├── samples_import_ready/     # Output: Processed files
+│   │   ├── [translated ZIP files]
+│   │   ├── segmented_spark_uids.csv
+│   │   ├── asset_uids.csv
+│   │   ├── asset-profiles-export.csv
+│   │   ├── asset-config-export.csv
+│   │   └── segments_output.csv
+│   └── output/                   # Custom output directory
+├── config.env                    # Environment configuration
+└── README.md
 ```
 
-## Development
+## Common Use Cases
 
-### Running Tests
+### Development Environment Migration
 
 ```bash
-uv run pytest
+# 1. Process policy exports
+python -m adoc_export_import formatter \
+  --input data/policy_exports \
+  --source-env-string "PROD_DB" \
+  --target-env-string "DEV_DB" \
+  --verbose
+
+# 2. Start interactive session
+python -m adoc_export_import interactive --env-file config.env
+
+# 3. Export and import profiles
+ADOC> asset-profile-export data/samples_import_ready/asset_uids.csv --verbose
+ADOC> asset-profile-import data/samples_import_ready/asset-profiles-export.csv --dry-run --verbose
+
+# 4. Export and import configurations
+ADOC> asset-config-export data/samples_import_ready/asset_uids.csv --verbose
+# asset-config-import command will be available in future update
+
+# 5. Handle segmented assets (if any)
+ADOC> segments-export data/samples_import_ready/segmented_spark_uids.csv --verbose
+ADOC> segments-import data/samples_import_ready/segments_output.csv --dry-run --verbose
 ```
 
-### Code Formatting
+### Testing Environment Migration
 
 ```bash
-uv run black src/ tests/
-uv run isort src/ tests/
+# Similar to development, but with different environment strings
+python -m adoc_export_import formatter \
+  --input data/policy_exports \
+  --source-env-string "PROD_DB" \
+  --target-env-string "TEST_DB" \
+  --verbose
 ```
 
-### Type Checking
+## Troubleshooting
 
-```bash
-uv run mypy src/
-```
+### Common Issues
 
-### Linting
+1. **Environment String Not Found**
+   - Ensure exact string matching (case-sensitive)
+   - Check the actual strings in your policy files
+   - Use `--verbose` to see detailed processing
 
-```bash
-uv run flake8 src/ tests/
-```
+2. **API Connection Errors**
+   - Verify `config.env` file has correct credentials
+   - Check network connectivity to Acceldata instance
+   - Ensure access keys have appropriate permissions
 
-## Configuration
+3. **CSV File Not Found**
+   - Verify file paths are correct
+   - Check that formatter has generated the required CSV files
+   - Use absolute paths if needed
 
-The project uses `pyproject.toml` for configuration, including:
+4. **Permission Errors**
+   - Ensure write permissions for output directories
+   - Check file permissions for input files
 
-- **Build System**: hatchling
-- **Code Formatting**: black with 88 character line length
-- **Import Sorting**: isort with black profile
-- **Type Checking**: mypy with strict settings
-- **Testing**: pytest with coverage reporting
+### Logging
 
-## License
+The tool provides comprehensive logging:
+- Console output with `--verbose` flag
+- Log files: `policy_export_formatter_*.log`
+- Interactive mode history: `~/.adoc_history`
 
-MIT License - see LICENSE file for details.
+### Getting Help
 
-## Contributing
+- Use `help` command in interactive mode for detailed command information
+- Check log files for detailed error information
+- Use `--dry-run` flag to preview changes before applying them
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
+## Best Practices
+
+1. **Always use dry-run first**: Test your commands with `--dry-run` before applying changes
+2. **Backup your data**: Keep backups of original policy exports
+3. **Verify environment strings**: Double-check source and target environment strings
+4. **Test in non-production**: Always test the migration process in a test environment first
+5. **Monitor logs**: Use verbose mode and check log files for detailed information
+6. **Validate outputs**: Verify generated CSV files before proceeding to import steps
 
 ## Support
 
-For issues and questions, please use the GitHub issue tracker. 
+For issues and questions:
+- Check the troubleshooting section above
+- Review log files for detailed error information
+- Use the GitHub issue tracker for bug reports and feature requests
+
+## Formatter Technical Details
+
+The formatter is the core component of the ADOC Export Import Tool, responsible for processing policy export ZIP files and preparing them for import into target environments. This section provides detailed technical information about how the formatter works.
+
+### Architecture Overview
+
+The formatter operates on a multi-stage pipeline:
+
+1. **File Discovery**: Scans input directory for ZIP and JSON files
+2. **Content Extraction**: Extracts and processes JSON content from ZIP archives
+3. **String Replacement**: Performs environment string translation
+4. **Asset Analysis**: Identifies and categorizes assets for specialized handling
+5. **Output Generation**: Creates import-ready files and asset management CSVs
+
+### Processing Pipeline
+
+#### Stage 1: File Discovery and Validation
+```
+Input Directory Scan
+├── ZIP Files (*.zip)
+│   ├── Validate ZIP structure
+│   ├── Check for JSON content
+│   └── Extract file metadata
+└── JSON Files (*.json)
+    ├── Validate JSON syntax
+    ├── Check for policy content
+    └── Prepare for processing
+```
+
+#### Stage 2: Content Extraction and Processing
+```
+ZIP Archive Processing
+├── Extract all files maintaining structure
+├── Identify JSON files within archives
+├── Parse JSON content recursively
+└── Build content tree for analysis
+
+JSON File Processing
+├── Parse JSON structure
+├── Traverse all nested objects and arrays
+├── Identify string fields for replacement
+└── Maintain data type integrity
+```
+
+#### Stage 3: Environment String Replacement
+```
+String Replacement Engine
+├── Exact String Matching
+│   ├── Case-sensitive comparison
+│   ├── Whole string replacement
+│   └── Preserve surrounding context
+├── Recursive Processing
+│   ├── Object properties
+│   ├── Array elements
+│   └── Nested structures
+└── Validation
+    ├── JSON syntax preservation
+    ├── Data type consistency
+    └── Replacement verification
+```
+
+#### Stage 4: Asset Analysis and Categorization
+```
+Asset Identification
+├── Scan processed JSON for asset definitions
+├── Extract asset metadata
+│   ├── UID (Unique Identifier)
+│   ├── Engine Type (SPARK, JDBC_SQL, etc.)
+│   ├── Segmentation Status
+│   └── Configuration Type
+└── Categorize assets
+    ├── Segmented SPARK assets
+    ├── Segmented JDBC_SQL assets
+    ├── Non-segmented assets
+    └── Special configuration assets
+```
+
+#### Stage 5: Output Generation
+```
+File Output Generation
+├── Import-Ready ZIP Files
+│   ├── Maintain original structure
+│   ├── Include translated JSON
+│   ├── Preserve file metadata
+│   └── Create _import_ready directories
+├── Asset Management CSVs
+│   ├── segmented_spark_uids.csv
+│   ├── asset_uids.csv
+│   └── Validation and formatting
+└── Processing Statistics
+    ├── File counts and types
+    ├── Replacement statistics
+    ├── Asset categorization
+    └── Error reporting
+```
+
+### String Replacement Algorithm
+
+The formatter uses a sophisticated string replacement algorithm that ensures data integrity:
+
+```python
+def replace_strings_recursive(obj, search_string, replace_string):
+    """
+    Recursively replace strings in JSON objects while preserving structure.
+    
+    Args:
+        obj: JSON object, array, or primitive value
+        search_string: String to search for (exact match)
+        replace_string: String to replace with
+        
+    Returns:
+        Modified object with strings replaced
+    """
+    if isinstance(obj, dict):
+        return {key: replace_strings_recursive(value, search_string, replace_string) 
+                for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [replace_strings_recursive(item, search_string, replace_string) 
+                for item in obj]
+    elif isinstance(obj, str):
+        return obj.replace(search_string, replace_string)
+    else:
+        return obj  # Preserve non-string types (numbers, booleans, null)
+```
+
+### Asset Detection and Classification
+
+The formatter identifies assets using multiple criteria:
+
+#### Asset Detection Criteria
+```json
+{
+  "asset": {
+    "uid": "string",           // Required: Unique asset identifier
+    "engineType": "SPARK|JDBC_SQL|...",  // Engine classification
+    "isSegmented": true|false, // Segmentation status
+    "configType": "string",    // Configuration type
+    "metadata": {...}          // Additional metadata
+  }
+}
+```
+
+#### Classification Logic
+```python
+def classify_asset(asset_data):
+    """
+    Classify asset based on engine type and segmentation status.
+    """
+    engine_type = asset_data.get('engineType', '')
+    is_segmented = asset_data.get('isSegmented', False)
+    
+    if is_segmented and engine_type == 'SPARK':
+        return 'segmented_spark'
+    elif is_segmented and engine_type == 'JDBC_SQL':
+        return 'segmented_jdbc'
+    else:
+        return 'standard'
+```
+
+### File Structure Preservation
+
+The formatter maintains the original file structure while processing:
+
+```
+Original ZIP Structure
+├── policy_export.zip
+│   ├── assets/
+│   │   ├── asset1.json
+│   │   ├── asset2.json
+│   │   └── metadata.json
+│   ├── policies/
+│   │   ├── policy1.json
+│   │   └── policy2.json
+│   └── config/
+│       └── settings.json
+
+Processed Output Structure
+├── policy_export_import_ready/
+│   ├── assets/
+│   │   ├── asset1.json (translated)
+│   │   ├── asset2.json (translated)
+│   │   └── metadata.json (translated)
+│   ├── policies/
+│   │   ├── policy1.json (translated)
+│   │   └── policy2.json (translated)
+│   ├── config/
+│   │   └── settings.json (translated)
+│   ├── segmented_spark_uids.csv
+│   └── asset_uids.csv
+```
+
+### Error Handling and Validation
+
+The formatter implements comprehensive error handling:
+
+#### Error Categories
+1. **File System Errors**
+   - Invalid file paths
+   - Permission issues
+   - Disk space problems
+
+2. **ZIP Processing Errors**
+   - Corrupted ZIP files
+   - Invalid ZIP structure
+   - Extraction failures
+
+3. **JSON Processing Errors**
+   - Invalid JSON syntax
+   - Encoding issues
+   - Memory constraints
+
+4. **String Replacement Errors**
+   - Invalid search/replace strings
+   - Data type corruption
+   - Replacement failures
+
+#### Validation Checks
+```python
+def validate_replacement(original, modified, search_string, replace_string):
+    """
+    Validate that string replacement was successful and safe.
+    """
+    # Check JSON syntax
+    if not is_valid_json(modified):
+        raise JSONSyntaxError("Replacement corrupted JSON structure")
+    
+    # Verify replacements occurred
+    if search_string in str(original) and search_string in str(modified):
+        raise ReplacementError("Not all instances were replaced")
+    
+    # Check data type preservation
+    if type(original) != type(modified):
+        raise DataTypeError("Replacement changed data types")
+    
+    return True
+```
+
+### Performance Optimizations
+
+The formatter includes several performance optimizations:
+
+#### Memory Management
+- **Streaming Processing**: Large ZIP files are processed in chunks
+- **Lazy Loading**: JSON content is parsed only when needed
+- **Memory Pooling**: Reuses objects to reduce garbage collection
+
+#### Parallel Processing
+- **File-Level Parallelism**: Multiple files processed concurrently
+- **Content-Level Parallelism**: Large JSON objects processed in parallel
+- **I/O Optimization**: Asynchronous file operations
+
+#### Caching
+- **String Cache**: Caches frequently used search/replace operations
+- **Pattern Cache**: Caches compiled regex patterns
+- **Metadata Cache**: Caches file metadata for repeated access
+
+### Statistics and Reporting
+
+The formatter provides detailed statistics for monitoring and debugging:
+
+#### Processing Statistics
+```json
+{
+  "total_files": 150,
+  "json_files": 120,
+  "zip_files": 30,
+  "files_investigated": 145,
+  "changes_made": 89,
+  "successful": 142,
+  "failed": 3,
+  "total_policies_processed": 89,
+  "segmented_spark_policies": 12,
+  "segmented_jdbc_policies": 8,
+  "non_segmented_policies": 69,
+  "extracted_assets": 156,
+  "all_assets": 156,
+  "errors": ["error1", "error2", "error3"]
+}
+```
+
+#### Asset Statistics
+```json
+{
+  "asset_categories": {
+    "segmented_spark": 12,
+    "segmented_jdbc": 8,
+    "standard": 136
+  },
+  "engine_types": {
+    "SPARK": 45,
+    "JDBC_SQL": 67,
+    "PYTHON": 23,
+    "OTHER": 21
+  },
+  "segmentation_status": {
+    "segmented": 20,
+    "non_segmented": 136
+  }
+}
+```
+
+### Configuration Options
+
+The formatter supports various configuration options:
+
+#### Command Line Options
+```bash
+python -m adoc_export_import formatter \
+  --input <directory>           # Input directory path
+  --source-env-string <string>  # Source environment string
+  --target-env-string <string>  # Target environment string
+  --output-dir <directory>      # Custom output directory
+  --verbose                     # Enable verbose logging
+  --log-level <level>          # Set logging level
+```
+
+#### Advanced Configuration
+```python
+# Programmatic configuration
+formatter = PolicyExportFormatter(
+    input_dir="data/policy_exports",
+    search_string="PROD_DB",
+    replace_string="DEV_DB",
+    output_dir="data/import_ready",
+    logger=custom_logger,
+    max_workers=4,              # Parallel processing workers
+    chunk_size=8192,            # File processing chunk size
+    validate_json=True,         # JSON validation
+    preserve_structure=True,    # Maintain file structure
+    create_backups=True         # Create backup files
+)
+```
+
+### Integration Points
+
+The formatter integrates with other components:
+
+#### CSV Generation
+- **segmented_spark_uids.csv**: Used by segments-export command
+- **asset_uids.csv**: Used by asset-profile-export and asset-config-export commands
+
+#### API Integration
+- Generated CSV files feed into interactive mode commands
+- Asset UIDs enable API-based configuration management
+- Segmentation data supports specialized import workflows
+
+#### Logging Integration
+- Comprehensive logging for debugging and monitoring
+- Error tracking for failed operations
+- Performance metrics for optimization
+
+This technical foundation ensures the formatter can handle complex policy migrations while maintaining data integrity and providing detailed feedback for troubleshooting and optimization. 
