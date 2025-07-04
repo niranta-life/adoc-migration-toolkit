@@ -29,9 +29,31 @@ from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
 
 # Configure logging with professional formatting
-def setup_logging(verbose: bool = False) -> logging.Logger:
-    """Setup professional logging configuration."""
-    log_level = logging.DEBUG if verbose else logging.INFO
+def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Logger:
+    """Setup professional logging configuration.
+    
+    Args:
+        verbose (bool): Enable verbose logging (overrides log_level)
+        log_level (str): Logging level (ERROR, WARNING, INFO, DEBUG)
+    
+    Returns:
+        logging.Logger: Configured logger instance
+    """
+    # Map string log levels to logging constants
+    level_map = {
+        "ERROR": logging.ERROR,
+        "WARNING": logging.WARNING,
+        "INFO": logging.INFO,
+        "DEBUG": logging.DEBUG
+    }
+    
+    # Determine the actual log level
+    if verbose:
+        # Verbose overrides log_level
+        actual_level = logging.DEBUG
+    else:
+        # Use the specified log level, default to ERROR
+        actual_level = level_map.get(log_level.upper(), logging.ERROR)
     
     # Create formatter
     formatter = logging.Formatter(
@@ -55,13 +77,14 @@ def setup_logging(verbose: bool = False) -> logging.Logger:
     
     # Configure root logger
     logging.basicConfig(
-        level=log_level,
+        level=actual_level,
         handlers=handlers,
         force=True
     )
     
     logger = logging.getLogger(__name__)
     logger.info(f"Logging initialized. Log file: {log_file}")
+    logger.info(f"Log level set to: {log_level.upper()}")
     return logger
 
 
@@ -779,13 +802,18 @@ Features:
     parser.add_argument("search_string", help="Substring to search for")
     parser.add_argument("replace_string", help="Substring to replace with")
     parser.add_argument("--output-dir", help="Output directory (defaults to input_dir with '_import_ready' suffix)")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--log-level", "-l",
+        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
+        default="ERROR",
+        help="Set logging level (default: ERROR)"
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging (overrides --log-level)")
     
     try:
         args = parser.parse_args()
         
         # Setup logging
-        logger = setup_logging(args.verbose)
+        logger = setup_logging(args.verbose, args.log_level)
         
         # Validate arguments
         validate_arguments(args)

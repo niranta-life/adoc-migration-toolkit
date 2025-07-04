@@ -23,7 +23,7 @@ def main():
     """Example usage of the Acceldata API Client."""
     
     # Setup logging
-    logger = setup_logging(verbose=True)
+    logger = setup_logging(verbose=True, log_level="INFO")
     
     try:
         # Create API client using environment file

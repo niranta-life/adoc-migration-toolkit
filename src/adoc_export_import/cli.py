@@ -21,7 +21,7 @@ def create_formatter_parser(subparsers):
     formatter_parser = subparsers.add_parser(
         'formatter',
         help='Format policy export files by replacing substrings in JSON files and ZIP archives',
-        description='Professional JSON String Replacer - Replace substrings in JSON files and ZIP archives',
+        description='JSON String Replacer - Replace substrings in JSON files and ZIP archives',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -58,9 +58,15 @@ Features:
         help="Output directory (defaults to input_dir with '_import_ready' suffix)"
     )
     formatter_parser.add_argument(
+        "--log-level", "-l",
+        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
+        default="ERROR",
+        help="Set logging level (default: ERROR)"
+    )
+    formatter_parser.add_argument(
         "--verbose", "-v", 
         action="store_true", 
-        help="Enable verbose logging"
+        help="Enable verbose logging (overrides --log-level)"
     )
     
     return formatter_parser
@@ -97,9 +103,15 @@ Features:
         help="Path to environment file containing AD_HOST, AD_SOURCE_ACCESS_KEY, AD_SOURCE_SECRET_KEY, AD_SOURCE_TENANT"
     )
     asset_export_parser.add_argument(
+        "--log-level", "-l",
+        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
+        default="ERROR",
+        help="Set logging level (default: ERROR)"
+    )
+    asset_export_parser.add_argument(
         "--verbose", "-v", 
         action="store_true", 
-        help="Enable verbose logging"
+        help="Enable verbose logging (overrides --log-level)"
     )
     
     return asset_export_parser
@@ -142,9 +154,15 @@ Features:
         help="Path to environment file containing AD_HOST, AD_SOURCE_ACCESS_KEY, AD_SOURCE_SECRET_KEY, AD_SOURCE_TENANT"
     )
     rest_api_parser.add_argument(
+        "--log-level", "-l",
+        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
+        default="ERROR",
+        help="Set logging level (default: ERROR)"
+    )
+    rest_api_parser.add_argument(
         "--verbose", "-v", 
         action="store_true", 
-        help="Enable verbose logging"
+        help="Enable verbose logging (overrides --log-level)"
     )
     
     return rest_api_parser
@@ -187,6 +205,19 @@ def validate_asset_export_arguments(args):
         raise ValueError(f"CSV path is not a file: {args.csv_file}")
     
     # Check if environment file exists
+    env_path = Path(args.env_file)
+    if not env_path.exists():
+        raise FileNotFoundError(f"Environment file does not exist: {args.env_file}")
+    
+    if not env_path.is_file():
+        raise ValueError(f"Environment path is not a file: {args.env_file}")
+
+
+def validate_rest_api_arguments(args):
+    """Validate rest-api command line arguments."""
+    if not args.env_file or not args.env_file.strip():
+        raise ValueError("Environment file path cannot be empty")
+    
     env_path = Path(args.env_file)
     if not env_path.exists():
         raise FileNotFoundError(f"Environment file does not exist: {args.env_file}")
@@ -241,7 +272,7 @@ def run_formatter(args):
     """Run the formatter command."""
     try:
         # Setup logging
-        logger = setup_logging(args.verbose)
+        logger = setup_logging(args.verbose, args.log_level)
         
         # Validate arguments
         validate_formatter_arguments(args)
@@ -322,7 +353,7 @@ def run_asset_export(args):
     """Run the asset-export command."""
     try:
         # Setup logging
-        logger = setup_logging(args.verbose)
+        logger = setup_logging(args.verbose, args.log_level)
         
         # Validate arguments
         validate_asset_export_arguments(args)
@@ -803,18 +834,10 @@ def run_rest_api(args):
     """Run the interactive REST API client."""
     try:
         # Setup logging
-        logger = setup_logging(args.verbose)
+        logger = setup_logging(args.verbose, args.log_level)
         
         # Validate arguments
-        if not args.env_file or not args.env_file.strip():
-            raise ValueError("Environment file path cannot be empty")
-        
-        env_path = Path(args.env_file)
-        if not env_path.exists():
-            raise FileNotFoundError(f"Environment file does not exist: {args.env_file}")
-        
-        if not env_path.is_file():
-            raise ValueError(f"Environment path is not a file: {args.env_file}")
+        validate_rest_api_arguments(args)
         
         # Create API client
         client = create_api_client(env_file=args.env_file, logger=logger)
