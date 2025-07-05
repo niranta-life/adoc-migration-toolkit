@@ -17,7 +17,7 @@ def execute_asset_profile_export_guided(
     client, 
     logger: logging.Logger, 
     output_file: str = None, 
-    quiet_mode: bool = False, 
+    quiet_mode: bool = True, 
     verbose_mode: bool = False
 ) -> Tuple[bool, str]:
     """Execute asset profile export for guided migration."""
@@ -31,13 +31,12 @@ def execute_asset_profile_export_guided(
         
         # Generate default output file if not provided
         if not output_file:
-            output_file = get_output_file_path(csv_file, "asset-profiles-export.csv")
+            output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
         
-        if not quiet_mode:
+        if verbose_mode:
             print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file: {csv_file}")
             print(f"Output will be written to: {output_file}")
-            if verbose_mode:
-                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
         
         # Open output file for writing
@@ -55,14 +54,16 @@ def execute_asset_profile_export_guided(
             writer.writerow(['target-env', 'profile_json'])
             
             for i, (source_env, target_env) in enumerate(env_mappings, 1):
-                if not quiet_mode:
+                if verbose_mode:
                     print(f"\n[{i}/{len(env_mappings)}] Processing source-env: {source_env}")
                     print(f"Target-env: {target_env}")
                     print("-" * 60)
+                else:
+                    print(f"Processing [{i}/{len(env_mappings)}] UID: {source_env}")
                 
                 try:
                     # Step 1: Get asset details by source-env (UID)
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"Getting asset details for UID: {source_env}")
                     
                     asset_response = client.make_api_call(
@@ -73,7 +74,7 @@ def execute_asset_profile_export_guided(
                     # Step 2: Extract the asset ID
                     if not asset_response or 'data' not in asset_response:
                         error_msg = f"No 'data' field found in asset response for UID: {source_env}"
-                        if not quiet_mode:
+                        if verbose_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
@@ -82,7 +83,7 @@ def execute_asset_profile_export_guided(
                     data_array = asset_response['data']
                     if not data_array or len(data_array) == 0:
                         error_msg = f"Empty 'data' array in asset response for UID: {source_env}"
-                        if not quiet_mode:
+                        if verbose_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
@@ -91,18 +92,18 @@ def execute_asset_profile_export_guided(
                     first_asset = data_array[0]
                     if 'id' not in first_asset:
                         error_msg = f"No 'id' field found in first asset for UID: {source_env}"
-                        if not quiet_mode:
+                        if verbose_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
                         continue
                     
                     asset_id = first_asset['id']
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"Extracted asset ID: {asset_id}")
                     
                     # Step 3: Get profile configuration for the asset
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"Getting profile configuration for asset ID: {asset_id}")
                     
                     profile_response = client.make_api_call(
@@ -114,21 +115,25 @@ def execute_asset_profile_export_guided(
                     profile_json = json.dumps(profile_response, ensure_ascii=False)
                     writer.writerow([target_env, profile_json])
                     
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"✅ Written to file: {target_env}")
+                    else:
+                        print(f"✅ [{i}/{len(env_mappings)}] {source_env}: Profile exported successfully")
                     
                     successful += 1
                     total_assets_processed += 1
                     
                 except Exception as e:
                     error_msg = f"Failed to process source-env {source_env}: {e}"
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"❌ {error_msg}")
+                    else:
+                        print(f"❌ [{i}/{len(env_mappings)}] {source_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
         
         # Print summary
-        if not quiet_mode:
+        if verbose_mode:
             print("\n" + "="*80)
             print("ASSET PROFILE EXPORT COMPLETED")
             print("="*80)
@@ -138,12 +143,15 @@ def execute_asset_profile_export_guided(
             print(f"Failed: {failed}")
             print(f"Total assets processed: {total_assets_processed}")
             print("="*80)
+        else:
+            print(f"✅ Asset profile export completed: {successful} successful, {failed} failed")
+            print(f"Output written to: {output_file}")
         
         return True, f"Asset profiles exported to {output_file}"
         
     except Exception as e:
         error_msg = f"Error in asset-profile-export: {e}"
-        if not quiet_mode:
+        if verbose_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
         return False, error_msg
@@ -183,11 +191,35 @@ def read_csv_uids(csv_file: str, logger: logging.Logger) -> list:
         raise
 
 
-def get_output_file_path(csv_file: str, default_filename: str) -> Path:
-    """Get the output file path based on input CSV file location."""
-    csv_path = Path(csv_file)
-    if "_import_ready" in csv_path.parent.name:
-        return csv_path.parent / default_filename
+def get_output_file_path(csv_file: str, default_filename: str, custom_output_file: str = None, category: str = None) -> Path:
+    """Get the output file path based on global output directory and custom settings.
+    
+    Args:
+        csv_file: Path to the input CSV file
+        default_filename: Default filename to use
+        custom_output_file: Custom output file path (overrides global directory)
+        category: Subdirectory under output dir (e.g., 'policy-export', 'asset-export')
+        
+    Returns:
+        Path: Output file path
+    """
+    if custom_output_file:
+        # Use custom output file if specified
+        return Path(custom_output_file)
+    
+    # Import here to avoid circular imports
+    from .cli import GLOBAL_OUTPUT_DIR
+    
+    if GLOBAL_OUTPUT_DIR:
+        base_dir = GLOBAL_OUTPUT_DIR
     else:
-        import_ready_dir = csv_path.parent / f"{csv_path.parent.name}_import_ready"
-        return import_ready_dir / default_filename 
+        from datetime import datetime
+        base_dir = Path.cwd() / f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d%H%M')}"
+        base_dir.mkdir(parents=True, exist_ok=True)
+    
+    if category:
+        category_dir = base_dir / category
+        category_dir.mkdir(parents=True, exist_ok=True)
+        return category_dir / default_filename
+    else:
+        return base_dir / default_filename 

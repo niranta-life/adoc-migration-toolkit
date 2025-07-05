@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # Script configuration
-SCRIPT_NAME="adoc-migration-tool"
+SCRIPT_NAME="adoc-migration-toolkit"
 SCRIPT_VERSION="1.0.0"
 DEFAULT_CONFIG_FILE="config/config.env"
 PYTHON_MODULE="adoc_export_import"
@@ -172,27 +172,42 @@ validate_config_file() {
 # Function to check environment configuration
 check_environment() {
     local config_file="$1"
+    local verbose="${2:-false}"
     
-    print_header "Environment Configuration Check"
-    echo
+    if [[ "$verbose" == "true" ]]; then
+        print_header "Environment Configuration Check"
+        echo
+    fi
     
     # Validate config file
-    if ! validate_config_file "$config_file"; then
+    if ! validate_config_file "$config_file" >/dev/null 2>&1; then
+        if [[ "$verbose" == "true" ]]; then
+            validate_config_file "$config_file"
+        fi
         return 1
     fi
     
     # Check Python module
-    if ! check_python_module; then
+    if ! check_python_module >/dev/null 2>&1; then
+        if [[ "$verbose" == "true" ]]; then
+            check_python_module
+        fi
         return 1
     fi
     
     # Test connection using the tool
-    print_info "Testing connection to ADOC environment..."
+    if [[ "$verbose" == "true" ]]; then
+        print_info "Testing connection to ADOC environment..."
+    fi
     if python -m "$PYTHON_MODULE" interactive --env-file "$config_file" --help >/dev/null 2>&1; then
-        print_success "Environment configuration is valid"
+        if [[ "$verbose" == "true" ]]; then
+            print_success "Environment configuration is valid"
+        fi
         return 0
     else
-        print_error "Failed to initialize the migration tool"
+        if [[ "$verbose" == "true" ]]; then
+            print_error "Failed to initialize the migration tool"
+        fi
         return 1
     fi
 }
@@ -238,18 +253,12 @@ find_config_file() {
 run_migration_tool() {
     local config_file="$1"
     
-    print_header "Starting ADOC Migration Tool"
-    echo
-    
-    # Validate environment
-    if ! check_environment "$config_file"; then
+    # Validate environment silently
+    if ! check_environment "$config_file" "false" >/dev/null 2>&1; then
         print_error "Environment validation failed. Please check your configuration."
         exit 1
     fi
-    
-    print_success "Starting interactive migration tool..."
-    echo
-    
+        
     # Run the Python module
     exec python -m "$PYTHON_MODULE" interactive --env-file "$config_file"
 }
@@ -301,11 +310,10 @@ main() {
         print_error "No valid configuration file found."
         exit 1
     fi
-    print_info "Found configuration file: $config_file"
     
     # Check if only environment validation is requested
     if [[ "$check_env_only" == true ]]; then
-        if check_environment "$config_file"; then
+        if check_environment "$config_file" "true"; then
             exit 0
         else
             exit 4

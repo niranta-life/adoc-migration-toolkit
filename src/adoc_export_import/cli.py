@@ -43,8 +43,8 @@ Features:
     
     formatter_parser.add_argument(
         "--input", 
-        required=True,
-        help="Directory containing JSON files and ZIP files to process"
+        required=False,
+        help="Directory containing JSON files and ZIP files to process (defaults to latest policy-export directory)"
     )
     formatter_parser.add_argument(
         "--source-env-string", 
@@ -173,22 +173,14 @@ Features:
 
 def validate_formatter_arguments(args):
     """Validate formatter command line arguments."""
-    if not args.input or not args.input.strip():
-        raise ValueError("Input directory cannot be empty")
-    
     if not args.source_env_string or not args.source_env_string.strip():
         raise ValueError("Source environment string cannot be empty")
     
     if args.target_env_string is None:
         raise ValueError("Target environment string cannot be None")
     
-    # Check if input directory exists
-    input_path = Path(args.input)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input directory does not exist: {args.input}")
-    
-    if not input_path.is_dir():
-        raise ValueError(f"Input path is not a directory: {args.input}")
+    # Input directory validation is now handled in run_formatter since it's optional
+    # and can auto-detect the policy-export directory
 
 
 def validate_asset_export_arguments(args):
@@ -321,9 +313,39 @@ def run_formatter(args):
         # Validate arguments
         validate_formatter_arguments(args)
         
+        # Determine input directory - if not specified, use policy-export directory
+        input_dir = args.input
+        if not input_dir:
+            # First, check if we have a global output directory set
+            if GLOBAL_OUTPUT_DIR:
+                global_policy_export_dir = GLOBAL_OUTPUT_DIR / "policy-export"
+                if global_policy_export_dir.exists() and global_policy_export_dir.is_dir():
+                    input_dir = str(global_policy_export_dir)
+                    print(f"📁 Using global output directory: {input_dir}")
+                else:
+                    print(f"📁 Global output directory policy-export not found: {global_policy_export_dir}")
+            
+            # If no global directory or it doesn't exist, look for the most recent adoc-migration-toolkit directory
+            if not input_dir:
+                current_dir = Path.cwd()
+                # Only look for directories, not files
+                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                
+                if not toolkit_dirs:
+                    print("❌ No adoc-migration-toolkit directory found.")
+                    print("💡 Please specify an input directory or run 'policy-export' first to generate ZIP files")
+                    return 1
+                
+                # Sort by creation time and use the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                input_dir = str(latest_toolkit_dir / "policy-export")
+                
+                print(f"📁 Using input directory: {input_dir}")
+        
         # Create and run the formatter
         formatter = PolicyExportFormatter(
-            input_dir=args.input,
+            input_dir=input_dir,
             search_string=args.source_env_string,
             replace_string=args.target_env_string,
             output_dir=args.output_dir,
@@ -336,8 +358,10 @@ def run_formatter(args):
         print("\n" + "="*60)
         print("PROCESSING SUMMARY")
         print("="*60)
-        print(f"Input directory:     {args.input}")
+        print(f"Input directory:     {input_dir}")
         print(f"Output directory:    {formatter.output_dir}")
+        print(f"Asset export dir:    {formatter.asset_export_dir}")
+        print(f"Policy export dir:   {formatter.policy_export_dir}")
         print(f"Source env string:   '{args.source_env_string}'")
         print(f"Target env string:   '{args.target_env_string}'")
         print(f"Total files found:   {stats['total_files']}")
@@ -546,7 +570,7 @@ def parse_segments_export_command(command: str) -> tuple:
     """Parse a segments-export command string into components.
     
     Args:
-        command: Command string like "segments-export <csv_file> [--output-file <file>] [--quiet]"
+        command: Command string like "segments-export [<csv_file>] [--output-file <file>] [--quiet]"
         
     Returns:
         Tuple of (csv_file, output_file, quiet_mode)
@@ -555,15 +579,12 @@ def parse_segments_export_command(command: str) -> tuple:
     if not parts or parts[0].lower() != 'segments-export':
         return None, None, False
     
-    if len(parts) < 2:
-        raise ValueError("CSV file path is required for segments-export command")
-    
-    csv_file = parts[1]
+    csv_file = None
     output_file = None
     quiet_mode = False
     
     # Check for flags and options
-    i = 2
+    i = 1
     while i < len(parts):
         if parts[i] == '--output-file' and i + 1 < len(parts):
             output_file = parts[i + 1]
@@ -572,12 +593,33 @@ def parse_segments_export_command(command: str) -> tuple:
         elif parts[i] == '--quiet':
             quiet_mode = True
             parts.remove('--quiet')
+        elif i == 1 and not parts[i].startswith('--'):
+            # This is the CSV file argument (first non-flag argument)
+            csv_file = parts[i]
+            parts.remove(parts[i])
         else:
             i += 1
     
-    # Generate default output file if not provided
+    # If no CSV file specified, use default from output directory
+    if not csv_file:
+        if GLOBAL_OUTPUT_DIR:
+            csv_file = str(GLOBAL_OUTPUT_DIR / "policy-export" / "segmented_spark_uids.csv")
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+            
+            if toolkit_dirs:
+                # Sort by creation time and use the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                csv_file = str(latest_toolkit_dir / "policy-export" / "segmented_spark_uids.csv")
+            else:
+                csv_file = "policy-export/segmented_spark_uids.csv"  # Fallback
+    
+    # Generate default output file if not provided - use policy-import category
     if not output_file:
-        output_file = get_output_file_path(csv_file, f"{Path(csv_file).stem}_segments_output.csv", category="asset-export")
+        output_file = get_output_file_path(csv_file, "segments_output.csv", category="policy-import")
     
     return csv_file, output_file, quiet_mode
 
@@ -593,6 +635,19 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
         quiet_mode: Whether to suppress console output
     """
     try:
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {csv_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'policy-xfr' first to generate the segmented_spark_uids.csv file")
+            if GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {GLOBAL_OUTPUT_DIR}/policy-export/segmented_spark_uids.csv")
+            else:
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/policy-export/segmented_spark_uids.csv")
+            logger.error(error_msg)
+            return
+        
         # Read source-env and target-env mappings from CSV file
         env_mappings = read_csv_uids(csv_file, logger)
         
@@ -600,9 +655,9 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
             logger.warning("No environment mappings found in CSV file")
             return
         
-        # Generate default output file if not provided
+        # Generate default output file if not provided - use policy-import category
         if not output_file:
-            output_file = get_output_file_path(csv_file, f"{Path(csv_file).stem}_segments_output.csv", category="asset-export")
+            output_file = get_output_file_path(csv_file, "segments_output.csv", category="policy-import")
         
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} environment mappings from CSV file: {csv_file}")
@@ -821,6 +876,60 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
         logger.error(error_msg)
 
 
+def cleanup_command_history():
+    """Clean up command history to prevent cursor position issues."""
+    try:
+        # Clear the current line buffer to reset cursor position
+        readline.clear_history()
+        
+        # Reload history from file and filter out exit commands
+        history_file = os.path.expanduser("~/.adoc_migration_toolkit_history")
+        if os.path.exists(history_file):
+            # Read history and filter out exit commands
+            with open(history_file, 'r') as f:
+                lines = f.readlines()
+            
+            # Filter out exit commands, history, help commands and empty lines
+            filtered_lines = []
+            for line in lines:
+                line = line.strip()
+                if line and line.lower() not in ['exit', 'quit', 'q', 'history', 'help']:
+                    filtered_lines.append(line)
+            
+            # Write back filtered history
+            with open(history_file, 'w') as f:
+                for line in filtered_lines:
+                    f.write(line + '\n')
+            
+            # Reload the cleaned history
+            readline.read_history_file(history_file)
+            
+    except Exception:
+        # If cleanup fails, just continue
+        pass
+
+
+def get_user_input(prompt: str) -> str:
+    """Get user input with improved cursor handling."""
+    try:
+        # Clear any pending input
+        import sys
+        if hasattr(sys.stdin, 'flush'):
+            sys.stdin.flush()
+        
+        # Get input with proper prompt
+        command = input(prompt).strip()
+        
+        # Clean up any trailing whitespace that might cause issues
+        return command
+    except (EOFError, KeyboardInterrupt):
+        raise
+    except Exception as e:
+        # If there's an issue with input, try to recover
+        print(f"\nInput error: {e}")
+        return ""
+
+
 def setup_autocomplete():
     """Setup autocomplete for the interactive session."""
     import glob
@@ -834,12 +943,15 @@ def setup_autocomplete():
         'asset-list-export',
         'policy-list-export',
         'policy-export',
+        'policy-import',
+        'policy-xfr',
         'set-output-dir',
         'guided-migration',
         'resume-migration',
         'delete-migration',
         'list-migrations',
         'help',
+        'history',
         'exit',
         'quit',
         'q'
@@ -850,14 +962,19 @@ def setup_autocomplete():
         '--quiet',
         '--output-file',
         '--dry-run',
-        '--verbose'
+        '--verbose',
+        '--input',
+        '--output-dir',
+        '--source-env-string',
+        '--target-env-string',
+        '--batch-size'
     ]
 
     # Commands that expect a file or directory path as the next argument
     path_arg_commands = [
         'segments-export', 'segments-import',
         'asset-profile-export', 'asset-profile-import',
-        'asset-config-export', 'set-output-dir',
+        'asset-config-export', 'policy-import', 'set-output-dir',
         'guided-migration', 'resume-migration', 'delete-migration'
     ]
 
@@ -982,7 +1099,58 @@ def setup_autocomplete():
                     options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose']]
             elif cmd == 'policy-export' and len(words) >= 2:
                 if text.startswith('--'):
-                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose', '--batch-size']]
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose', '--batch-size', '--type', '--filter']]
+                elif words[-2] == '--type' and len(words) >= 3:
+                    # After --type, suggest export types
+                    export_types = ['rule-types', 'engine-types', 'assemblies', 'source-types']
+                    options = [et for et in export_types if et.startswith(text)]
+                elif words[-2] == '--filter' and len(words) >= 3:
+                    # After --filter, suggest common filter values based on the export type
+                    # This is a basic suggestion - actual values would depend on the data
+                    if any('--type' in word for word in words):
+                        # Find the export type to suggest relevant filters
+                        type_index = words.index('--type')
+                        if type_index + 1 < len(words):
+                            export_type = words[type_index + 1]
+                            if export_type == 'rule-types':
+                                options = ['data-quality', 'data-governance', 'data-observability']
+                            elif export_type == 'engine-types':
+                                options = ['SPARK', 'JDBC_URL', 'PYTHON']
+                            elif export_type == 'assemblies':
+                                options = ['production-db', 'staging-db', 'dev-db', 'test-db']
+                            elif export_type == 'source-types':
+                                options = ['PostgreSQL', 'MySQL', 'Oracle', 'SQL Server']
+                            else:
+                                options = []
+                            options = [opt for opt in options if opt.lower().startswith(text.lower())]
+                        else:
+                            options = []
+                    else:
+                        options = []
+            elif cmd == 'policy-import' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose']]
+            elif cmd == 'policy-xfr' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose', '--input', '--output-dir', '--source-env-string', '--target-env-string']]
+            elif cmd == 'asset-profile-export' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose', '--output-file']]
+                elif len(words) == 2 and not words[1].startswith('--'):
+                    # First argument (optional CSV file)
+                    options = complete_path(text)
+            elif cmd == 'asset-profile-import' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose', '--dry-run']]
+                elif len(words) == 2 and not words[1].startswith('--'):
+                    # First argument (optional CSV file)
+                    options = complete_path(text)
+            elif cmd == 'segments-export' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--output-file']]
+                elif len(words) == 2 and not words[1].startswith('--'):
+                    # First argument (optional CSV file)
+                    options = complete_path(text)
             elif words[-2] == '--output-file' and len(words) >= 3:
                 # After --output-file, suggest output file names
                 options = complete_path(text)
@@ -1026,18 +1194,21 @@ def run_interactive(args):
         
         # Display current output directory status
         print("\n" + "="*80)
-        print("ADOC INTERACTIVE MIGRATION TOOLKIT")
+        print("\033[1m\033[36mADOC INTERACTIVE MIGRATION TOOLKIT\033[0m")
         print("="*80)
         if GLOBAL_OUTPUT_DIR:
             print(f"📁 Output Directory: {GLOBAL_OUTPUT_DIR}")
-            print(f"💾 Configuration: Loaded from ~/.adoc_migration_config.json")
+            print(f"📁 Current Directory: {os.getcwd()}")
+            print(f"📋 Config File: {args.env_file}")
+            print(f"🌍 Source Environment: {client.host}")
+            print(f"🌍 Source Tenant: {client.tenant}")
         else:
             print(f"📁 Output Directory: Not set (will use default timestamped directories)")
             print(f"💡 Use 'set-output-dir <directory>' to set a persistent output directory")
         print("="*80)
         
         # Setup command history
-        history_file = os.path.expanduser("~/.adoc_history")
+        history_file = os.path.expanduser("~/.adoc_migration_toolkit_history")
         try:
             readline.read_history_file(history_file)
         except FileNotFoundError:
@@ -1046,24 +1217,88 @@ def run_interactive(args):
         # Set history file for future sessions
         readline.set_history_length(1000)  # Keep last 1000 commands
         
+        # Configure readline for better cursor handling
+        try:
+            # Set input mode for better cursor behavior
+            readline.parse_and_bind('set input-meta on')
+            readline.parse_and_bind('set output-meta on')
+            readline.parse_and_bind('set convert-meta off')
+            readline.parse_and_bind('set horizontal-scroll-mode on')
+            readline.parse_and_bind('set completion-query-items 0')
+            readline.parse_and_bind('set page-completions off')
+            readline.parse_and_bind('set skip-completed-text on')
+            readline.parse_and_bind('set completion-ignore-case on')
+            readline.parse_and_bind('set show-all-if-ambiguous on')
+            readline.parse_and_bind('set show-all-if-unmodified on')
+        except Exception as e:
+            logger.warning(f"Could not configure readline settings: {e}")
+        
         # Setup autocomplete
         setup_autocomplete()
         
+        # Clean up command history to prevent cursor issues
+        cleanup_command_history()
+        
         while True:
             try:
-                # Get user input
-                command = input("\n\033[1m\033[36mADOC\033[0m > ").strip()
+                # Get user input with improved handling
+                command = get_user_input("\n\033[1m\033[36mADOC\033[0m > ")
                 
                 if not command:
                     continue
                 
+                # Don't add exit commands to history
                 if command.lower() in ['exit', 'quit', 'q']:
                     print("Goodbye!")
                     break
                 
+                # Check if it's a command number from history (before adding to history)
+                if command.isdigit():
+                    history_command = get_command_from_history(int(command))
+                    if history_command:
+                        print(f"Executing: {history_command}")
+                        # Set the command to the history command and continue processing
+                        command = history_command
+                        # Don't add this to history since it's already there
+                        skip_history_add = True
+                    else:
+                        print(f"❌ No command found with number {command}")
+                        continue
+                else:
+                    skip_history_add = False
+                
+                # List of valid commands (including aliases)
+                valid_commands = [
+                    'segments-export', 'segments-import',
+                    'asset-profile-export', 'asset-profile-import',
+                    'asset-config-export', 'asset-list-export',
+                    'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr',
+                    'set-output-dir', 'guided-migration', 'resume-migration',
+                    'delete-migration', 'list-migrations',
+                    # Utility commands (will be filtered anyway)
+                    'help', 'history', 'exit', 'quit', 'q'
+                ]
+                
+                # Add command to history (except exit commands, history command, help command, and commands from history)
+                if (
+                    not skip_history_add
+                    and command.strip()
+                    and command.lower() not in ['exit', 'quit', 'q', 'history', 'help']
+                    and any(command.lower().startswith(cmd) for cmd in valid_commands)
+                ):
+                    try:
+                        readline.add_history(command)
+                    except Exception:
+                        pass  # Ignore history errors
+                
                 # Check if it's a help command
                 if command.lower() == 'help':
                     show_interactive_help()
+                    continue
+                
+                # Check if it's a history command
+                if command.lower() == 'history':
+                    show_command_history()
                     continue
                 
                 # Check if it's a segments-export command
@@ -1115,8 +1350,22 @@ def run_interactive(args):
                 
                 # Check if it's a policy-export command
                 if command.lower().startswith('policy-export'):
-                    quiet_mode, verbose_mode, batch_size = parse_policy_export_command(command)
-                    execute_policy_export(client, logger, quiet_mode, verbose_mode, batch_size)
+                    quiet_mode, verbose_mode, batch_size, export_type, filter_value = parse_policy_export_command(command)
+                    execute_policy_export(client, logger, quiet_mode, verbose_mode, batch_size, export_type, filter_value)
+                    continue
+                
+                # Check if it's a policy-import command
+                if command.lower().startswith('policy-import'):
+                    file_pattern, quiet_mode, verbose_mode = parse_policy_import_command(command)
+                    if file_pattern:
+                        execute_policy_import(client, logger, file_pattern, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's a policy-xfr command
+                if command.lower().startswith('policy-xfr'):
+                    input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+                    if source_string and target_string:
+                        execute_formatter(input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode, logger)
                     continue
                 
                 # Check if it's a set-output-dir command
@@ -1523,25 +1772,22 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     """Parse an asset-profile-export command string into components.
     
     Args:
-        command: Command string like "asset-profile-export <csv_file> [--output-file <file>] [--quiet] [--verbose]"
+        command: Command string like "asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose]"
         
     Returns:
         Tuple of (csv_file, output_file, quiet_mode, verbose_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-profile-export':
-        return None, None, False, False
+        return None, None, True, False
     
-    if len(parts) < 2:
-        raise ValueError("CSV file path is required for asset-profile-export command")
-    
-    csv_file = parts[1]
+    csv_file = None
     output_file = None
-    quiet_mode = False
+    quiet_mode = True  # Default to quiet mode
     verbose_mode = False
     
     # Check for flags and options
-    i = 2
+    i = 1
     while i < len(parts):
         if parts[i] == '--output-file' and i + 1 < len(parts):
             output_file = parts[i + 1]
@@ -1555,12 +1801,33 @@ def parse_asset_profile_export_command(command: str) -> tuple:
             verbose_mode = True
             quiet_mode = False  # Verbose overrides quiet
             parts.remove('--verbose')
+        elif i == 1 and not parts[i].startswith('--'):
+            # This is the CSV file argument (first non-flag argument)
+            csv_file = parts[i]
+            parts.remove(parts[i])
         else:
             i += 1
     
-    # Generate default output file if not provided
+    # If no CSV file specified, use default from output directory
+    if not csv_file:
+        if GLOBAL_OUTPUT_DIR:
+            csv_file = str(GLOBAL_OUTPUT_DIR / "asset-export" / "asset_uids.csv")
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+            
+            if toolkit_dirs:
+                # Sort by creation time and use the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                csv_file = str(latest_toolkit_dir / "asset-export" / "asset_uids.csv")
+            else:
+                csv_file = "asset-export/asset_uids.csv"  # Fallback
+    
+    # Generate default output file if not provided - use asset-import category
     if not output_file:
-        output_file = get_output_file_path(csv_file, "asset-profiles-export.csv", category="asset-export")
+        output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
     
     return csv_file, output_file, quiet_mode, verbose_mode
 
@@ -1577,6 +1844,19 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         verbose_mode: Whether to enable verbose logging
     """
     try:
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {csv_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'policy-xfr' first to generate the asset_uids.csv file")
+            if GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {GLOBAL_OUTPUT_DIR}/asset-export/asset_uids.csv")
+            else:
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-export/asset_uids.csv")
+            logger.error(error_msg)
+            return
+        
         # Read source-env and target-env mappings from CSV file
         env_mappings = read_csv_uids(csv_file, logger)
         
@@ -1584,9 +1864,9 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
             logger.warning("No environment mappings found in CSV file")
             return
         
-        # Generate default output file if not provided
+        # Generate default output file if not provided - use asset-import category
         if not output_file:
-            output_file = get_output_file_path(csv_file, "asset-profiles-export.csv", category="asset-export")
+            output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
         
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file: {csv_file}")
@@ -1612,14 +1892,16 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
             writer.writerow(['target-env', 'profile_json'])
             
             for i, (source_env, target_env) in enumerate(env_mappings, 1):
-                if not quiet_mode:
+                if verbose_mode:
                     print(f"\n[{i}/{len(env_mappings)}] Processing source-env: {source_env}")
                     print(f"Target-env: {target_env}")
                     print("-" * 60)
+                else:
+                    print(f"Processing [{i}/{len(env_mappings)}] UID: {source_env}")
                 
                 try:
                     # Step 1: Get asset details by source-env (UID)
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"Getting asset details for UID: {source_env}")
                     
                     # Show headers in verbose mode
@@ -1645,7 +1927,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     # Step 2: Extract the asset ID
                     if not asset_response or 'data' not in asset_response:
                         error_msg = f"No 'data' field found in asset response for UID: {source_env}"
-                        if not quiet_mode:
+                        if verbose_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
@@ -1654,7 +1936,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     data_array = asset_response['data']
                     if not data_array or len(data_array) == 0:
                         error_msg = f"Empty 'data' array in asset response for UID: {source_env}"
-                        if not quiet_mode:
+                        if verbose_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
@@ -1663,18 +1945,18 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     first_asset = data_array[0]
                     if 'id' not in first_asset:
                         error_msg = f"No 'id' field found in first asset for UID: {source_env}"
-                        if not quiet_mode:
+                        if verbose_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
                         continue
                     
                     asset_id = first_asset['id']
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"Extracted asset ID: {asset_id}")
                     
                     # Step 3: Get profile configuration for the asset
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"Getting profile configuration for asset ID: {asset_id}")
                     
                     # Show headers in verbose mode
@@ -1701,19 +1983,20 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     profile_json = json.dumps(profile_response, ensure_ascii=False)
                     writer.writerow([target_env, profile_json])
                     
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"✅ Written to file: {target_env}")
-                        if not verbose_mode:  # Only show response if not in verbose mode (to avoid duplication)
-                            print("Profile Response:")
-                            print(json.dumps(profile_response, indent=2, ensure_ascii=False))
+                    else:
+                        print(f"✅ [{i}/{len(env_mappings)}] {source_env}: Profile exported successfully")
                     
                     successful += 1
                     total_assets_processed += 1
                     
                 except Exception as e:
                     error_msg = f"Failed to process source-env {source_env}: {e}"
-                    if not quiet_mode:
+                    if verbose_mode:
                         print(f"❌ {error_msg}")
+                    else:
+                        print(f"❌ [{i}/{len(env_mappings)}] {source_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
         
@@ -1801,7 +2084,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
             logger.error(error_msg)
         
         # Print summary
-        if not quiet_mode:
+        if verbose_mode:
             print("\n" + "="*80)
             print("ASSET PROFILE EXPORT COMPLETED")
             print("="*80)
@@ -1826,7 +2109,7 @@ def parse_asset_profile_import_command(command: str) -> tuple:
     """Parse an asset-profile-import command string into components.
     
     Args:
-        command: Command string like "asset-profile-import <csv_file> [--dry-run] [--quiet] [--verbose]"
+        command: Command string like "asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose]"
         
     Returns:
         Tuple of (csv_file, dry_run, quiet_mode, verbose_mode)
@@ -1835,28 +2118,48 @@ def parse_asset_profile_import_command(command: str) -> tuple:
     if not parts or parts[0].lower() != 'asset-profile-import':
         return None, False, True, False
     
-    if len(parts) < 2:
-        raise ValueError("CSV file path is required for asset-profile-import command")
-    
-    csv_file = parts[1]
+    csv_file = None
     dry_run = False
     quiet_mode = True  # Default to quiet mode
     verbose_mode = False
     
-    # Check for flags
-    if '--dry-run' in parts:
-        dry_run = True
-        parts.remove('--dry-run')
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--dry-run':
+            dry_run = True
+            parts.remove('--dry-run')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif i == 1 and not parts[i].startswith('--'):
+            # This is the CSV file argument (first non-flag argument)
+            csv_file = parts[i]
+            parts.remove(parts[i])
+        else:
+            i += 1
     
-    if '--verbose' in parts:
-        verbose_mode = True
-        quiet_mode = False  # Verbose overrides quiet
-        parts.remove('--verbose')
-    
-    if '--quiet' in parts:
-        quiet_mode = True
-        verbose_mode = False  # Quiet overrides verbose
-        parts.remove('--quiet')
+    # If no CSV file specified, use default from output directory
+    if not csv_file:
+        if GLOBAL_OUTPUT_DIR:
+            csv_file = str(GLOBAL_OUTPUT_DIR / "asset-import" / "asset-profiles-import-ready.csv")
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+            
+            if toolkit_dirs:
+                # Sort by creation time and use the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                csv_file = str(latest_toolkit_dir / "asset-import" / "asset-profiles-import-ready.csv")
+            else:
+                csv_file = "asset-import/asset-profiles-import-ready.csv"  # Fallback
     
     return csv_file, dry_run, quiet_mode, verbose_mode
 
@@ -1873,10 +2176,16 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
         verbose_mode: Whether to enable verbose logging
     """
     try:
-        # Read target-env and profile_json from CSV file
-        if not Path(csv_file).exists():
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
             error_msg = f"CSV file does not exist: {csv_file}"
             print(f"❌ {error_msg}")
+            print(f"💡 Please run 'asset-profile-export' first to generate the asset-profiles-import-ready.csv file")
+            if GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {GLOBAL_OUTPUT_DIR}/asset-import/asset-profiles-import-ready.csv")
+            else:
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-profiles-import-ready.csv")
             logger.error(error_msg)
             return
         
@@ -2567,21 +2876,40 @@ def show_interactive_help():
     BOLD = '\033[1m'
     RESET = '\033[0m'
     
+    # Get current output directory for dynamic paths
+    current_output_dir = GLOBAL_OUTPUT_DIR
+    if current_output_dir:
+        output_prefix = str(current_output_dir)
+    else:
+        output_prefix = "adoc-migration-toolkit-YYYYMMDDHHMM"
+    
     print("\n" + "="*80)
     print("ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP")
     print("="*80)
     
+    # Show current output directory status
+    if current_output_dir:
+        print(f"\n📁 Current Output Directory: {current_output_dir}")
+    else:
+        print(f"\n📁 Current Output Directory: Not set (will use default: {output_prefix})")
+    print("💡 Use 'set-output-dir <directory>' to change the output directory")
+    print("="*80)
+    
     print(f"\n{BOLD}📊 SEGMENTS COMMANDS:{RESET}")
-    print(f"  {BOLD}segments-export{RESET} <csv_file> [--output-file <file>] [--quiet]")
+    print(f"  {BOLD}segments-export{RESET} [<csv_file>] [--output-file <file>] [--quiet]")
     print("    Description: Export segments from source environment to CSV file")
     print("    Arguments:")
-    print("      csv_file: Path to CSV file with source-env and target-env mappings")
+    print("      csv_file: Path to CSV file with source-env and target-env mappings (optional)")
     print("      --output-file: Specify custom output file (optional)")
     print("      --quiet: Suppress console output, show only summary")
     print("    Examples:")
-    print("      segments-export data/samples_import_ready/segmented_spark_uids.csv")
+    print("      segments-export")
+    print(f"      segments-export {output_prefix}/policy-export/segmented_spark_uids.csv")
     print("      segments-export data/uids.csv --output-file my_segments.csv --quiet")
     print("    Behavior:")
+    print("      • If no CSV file specified, uses default from output directory")
+    print(f"      • Default input: {output_prefix}/policy-export/segmented_spark_uids.csv")
+    print(f"      • Default output: {output_prefix}/policy-import/segments_output.csv")
     print("      • Exports segments configuration for assets with isSegmented=true")
     print("      • For engineType=SPARK: Required because segmented Spark configurations")
     print("        are not directly imported with standard import capability")
@@ -2598,7 +2926,7 @@ def show_interactive_help():
     print("      --quiet: Suppress console output (default)")
     print("      --verbose: Show detailed output including headers")
     print("    Examples:")
-    print("      segments-import data/samples_import_ready/segments_output.csv")
+    print(f"      segments-import {output_prefix}/policy-import/segments_output.csv")
     print("      segments-import segments.csv --dry-run --verbose")
     print("    Behavior:")
     print("      • Reads the CSV file generated from segments-export command")
@@ -2610,27 +2938,43 @@ def show_interactive_help():
     print("      • Processes only assets that have valid segments configuration")
     
     print(f"\n{BOLD}🔧 ASSET PROFILE COMMANDS:{RESET}")
-    print(f"  {BOLD}asset-profile-export{RESET} <csv_file> [--output-file <file>] [--quiet] [--verbose]")
+    print(f"  {BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose]")
     print("    Description: Export asset profiles from source environment to CSV file")
     print("    Arguments:")
-    print("      csv_file: Path to CSV file with source-env and target-env mappings")
+    print("      csv_file: Path to CSV file with source-env and target-env mappings (optional)")
     print("      --output-file: Specify custom output file (optional)")
-    print("      --quiet: Suppress console output, show only summary")
+    print("      --quiet: Suppress console output, show only summary (default)")
     print("      --verbose: Show detailed output including headers and responses")
     print("    Examples:")
-    print("      asset-profile-export data/samples_import_ready/asset_uids.csv")
+    print("      asset-profile-export")
+    print(f"      asset-profile-export {output_prefix}/asset-export/asset_uids.csv")
     print("      asset-profile-export uids.csv --output-file profiles.csv --verbose")
+    print("    Behavior:")
+    print("      • If no CSV file specified, uses default from output directory")
+    print(f"      • Default input: {output_prefix}/asset-export/asset_uids.csv")
+    print(f"      • Default output: {output_prefix}/asset-import/asset-profiles-import-ready.csv")
+    print("      • Reads source-env and target-env mappings from CSV file")
+    print("      • Makes API calls to get asset profiles from source environment")
+    print("      • Writes profile JSON data to output CSV file")
+    print("      • Shows minimal output by default, use --verbose for detailed information")
     
-    print(f"\n  {BOLD}asset-profile-import{RESET} <csv_file> [--dry-run] [--quiet] [--verbose]")
+    print(f"\n  {BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose]")
     print("    Description: Import asset profiles to target environment from CSV file")
     print("    Arguments:")
-    print("      csv_file: Path to CSV file with target-env and profile_json")
+    print("      csv_file: Path to CSV file with target-env and profile_json (optional)")
     print("      --dry-run: Preview changes without making API calls")
     print("      --quiet: Suppress console output (default)")
     print("      --verbose: Show detailed output including headers and responses")
     print("    Examples:")
-    print("      asset-profile-import data/samples_import_ready/asset-profiles-export.csv")
+    print("      asset-profile-import")
+    print(f"      asset-profile-import {output_prefix}/asset-import/asset-profiles-import-ready.csv")
     print("      asset-profile-import profiles.csv --dry-run --verbose")
+    print("    Behavior:")
+    print("      • If no CSV file specified, uses default from output directory")
+    print(f"      • Default input: {output_prefix}/asset-import/asset-profiles-import-ready.csv")
+    print("      • Reads target-env and profile_json from CSV file")
+    print("      • Makes API calls to update asset profiles in target environment")
+    print("      • Supports dry-run mode for previewing changes")
     
     print(f"\n{BOLD}🔍 ASSET CONFIGURATION COMMANDS:{RESET}")
     print(f"  {BOLD}asset-config-export{RESET} <csv_file> [--output-file <file>] [--quiet] [--verbose]")
@@ -2641,7 +2985,7 @@ def show_interactive_help():
     print("      --quiet: Suppress console output, show only summary (default)")
     print("      --verbose: Show detailed output including headers and responses")
     print("    Examples:")
-    print("      asset-config-export data/samples_import_ready/asset_uids.csv")
+    print(f"      asset-config-export {output_prefix}/asset-export/asset_uids.csv")
     print("      asset-config-export uids.csv --output-file configs.csv --verbose")
     print("    Behavior:")
     print("      • Reads UIDs from the first column of the CSV file")
@@ -2665,7 +3009,7 @@ def show_interactive_help():
     print("      • Uses '/catalog-server/api/assets/discover' endpoint with pagination")
     print("      • First call gets total count with size=0&page=0")
     print("      • Retrieves all pages with size=500 (default)")
-    print("      • Output file: asset-all-export.csv in global output directory")
+    print(f"      • Output file: {output_prefix}/asset-export/asset-all-export.csv")
     print("      • CSV columns: uid, id")
     print("      • Sorts output by uid first, then by id")
     print("      • Shows page-by-page progress in quiet mode")
@@ -2685,35 +3029,90 @@ def show_interactive_help():
     print("      • Uses '/catalog-server/api/rules' endpoint with pagination")
     print("      • First call gets total count with page=0&size=0")
     print("      • Retrieves all pages with size=1000 (default)")
-    print("      • Output file: policies-all-export.csv in global output directory")
+    print(f"      • Output file: {output_prefix}/policy-export/policies-all-export.csv")
     print("      • CSV columns: id, type, engineType")
     print("      • Sorts output by id")
     print("      • Shows page-by-page progress in quiet mode")
     print("      • Shows detailed request/response in verbose mode")
     print("      • Provides comprehensive statistics upon completion")
     
-    print(f"\n  {BOLD}policy-export{RESET} [--quiet] [--verbose] [--batch-size <size>]")
-    print("    Description: Export policy definitions by type from source environment to ZIP files")
+    print(f"\n  {BOLD}policy-export{RESET} [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>]")
+    print("    Description: Export policy definitions by different categories from source environment to ZIP files")
     print("    Arguments:")
+    print("      --type: Export type (rule-types, engine-types, assemblies, source-types)")
+    print("      --filter: Optional filter value within the export type")
     print("      --quiet: Suppress console output, show only summary")
     print("      --verbose: Show detailed output including headers and responses")
-    print("      --batch-size: Number of policies to export in each batch (default: 100)")
+    print("      --batch-size: Number of policies to export in each batch (default: 50)")
     print("    Examples:")
     print("      policy-export")
-    print("      policy-export --quiet")
-    print("      policy-export --verbose")
-    print("      policy-export --batch-size 50")
-    print("      policy-export --batch-size 200 --quiet")
+    print("      policy-export --type rule-types")
+    print("      policy-export --type engine-types --filter JDBC_URL")
+    print("      policy-export --type assemblies --filter production-db")
+    print("      policy-export --type source-types --filter PostgreSQL")
+    print("      policy-export --type rule-types --batch-size 100 --quiet")
     print("    Behavior:")
-    print("      • Reads policies from policies-all-export.csv (generated by policy-list-export)")
-    print("      • Groups policies by type (data-quality, data-governance, etc.)")
-    print("      • Exports each type in batches using '/catalog-server/api/rules/export/policy-definitions'")
-    print("      • Output files: <type>-<timestamp>-<range>.zip in global output directory")
-    print("      • Default batch size: 100 policies per ZIP file")
-    print("      • Filename format: data-quality-07-04-2025-17-21-0-99.zip")
+    print(f"      • Reads policies from {output_prefix}/policy-export/policies-all-export.csv (generated by policy-list-export)")
+    print("      • Groups policies by the specified export type")
+    print("      • Optionally filters to a specific value within that type")
+    print("      • Exports each group in batches using '/catalog-server/api/rules/export/policy-definitions'")
+    print(f"      • Output files: <export_type>[-<filter>]-<timestamp>-<range>.zip in {output_prefix}/policy-export")
+    print("      • Default batch size: 50 policies per ZIP file")
+    print("      • Filename examples:")
+    print("        - rule_types-07-04-2025-17-21-0-99.zip")
+    print("        - engine_types_jdbc_url-07-04-2025-17-21-0-99.zip")
+    print("        - assemblies_production_db-07-04-2025-17-21-0-99.zip")
     print("      • Shows batch-by-batch progress in quiet mode")
     print("      • Shows detailed request/response in verbose mode")
     print("      • Provides comprehensive statistics upon completion")
+    
+    print(f"\n  {BOLD}policy-import{RESET} <file_or_pattern> [--quiet] [--verbose]")
+    print("    Description: Import policy definitions from ZIP files to target environment")
+    print("    Arguments:")
+    print("      file_or_pattern: ZIP file path or glob pattern (e.g., *.zip)")
+    print("      --quiet: Suppress console output, show only summary")
+    print("      --verbose: Show detailed output including headers and responses")
+    print("    Examples:")
+    print("      policy-import *.zip")
+    print("      policy-import data-quality-*.zip")
+    print("      policy-import /path/to/specific-file.zip")
+    print("      policy-import *.zip --verbose")
+    print("    Behavior:")
+    print("      • Uploads ZIP files to '/catalog-server/api/rules/import/policy-definitions/upload-config'")
+    print("      • Uses target environment authentication (target access key, secret key, and tenant)")
+    print("      • By default, looks for files in output-dir/policy-import directory")
+    print("      • Supports absolute paths to override default directory")
+    print("      • Supports glob patterns for multiple files")
+    print("      • Validates that files exist and are readable")
+    print("      • Aggregates statistics across all imported files")
+    print("      • Shows detailed import results and conflicts")
+    print("      • Provides comprehensive summary with aggregated statistics")
+    print("      • Tracks UUIDs of imported policy definitions")
+    print("      • Reports conflicts (assemblies, policies, SQL views, visual views)")
+    
+    print(f"\n  {BOLD}policy-xfr{RESET} [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
+    print("    Description: Format policy export files by replacing substrings in JSON files and ZIP archives")
+    print("    Arguments:")
+    print("      --source-env-string: Substring to search for (source environment) [REQUIRED]")
+    print("      --target-env-string: Substring to replace with (target environment) [REQUIRED]")
+    print("    Options:")
+    print("      --input: Input directory (auto-detected from policy-export if not specified)")
+    print("      --output-dir: Output directory (defaults to organized subdirectories)")
+    print("      --quiet: Suppress console output, show only summary")
+    print("      --verbose: Show detailed output including processing details")
+    print("    Examples:")
+    print("      policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\"")
+    print("      policy-xfr --input data/samples --source-env-string \"old\" --target-env-string \"new\"")
+    print("      policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\" --verbose")
+    print("    Behavior:")
+    print("      • Processes JSON files and ZIP archives in the input directory")
+    print("      • Replaces all occurrences of source string with target string")
+    print("      • Maintains file structure and count")
+    print(f"      • Auto-detects input directory from {output_prefix}/policy-export if not specified")
+    print("      • Creates organized output directory structure")
+    print("      • Extracts data quality policy assets to CSV files")
+    print(f"      • Generates {output_prefix}/asset-export/asset_uids.csv and {output_prefix}/policy-import/segmented_spark_uids.csv")
+    print("      • Shows detailed processing statistics upon completion")
     
     print(f"\n{BOLD}🛠️ UTILITY COMMANDS:{RESET}")
     print(f"  {BOLD}set-output-dir{RESET} <directory>")
@@ -2780,6 +3179,16 @@ def show_interactive_help():
     print("    Description: Show this help information")
     print("    Example: help")
     
+    print(f"\n  {BOLD}history{RESET}")
+    print("    Description: Show the last 25 commands with numbers")
+    print("    Example: history")
+    print("    Features:")
+    print("      • Displays the last 25 commands with numbered entries")
+    print("      • Latest commands appear first (highest numbers)")
+    print("      • Long commands are truncated for display")
+    print("      • Enter a number to execute that command")
+    print("      • Works alongside ↑/↓ arrow key navigation")
+    
     print(f"\n  {BOLD}exit, quit, q{RESET}")
     print("    Description: Exit the interactive client")
     print("    Examples: exit, quit, q")
@@ -2793,6 +3202,7 @@ def show_interactive_help():
     print("  • asset-list-export: Always exports from source environment")
     print("  • policy-list-export: Always exports from source environment")
     print("  • policy-export: Always exports from source environment")
+    print("  • policy-import: Always imports to target environment")
     print(f"\n{BOLD}💡 TIPS:{RESET}")
     print("  • Use TAB key for command autocomplete")
     print("  • Use ↑/↓ arrow keys to navigate command history")
@@ -2803,9 +3213,15 @@ def show_interactive_help():
     print("  • Set output directory once with set-output-dir to avoid specifying --output-file repeatedly")
     
     print(f"\n{BOLD}📁 FILE LOCATIONS:{RESET}")
-    print("  • Input CSV files: data/samples_import_ready/")
-    print("  • Output CSV files: *_import_ready/ directories (or custom output directory)")
-    print("  • Log files: adoc-migration-toolkit-YYYYMMDD.log")
+    if current_output_dir:
+        print(f"  • Input CSV files: {output_prefix}/asset-export/ and {output_prefix}/policy-import/")
+        print(f"  • Output CSV files: {output_prefix}/ (organized by category)")
+        print("  • Log files: adoc-migration-toolkit-YYYYMMDD.log")
+    else:
+        print(f"  • Input CSV files: {output_prefix}/asset-export/ and {output_prefix}/policy-import/")
+        print(f"  • Output CSV files: {output_prefix}/ (organized by category)")
+        print("  • Log files: adoc-migration-toolkit-YYYYMMDD.log")
+        print("  • 💡 Use 'set-output-dir <directory>' to set a persistent output directory")
     
     print("="*80)
 
@@ -3728,8 +4144,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         if not quiet_mode:
             print(f"\nExporting all policies from ADOC environment")
             print(f"Output will be written to: {output_file}")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
@@ -3835,9 +4250,126 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 logger.error(error_msg)
                 failed_pages += 1
         
-        # Step 3: Write policies to CSV file
+        # Step 3: Process each policy to get asset details
         if not quiet_mode:
-            print(f"\nWriting {len(all_policies)} policies to CSV file...")
+            print(f"\nProcessing {len(all_policies)} policies to extract asset information...")
+        
+        processed_policies = []
+        total_asset_calls = 0
+        successful_asset_calls = 0
+        failed_asset_calls = 0
+        failed_rules = []  # Track rules that failed to retrieve assemblies
+        
+        for i, policy in enumerate(all_policies, 1):
+            if not quiet_mode:
+                # Calculate percentage
+                percentage = (i / len(all_policies)) * 100
+                
+                # Create progress bar (50 characters wide)
+                bar_width = 50
+                filled_width = int(bar_width * i / len(all_policies))
+                bar = '\033[34m' + '█' * filled_width + '\033[0m' + '░' * (bar_width - filled_width)
+                
+                # Clear line and show progress
+                print(f"\rProcessing: [{bar}] {i}/{len(all_policies)} ({percentage:.1f}%)", end='', flush=True)
+            
+            # Extract tableAssetIds from backingAssets for this policy
+            table_asset_ids = []
+            backing_assets = policy.get('backingAssets', [])
+            for asset in backing_assets:
+                table_asset_id = asset.get('tableAssetId')
+                if table_asset_id:
+                    table_asset_ids.append(table_asset_id)
+            
+            # Get asset details for this policy's tableAssetIds
+            asset_details = {}
+            assembly_details = {}
+            
+            if table_asset_ids:
+                # Convert to comma-separated string for this policy
+                table_asset_ids_str = ','.join(map(str, table_asset_ids))
+                total_asset_calls += 1
+                
+                if verbose_mode:
+                    print(f"\nGET Request Headers:")
+                    print(f"  Endpoint: /catalog-server/api/assets/search?ids={table_asset_ids_str}")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(client, 'tenant') and client.tenant:
+                        print(f"  X-Tenant: {client.tenant}")
+                
+                try:
+                    assets_response = client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets/search?ids={table_asset_ids_str}",
+                        method='GET'
+                    )
+                    
+                    if verbose_mode:
+                        print("\nAssets Response:")
+                        print(json.dumps(assets_response, indent=2, ensure_ascii=False))
+                    
+                    # Extract asset details for this policy
+                    if assets_response and 'assets' in assets_response:
+                        for asset in assets_response['assets']:
+                            asset_id = asset.get('id')
+                            if asset_id:
+                                asset_details[asset_id] = asset
+                    
+                    # Extract assembly details for this policy
+                    if assets_response and 'assemblies' in assets_response:
+                        for assembly in assets_response['assemblies']:
+                            assembly_id = assembly.get('id')
+                            if assembly_id:
+                                assembly_details[assembly_id] = assembly
+                    
+                    successful_asset_calls += 1
+                    if verbose_mode:
+                        print(f"✅ Retrieved details for {len(asset_details)} assets and {len(assembly_details)} assemblies for policy {policy.get('id')}")
+                        
+                except Exception as e:
+                    error_msg = f"Failed to retrieve asset details for policy {policy.get('id')}: {e}"
+                    if verbose_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_asset_calls += 1
+                    
+                    # Track failed rule
+                    failed_rules.append({
+                        'policy_id': policy.get('id', 'unknown'),
+                        'policy_type': policy.get('type', 'unknown'),
+                        'error': str(e),
+                        'table_asset_ids': table_asset_ids
+                    })
+            
+            # Add asset and assembly details to the policy for later processing
+            policy['_asset_details'] = asset_details
+            policy['_assembly_details'] = assembly_details
+            processed_policies.append(policy)
+        
+        # Clear the progress line and show completion
+        if not quiet_mode:
+            print(f"\rProcessing: [\033[34m{'█' * 50}\033[0m] {len(all_policies)}/{len(all_policies)} (100.0%)")
+            print(f"\nAsset API calls completed:")
+            print(f"  Total API calls made: {total_asset_calls}")
+            print(f"  Successful calls: {successful_asset_calls}")
+            print(f"  Failed calls: {failed_asset_calls}")
+            
+            # Show failed rules summary
+            if failed_rules:
+                print(f"\n❌ Failed Rules Summary ({len(failed_rules)} rules):")
+                print("="*80)
+                for failed_rule in failed_rules:
+                    print(f"Policy ID: {failed_rule['policy_id']}")
+                    print(f"Policy Type: {failed_rule['policy_type']}")
+                    print(f"Table Asset IDs: {', '.join(map(str, failed_rule['table_asset_ids']))}")
+                    print(f"Error: {failed_rule['error']}")
+                    print("-" * 40)
+                print("="*80)
+        
+        # Step 4: Write policies to CSV file with additional columns
+        if not quiet_mode:
+            print(f"\nWriting {len(processed_policies)} policies to CSV file...")
         
         # Create output directory if needed
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -3845,18 +4377,61 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
-            # Write header
-            writer.writerow(['id', 'type', 'engineType'])
+            # Write header with additional columns
+            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
             
             # Write policy data
-            for policy in all_policies:
+            for policy in processed_policies:
                 policy_id = policy.get('id', '')
                 policy_type = policy.get('type', '') or ''  # Convert None to empty string
                 engine_type = policy.get('engineType', '') or ''  # Convert None to empty string
                 
-                writer.writerow([policy_id, policy_type, engine_type])
+                # Extract tableAssetIds from backingAssets
+                table_asset_ids = []
+                assembly_ids = set()
+                assembly_names = set()
+                source_types = set()
+                
+                backing_assets = policy.get('backingAssets', [])
+                asset_details = policy.get('_asset_details', {})
+                assembly_details = policy.get('_assembly_details', {})
+                
+                for asset in backing_assets:
+                    table_asset_id = asset.get('tableAssetId')
+                    if table_asset_id:
+                        table_asset_ids.append(str(table_asset_id))
+                        
+                        # Get assembly information from asset details
+                        if table_asset_id in asset_details:
+                            asset_detail = asset_details[table_asset_id]
+                            assembly_id = asset_detail.get('assemblyId')
+                            if assembly_id and assembly_id in assembly_details:
+                                assembly = assembly_details[assembly_id]
+                                assembly_ids.add(str(assembly_id))
+                                assembly_name = assembly.get('name', '')
+                                if assembly_name:
+                                    assembly_names.add(assembly_name)
+                                source_type = assembly.get('sourceType', {}).get('name', '')
+                                if source_type:
+                                    source_types.add(source_type)
+                
+                # Convert sets to comma-separated strings
+                table_asset_ids_str = ','.join(table_asset_ids)
+                assembly_ids_str = ','.join(sorted(assembly_ids))
+                assembly_names_str = ','.join(sorted(assembly_names))
+                source_types_str = ','.join(sorted(source_types))
+                
+                writer.writerow([
+                    policy_id, 
+                    policy_type, 
+                    engine_type, 
+                    table_asset_ids_str,
+                    assembly_ids_str,
+                    assembly_names_str,
+                    source_types_str
+                ])
         
-        # Step 4: Sort the CSV file by id
+        # Step 5: Sort the CSV file by id
         if not quiet_mode:
             print("Sorting CSV file by id...")
         
@@ -3885,39 +4460,124 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
             writer.writerow(header)
             writer.writerows(rows)
         
-        # Step 5: Print statistics
+        # Step 6: Print statistics
         if not quiet_mode:
             print("\n" + "="*80)
             print("POLICY LIST EXPORT COMPLETED")
             print("="*80)
             print(f"Output file: {output_file}")
-            print(f"Total policies exported: {len(all_policies)}")
+            print(f"Total policies exported: {len(processed_policies)}")
             print(f"Successful pages: {successful_pages}")
             print(f"Failed pages: {failed_pages}")
             print(f"Total pages processed: {total_pages}")
+            print(f"Total table assets found: {total_asset_calls}")
+            print(f"Total asset API calls made: {total_asset_calls}")
+            
+            # Calculate total assemblies found
+            total_assemblies = 0
+            for policy in processed_policies:
+                total_assemblies += len(policy.get('_assembly_details', {}))
+            print(f"Total assemblies found: {total_assemblies}")
             
             # Additional statistics
             type_counts = {}
             engine_type_counts = {}
+            assembly_name_counts = {}
+            source_type_counts = {}
             
-            for policy in all_policies:
+            for policy in processed_policies:
                 policy_type = policy.get('type', '') or 'UNKNOWN'
                 engine_type = policy.get('engineType', '') or 'UNKNOWN'
                 
                 type_counts[policy_type] = type_counts.get(policy_type, 0) + 1
                 engine_type_counts[engine_type] = engine_type_counts.get(engine_type, 0) + 1
+                
+                # Extract assembly names and source types from backingAssets
+                backing_assets = policy.get('backingAssets', [])
+                asset_details = policy.get('_asset_details', {})
+                assembly_details = policy.get('_assembly_details', {})
+                
+                for asset in backing_assets:
+                    table_asset_id = asset.get('tableAssetId')
+                    if table_asset_id and table_asset_id in asset_details:
+                        asset_detail = asset_details[table_asset_id]
+                        assembly_id = asset_detail.get('assemblyId')
+                        if assembly_id and assembly_id in assembly_details:
+                            assembly = assembly_details[assembly_id]
+                            assembly_name = assembly.get('name', '')
+                            if assembly_name:
+                                assembly_name_counts[assembly_name] = assembly_name_counts.get(assembly_name, 0) + 1
+                            source_type = assembly.get('sourceType', {}).get('name', '')
+                            if source_type:
+                                source_type_counts[source_type] = source_type_counts.get(source_type, 0) + 1
             
-            print(f"\nPolicy Statistics:")
-            print(f"  Total policies exported: {len(all_policies)}")
-            print(f"  Policy types: {len(type_counts)}")
-            for policy_type, count in sorted(type_counts.items()):
-                print(f"    {policy_type}: {count}")
-            print(f"  Engine types: {len(engine_type_counts)}")
-            for engine_type, count in sorted(engine_type_counts.items()):
-                print(f"    {engine_type}: {count}")
+            print(f"\n📊 DETAILED STATISTICS SUMMARY")
+            print("="*80)
+            print(f"Total policies processed: {len(processed_policies)}")
+            print(f"Total asset API calls: {total_asset_calls}")
+            print(f"Successful asset calls: {successful_asset_calls}")
+            print(f"Failed asset calls: {failed_asset_calls}")
+            print(f"Total assemblies found: {total_assemblies}")
+            
+            # Calculate success rate
+            if total_asset_calls > 0:
+                success_rate = (successful_asset_calls / total_asset_calls) * 100
+                print(f"Asset API success rate: {success_rate:.1f}%")
+            
+            # Rule Type Statistics
+            if type_counts:
+                print(f"\n🔧 RULE TYPES ({len(type_counts)} types):")
+                print("-" * 50)
+                total_rules = len(processed_policies)
+                for rule_type, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (count / total_rules) * 100
+                    print(f"  {rule_type:<20} {count:>5} rules ({percentage:>5.1f}%)")
+            
+            # Engine Type Statistics
+            if engine_type_counts:
+                print(f"\n⚙️  ENGINE TYPES ({len(engine_type_counts)} types):")
+                print("-" * 50)
+                for engine_type, count in sorted(engine_type_counts.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (count / len(processed_policies)) * 100
+                    print(f"  {engine_type:<20} {count:>5} rules ({percentage:>5.1f}%)")
+            
+            # Assembly Statistics
+            if assembly_name_counts:
+                print(f"\n🏗️  ASSEMBLIES ({len(assembly_name_counts)} assemblies):")
+                print("-" * 50)
+                total_assembly_rules = sum(assembly_name_counts.values())
+                for assembly_name, count in sorted(assembly_name_counts.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (count / total_assembly_rules) * 100
+                    print(f"  {assembly_name:<30} {count:>5} rules ({percentage:>5.1f}%)")
+            else:
+                print(f"\n🏗️  ASSEMBLIES: No assemblies found")
+            
+            # Source Type Statistics
+            if source_type_counts:
+                print(f"\n📡 SOURCE TYPES ({len(source_type_counts)} types):")
+                print("-" * 50)
+                total_source_rules = sum(source_type_counts.values())
+                for source_type, count in sorted(source_type_counts.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (count / total_source_rules) * 100
+                    print(f"  {source_type:<20} {count:>5} rules ({percentage:>5.1f}%)")
+            else:
+                print(f"\n📡 SOURCE TYPES: No source types found")
+            
+            # Failed Rules Summary (if any)
+            if failed_rules:
+                print(f"\n❌ FAILED RULES SUMMARY ({len(failed_rules)} rules):")
+                print("="*80)
+                for failed_rule in failed_rules:
+                    print(f"Policy ID: {failed_rule['policy_id']}")
+                    print(f"Policy Type: {failed_rule['policy_type']}")
+                    print(f"Table Asset IDs: {', '.join(map(str, failed_rule['table_asset_ids']))}")
+                    print(f"Error: {failed_rule['error']}")
+                    print("-" * 40)
+                print("="*80)
+            
             print("="*80)
         else:
-            print(f"✅ Policy list export completed: {len(all_policies)} policies exported to {output_file}")
+            print(f"✅ Policy list export completed: {len(processed_policies)} policies exported to {output_file}")
         
     except Exception as e:
         error_msg = f"Error in policy-list-export: {e}"
@@ -3930,23 +4590,35 @@ def parse_policy_export_command(command: str) -> tuple:
     """Parse a policy-export command string into components.
     
     Args:
-        command: Command string like "policy-export [--quiet] [--verbose] [--batch-size <size>]"
+        command: Command string like "policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>]"
         
     Returns:
-        Tuple of (quiet_mode, verbose_mode, batch_size)
+        Tuple of (quiet_mode, verbose_mode, batch_size, export_type, filter_value)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'policy-export':
-        return False, False, 100
+        return False, False, 50, None, None
     
     quiet_mode = False
     verbose_mode = False
-    batch_size = 100  # Default batch size
+    batch_size = 50  # Default batch size
+    export_type = None
+    filter_value = None
     
     # Check for flags and options
     i = 1
     while i < len(parts):
-        if parts[i] == '--batch-size' and i + 1 < len(parts):
+        if parts[i] == '--type' and i + 1 < len(parts):
+            export_type = parts[i + 1].lower()
+            if export_type not in ['rule-types', 'engine-types', 'assemblies', 'source-types']:
+                raise ValueError(f"Invalid export type: {export_type}. Must be one of: rule-types, engine-types, assemblies, source-types")
+            parts.pop(i)  # Remove --type
+            parts.pop(i)  # Remove the type value
+        elif parts[i] == '--filter' and i + 1 < len(parts):
+            filter_value = parts[i + 1]
+            parts.pop(i)  # Remove --filter
+            parts.pop(i)  # Remove the filter value
+        elif parts[i] == '--batch-size' and i + 1 < len(parts):
             try:
                 batch_size = int(parts[i + 1])
                 if batch_size <= 0:
@@ -3966,10 +4638,10 @@ def parse_policy_export_command(command: str) -> tuple:
         else:
             i += 1
     
-    return quiet_mode, verbose_mode, batch_size
+    return quiet_mode, verbose_mode, batch_size, export_type, filter_value
 
 
-def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 100):
+def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None):
     """Execute the policy-export command.
     
     Args:
@@ -3978,6 +4650,8 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
         batch_size: Number of policies to export in each batch
+        export_type: Type of export (rule-types, engine-types, assemblies, source-types)
+        filter_value: Optional filter value within the export type
     """
     try:
         # Determine input and output file paths
@@ -4023,44 +4697,116 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         if not quiet_mode:
             print("Reading policies from CSV file...")
         
-        policies_by_type = {}
+        policies_by_category = {}
         total_policies = 0
         
         with open(input_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             header = next(reader)  # Skip header
             
-            if len(header) != 3 or header[0] != 'id' or header[1] != 'type' or header[2] != 'engineType':
-                error_msg = f"Invalid CSV format. Expected header: ['id', 'type', 'engineType'], got: {header}"
+            # Check if this is the new format with additional columns
+            if len(header) >= 7 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
+                # New format with additional columns
+                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes']
+                if len(header) != len(expected_columns):
+                    error_msg = f"Invalid CSV format. Expected {len(expected_columns)} columns, got {len(header)}"
+                    print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    return
+            elif len(header) == 3 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
+                # Old format - only basic columns
+                error_msg = "CSV file is in old format. Please run 'policy-list-export' first to generate the new format with additional columns."
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            else:
+                error_msg = f"Invalid CSV format. Expected header: ['id', 'type', 'engineType', ...], got: {header}"
                 print(f"❌ {error_msg}")
                 logger.error(error_msg)
                 return
             
             for row_num, row in enumerate(reader, start=2):
-                if len(row) != 3:
-                    logger.warning(f"Row {row_num}: Expected 3 columns, got {len(row)}")
+                if len(row) != len(header):
+                    logger.warning(f"Row {row_num}: Expected {len(header)} columns, got {len(row)}")
                     continue
                 
                 policy_id = row[0].strip()
                 policy_type = row[1].strip()
                 engine_type = row[2].strip()
+                table_asset_ids = row[3].strip()
+                assembly_ids = row[4].strip()
+                assembly_names = row[5].strip()
+                source_types = row[6].strip()
                 
-                if policy_id and policy_type:
-                    if policy_type not in policies_by_type:
-                        policies_by_type[policy_type] = []
-                    policies_by_type[policy_type].append(policy_id)
+                if not policy_id:
+                    logger.warning(f"Row {row_num}: Empty policy ID")
+                    continue
+                
+                # Determine the category based on export_type
+                category = None
+                category_value = None
+                
+                if export_type == 'rule-types':
+                    category = policy_type
+                    category_value = policy_type
+                elif export_type == 'engine-types':
+                    category = engine_type
+                    category_value = engine_type
+                elif export_type == 'assemblies':
+                    if assembly_names:
+                        # Split by comma and use the first assembly name
+                        assembly_name_list = [name.strip() for name in assembly_names.split(',') if name.strip()]
+                        if assembly_name_list:
+                            category = assembly_name_list[0]
+                            category_value = assembly_names
+                elif export_type == 'source-types':
+                    if source_types:
+                        # Split by comma and use the first source type
+                        source_type_list = [stype.strip() for stype in source_types.split(',') if stype.strip()]
+                        if source_type_list:
+                            category = source_type_list[0]
+                            category_value = source_types
+                else:
+                    # Default: group by policy type (original behavior)
+                    category = policy_type
+                    category_value = policy_type
+                
+                # Apply filter if specified
+                if filter_value and category != filter_value:
+                    continue
+                
+                if category:
+                    if category not in policies_by_category:
+                        policies_by_category[category] = []
+                    policies_by_category[category].append(policy_id)
                     total_policies += 1
                 else:
-                    logger.warning(f"Row {row_num}: Empty policy ID or type")
+                    logger.warning(f"Row {row_num}: No valid category found for export type '{export_type}'")
         
-        if not policies_by_type:
-            error_msg = "No valid policies found in CSV file"
+        if not policies_by_category:
+            error_msg = "No valid policies found matching the specified criteria"
             print(f"❌ {error_msg}")
             logger.error(error_msg)
             return
         
+        # Determine output filename based on export type and filter
+        if export_type:
+            base_filename = export_type.replace('-', '_')
+            if filter_value:
+                # Sanitize filter value for filename
+                safe_filter = "".join(c for c in filter_value if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_filter = safe_filter.replace(' ', '_').lower()
+                filename = f"{base_filename}_{safe_filter}"
+            else:
+                filename = base_filename
+        else:
+            filename = "policy_types"
+        
         if not quiet_mode:
-            print(f"Found {total_policies} policies across {len(policies_by_type)} types")
+            export_type_display = export_type if export_type else "policy types"
+            filter_display = f" (filtered by: {filter_value})" if filter_value else ""
+            print(f"Found {total_policies} policies across {len(policies_by_category)} {export_type_display}{filter_display}")
+            print(f"Output filename base: {filename}")
             print("="*80)
         
         # Generate timestamp for all files
@@ -4071,29 +4817,58 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         failed_exports = 0
         export_results = {}
         
-        for policy_type, policy_ids in policies_by_type.items():
+        # Calculate total batches for progress bar
+        total_batches = 0
+        for policy_ids in policies_by_category.values():
+            total_batches += (len(policy_ids) + batch_size - 1) // batch_size
+        
+        current_batch = 0
+        failed_batch_indices = set()
+        
+        # Print initial progress bar and status line
+        if not quiet_mode:
+            print(f"Exporting: [{'░' * 50}] 0/{total_batches} (0.0%)")
+            print(f"Status: Initializing...")
+        
+        batch_idx = 0
+        for policy_type, policy_ids in policies_by_category.items():
             if not quiet_mode:
-                print(f"\nProcessing policy type: {policy_type}")
-                print(f"Number of policies: {len(policy_ids)}")
+                # Update status line for new policy type (but don't reset progress bar)
+                # Calculate current progress
+                percentage = (current_batch / total_batches) * 100
+                bar_width = 50
+                filled_blocks = int((current_batch / total_batches) * bar_width)
+                
+                # Build the current bar state
+                bar = ''
+                for i in range(bar_width):
+                    if i < filled_blocks:
+                        batch_index_for_block = int((i / bar_width) * total_batches)
+                        if batch_index_for_block in failed_batch_indices:
+                            bar += '\033[31m█\033[0m'  # Red for failed
+                        else:
+                            bar += '\033[34m█\033[0m'  # Blue for success
+                    else:
+                        bar += '░'  # Empty block
+                
+                print(f"\033[2F\033[KExporting: [{bar}] {current_batch}/{total_batches} ({percentage:.1f}%)")
+                print(f"\033[KStatus: Processing {policy_type} ({len(policy_ids)} policies)")
             else:
                 print(f"Processing {policy_type}: {len(policy_ids)} policies")
             
-            # Process policies in batches
-            total_batches = (len(policy_ids) + batch_size - 1) // batch_size  # Ceiling division
-            
-            for batch_num in range(total_batches):
+            type_total_batches = (len(policy_ids) + batch_size - 1) // batch_size
+            for batch_num in range(type_total_batches):
                 start_idx = batch_num * batch_size
                 end_idx = min((batch_num + 1) * batch_size, len(policy_ids))
                 batch_ids = policy_ids[start_idx:end_idx]
-                
-                if not quiet_mode:
-                    print(f"  Batch {batch_num + 1}/{total_batches}: IDs {start_idx}-{end_idx-1} ({len(batch_ids)} policies)")
-                else:
-                    print(f"  Batch {batch_num + 1}/{total_batches}: {len(batch_ids)} policies")
+                current_batch += 1
                 
                 # Generate filename with range information
-                filename = f"{policy_type.lower()}-{timestamp}-{start_idx}-{end_idx-1}.zip"
-                output_file = output_dir / filename
+                # Use the actual policy type name (category) for the filename
+                safe_category = "".join(c for c in policy_type if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_category = safe_category.replace(' ', '_').lower()
+                batch_filename = f"{safe_category}-{timestamp}-{start_idx}-{end_idx-1}.zip"
+                output_file = output_dir / batch_filename
                 
                 # Prepare query parameters
                 ids_param = ','.join(batch_ids)
@@ -4101,7 +4876,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                     'ruleStatus': 'ALL',
                     'includeTags': 'true',
                     'ids': ids_param,
-                    'filename': filename
+                    'filename': batch_filename
                 }
                 
                 # Build endpoint with query parameters
@@ -4143,16 +4918,11 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         with open(output_file, 'wb') as f:
                             f.write(response)
                         
-                        if not quiet_mode:
-                            print(f"✅ Exported to: {filename}")
-                        else:
-                            print(f"✅ {filename}")
-                        
                         # Store result for this batch
                         batch_key = f"{policy_type}_batch_{batch_num + 1}"
                         export_results[batch_key] = {
                             'success': True,
-                            'filename': filename,
+                            'filename': batch_filename,
                             'count': len(batch_ids),
                             'file_size': len(response),
                             'range': f"{start_idx}-{end_idx-1}"
@@ -4160,14 +4930,17 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         successful_exports += 1
                     else:
                         error_msg = f"Empty response for {policy_type} batch {batch_num + 1}"
-                        if not quiet_mode:
-                            print(f"❌ {error_msg}")
+                        if verbose_mode:
+                            print(f"\n❌ {error_msg}")
                         logger.error(error_msg)
+                        
+                        # Mark this batch as failed
+                        failed_batch_indices.add(batch_idx)
                         
                         batch_key = f"{policy_type}_batch_{batch_num + 1}"
                         export_results[batch_key] = {
                             'success': False,
-                            'filename': filename,
+                            'filename': batch_filename,
                             'count': len(batch_ids),
                             'error': error_msg,
                             'range': f"{start_idx}-{end_idx-1}"
@@ -4176,60 +4949,116 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         
                 except Exception as e:
                     error_msg = f"Failed to export {policy_type} batch {batch_num + 1}: {e}"
-                    if not quiet_mode:
-                        print(f"❌ {error_msg}")
+                    if verbose_mode:
+                        print(f"\n❌ {error_msg}")
                     logger.error(error_msg)
+                    
+                    # Mark this batch as failed
+                    failed_batch_indices.add(batch_idx)
                     
                     batch_key = f"{policy_type}_batch_{batch_num + 1}"
                     export_results[batch_key] = {
                         'success': False,
-                        'filename': filename,
+                        'filename': batch_filename,
                         'count': len(batch_ids),
                         'error': str(e),
                         'range': f"{start_idx}-{end_idx-1}"
                     }
                     failed_exports += 1
+                
+                # Update progress bar and status in place
+                if not quiet_mode:
+                    percentage = (current_batch / total_batches) * 100
+                    bar_width = 50
+                    
+                    # Calculate how many blocks should be filled based on current progress
+                    filled_blocks = int((current_batch / total_batches) * bar_width)
+                    
+                    # Build the bar with exactly 50 characters
+                    bar = ''
+                    for i in range(bar_width):
+                        if i < filled_blocks:
+                            # This block should be filled - check if it's a failed batch
+                            # Map the block index back to batch index
+                            batch_index_for_block = int((i / bar_width) * total_batches)
+                            if batch_index_for_block in failed_batch_indices:
+                                bar += '\033[31m█\033[0m'  # Red for failed
+                            else:
+                                bar += '\033[34m█\033[0m'  # Blue for success
+                        else:
+                            bar += '░'  # Empty block
+                    
+                    # Move cursor up 2 lines and update both progress bar and status
+                    print(f"\033[2F\033[KExporting: [{bar}] {current_batch}/{total_batches} ({percentage:.1f}%)")
+                    status_msg = f"Status: Processing {policy_type} batch {batch_num + 1}/{type_total_batches} ({len(batch_ids)} policies)"
+                    if response:
+                        status_msg += f" ✅ {batch_filename}"
+                    else:
+                        status_msg += f" ❌ Failed"
+                    print(f"\033[K{status_msg}")
+                else:
+                    print(f"  Batch {batch_num + 1}/{type_total_batches}: {len(batch_ids)} policies")
+                    if response:
+                        print(f"✅ {batch_filename}")
+                    else:
+                        print(f"❌ Failed")
+                
+                batch_idx += 1
+        
+        # Print final progress bar and status
+        if not quiet_mode:
+            bar_width = 50
+            bar = ''
+            for i in range(bar_width):
+                # Map the block index back to batch index
+                batch_index_for_block = int((i / bar_width) * total_batches)
+                if batch_index_for_block in failed_batch_indices:
+                    bar += '\033[31m█\033[0m'  # Red for failed
+                else:
+                    bar += '\033[34m█\033[0m'  # Blue for success
+            
+            print(f"\033[2F\033[KExporting: [{bar}] {total_batches}/{total_batches} (100.0%)")
+            print(f"\033[KStatus: Completed.")
+            print()  # Add a blank line after completion
         
         # Print summary
-        if not quiet_mode:
-            print("\n" + "="*80)
-            print("POLICY EXPORT COMPLETED")
-            print("="*80)
-            print(f"Output directory: {output_dir}")
-            print(f"Timestamp: {timestamp}")
-            print(f"Batch size: {batch_size}")
-            print(f"Total policy types processed: {len(policies_by_type)}")
-            print(f"Successful exports: {successful_exports}")
-            print(f"Failed exports: {failed_exports}")
-            
-            print(f"\nExport Results:")
-            # Group results by policy type for better display
-            results_by_type = {}
-            for batch_key, result in export_results.items():
-                policy_type = batch_key.split('_batch_')[0]
-                if policy_type not in results_by_type:
-                    results_by_type[policy_type] = []
-                results_by_type[policy_type].append(result)
-            
-            for policy_type, batch_results in results_by_type.items():
-                print(f"  {policy_type}:")
-                for result in batch_results:
-                    if result['success']:
-                        print(f"    ✅ Batch {result['range']}: {result['count']} policies -> {result['filename']} ({result['file_size']} bytes)")
-                    else:
-                        print(f"    ❌ Batch {result['range']}: {result['count']} policies -> {result['error']}")
-            
-            print("="*80)
-        else:
-            print(f"\n✅ Policy export completed: {successful_exports} successful, {failed_exports} failed")
-            print(f"Output directory: {output_dir}")
-            print(f"Timestamp: {timestamp}")
-            print(f"Batch size: {batch_size}")
+        print("\n" + "="*80)
+        print("POLICY EXPORT SUMMARY")
+        print("="*80)
+        print(f"Output directory: {output_dir}")
+        print(f"Timestamp: {timestamp}")
+        print(f"Batch size: {batch_size}")
+        print(f"Total policy types processed: {len(policies_by_category)}")
+        print(f"Successful exports: {successful_exports}")
+        print(f"Failed exports: {failed_exports}")
         
+        print(f"\nExport Results:")
+        # Group results by policy type for better display
+        results_by_type = {}
+        for batch_key, result in export_results.items():
+            policy_type = batch_key.split('_batch_')[0]
+            if policy_type not in results_by_type:
+                results_by_type[policy_type] = []
+            results_by_type[policy_type].append(result)
+        
+        for policy_type, batch_results in results_by_type.items():
+            print(f"  {policy_type}:")
+            for result in batch_results:
+                if result['success']:
+                    print(f"    ✅ Batch {result['range']}: {result['count']} policies -> {result['filename']} ({result['file_size']} bytes)")
+                else:
+                    print(f"    ❌ Batch {result['range']}: {result['count']} policies -> {result['error']}")
+        
+        print("="*80)
+        
+        if failed_exports > 0:
+            print("⚠️  Export completed with errors. Check log file for details.")
+        else:
+            print("✅ Export completed successfully!")
+            
     except Exception as e:
-        error_msg = f"Error in policy-export: {e}"
-        if not quiet_mode:
-            print(f"❌ {error_msg}")
+        error_msg = f"Error executing policy export: {e}"
+        print(f"❌ {error_msg}")
         logger.error(error_msg)
 
 
@@ -4277,6 +5106,588 @@ def set_global_output_directory(directory: str, logger: logging.Logger) -> bool:
         print(f"❌ {error_msg}")
         logger.error(error_msg)
         return False
+
+
+def parse_formatter_command(command: str) -> tuple:
+    """Parse policy-xfr command in interactive mode.
+    
+    Args:
+        command (str): The command string
+        
+    Returns:
+        tuple: (input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode)
+    """
+    try:
+        # Remove the command prefix
+        args_str = command[len('policy-xfr'):].strip()
+        
+        # Default values
+        input_dir = None
+        source_string = None
+        target_string = None
+        output_dir = None
+        quiet_mode = False
+        verbose_mode = False
+        
+        # Parse arguments
+        args = args_str.split()
+        i = 0
+        
+        while i < len(args):
+            arg = args[i]
+            
+            if arg == '--input' and i + 1 < len(args):
+                input_dir = args[i + 1]
+                i += 2
+            elif arg == '--output-dir' and i + 1 < len(args):
+                output_dir = args[i + 1]
+                i += 2
+            elif arg == '--source-env-string' and i + 1 < len(args):
+                source_string = args[i + 1]
+                i += 2
+            elif arg == '--target-env-string' and i + 1 < len(args):
+                target_string = args[i + 1]
+                i += 2
+            elif arg == '--quiet' or arg == '-q':
+                quiet_mode = True
+                i += 1
+            elif arg == '--verbose' or arg == '-v':
+                verbose_mode = True
+                i += 1
+            elif arg == '--help' or arg == '-h':
+                print("\n" + "="*60)
+                print("POLICY-XFR COMMAND HELP")
+                print("="*60)
+                print("Usage: policy-xfr [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
+                print("\nArguments:")
+                print("  --source-env-string <string>  Substring to search for (source environment) [REQUIRED]")
+                print("  --target-env-string <string>  Substring to replace with (target environment) [REQUIRED]")
+                print("\nOptions:")
+                print("  --input <dir>                 Input directory (auto-detected from policy-export if not specified)")
+                print("  --output-dir <dir>            Output directory (defaults to organized subdirectories)")
+                print("  --quiet, -q                   Quiet mode (minimal output)")
+                print("  --verbose, -v                 Verbose mode (detailed output)")
+                print("  --help, -h                    Show this help message")
+                print("\nExamples:")
+                print("  policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\"")
+                print("  policy-xfr --input data/samples --source-env-string \"old\" --target-env-string \"new\"")
+                print("  policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\" --verbose")
+                print("="*60)
+                return None, None, None, None, False, False
+            else:
+                # Unknown argument
+                print(f"❌ Unknown argument: {arg}")
+                print("💡 Use 'policy-xfr --help' for usage information")
+                return None, None, None, None, False, False
+        
+        # Validate required arguments
+        if not source_string:
+            print("❌ Missing required argument: --source-env-string")
+            print("💡 Use 'policy-xfr --help' for usage information")
+            return None, None, None, None, False, False
+        
+        if not target_string:
+            print("❌ Missing required argument: --target-env-string")
+            print("💡 Use 'policy-xfr --help' for usage information")
+            return None, None, None, None, False, False
+        
+        return input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode
+        
+    except Exception as e:
+        print(f"❌ Error parsing policy-xfr command: {e}")
+        return None, None, None, None, False, False
+
+
+def execute_formatter(input_dir: str, source_string: str, target_string: str, output_dir: str, 
+                     quiet_mode: bool, verbose_mode: bool, logger: logging.Logger):
+    """Execute formatter command in interactive mode.
+    
+    Args:
+        input_dir (str): Input directory (can be None for auto-detection)
+        source_string (str): Source environment string
+        target_string (str): Target environment string
+        output_dir (str): Output directory (can be None for default)
+        quiet_mode (bool): Quiet mode flag
+        verbose_mode (bool): Verbose mode flag
+        logger (Logger): Logger instance
+    """
+    try:
+        # Create a mock args object for the formatter
+        class MockArgs:
+            def __init__(self):
+                self.input = input_dir
+                self.source_env_string = source_string
+                self.target_env_string = target_string
+                self.output_dir = output_dir
+                self.verbose = verbose_mode
+                self.log_level = "DEBUG" if verbose_mode else "ERROR"
+        
+        args = MockArgs()
+        
+        # Run the formatter
+        result = run_formatter(args)
+        
+        if result == 0:
+            if not quiet_mode:
+                print("✅ Formatter completed successfully!")
+        else:
+            print("❌ Formatter failed!")
+            
+    except Exception as e:
+        print(f"❌ Error executing formatter: {e}")
+        logger.error(f"Error executing formatter: {e}")
+
+
+def show_command_history():
+    """Display the last 25 commands from history with numbers."""
+    try:
+        # Clean current session history first
+        clean_current_session_history()
+        
+        # Get current history length
+        history_length = readline.get_current_history_length()
+        
+        if history_length == 0:
+            print("\n📋 No command history available.")
+            return
+        
+        # Get the last 25 commands (or all if less than 25)
+        start_index = max(0, history_length - 25)
+        commands = []
+        
+        for i in range(start_index, history_length):
+            try:
+                command = readline.get_history_item(i + 1)  # readline uses 1-based indexing
+                if command and command.strip():
+                    commands.append(command.strip())
+            except Exception:
+                continue
+        
+        if not commands:
+            print("\n📋 No command history available.")
+            return
+        
+        print(f"\n📋 Command History (last {len(commands)} commands):")
+        print("="*60)
+        
+        # Display commands with numbers, latest first
+        for i, cmd in enumerate(reversed(commands), 1):
+            # Truncate long commands for display
+            display_cmd = cmd if len(cmd) <= 50 else cmd[:47] + "..."
+            print(f"{i:2d}: {display_cmd}")
+        
+        print("="*60)
+        print("💡 Enter a number to execute that command")
+        print("💡 Use ↑/↓ arrow keys to navigate history")
+        
+    except Exception as e:
+        print(f"❌ Error displaying history: {e}")
+
+
+def clean_current_session_history():
+    """Clean the current session's in-memory history by removing utility commands."""
+    try:
+        # Get current history length
+        history_length = readline.get_current_history_length()
+        
+        if history_length == 0:
+            return
+        
+        # Create a new clean history
+        clean_history = []
+        
+        for i in range(history_length):
+            try:
+                command = readline.get_history_item(i + 1)  # readline uses 1-based indexing
+                if command and command.strip():
+                    # Only keep commands that are not utility commands
+                    if command.strip().lower() not in ['exit', 'quit', 'q', 'history', 'help']:
+                        clean_history.append(command.strip())
+            except Exception:
+                continue
+        
+        # Clear current history and reload clean version
+        readline.clear_history()
+        
+        # Add back only the clean commands
+        for command in clean_history:
+            try:
+                readline.add_history(command)
+            except Exception:
+                continue
+                
+    except Exception:
+        # If cleanup fails, just continue
+        pass
+
+
+def get_command_from_history(command_number: int) -> str:
+    """Get a command from history by its number.
+    
+    Args:
+        command_number: The number of the command in history (1-based, latest first)
+        
+    Returns:
+        str: The command string or None if not found
+    """
+    try:
+        # Get current history length
+        history_length = readline.get_current_history_length()
+        
+        if history_length == 0:
+            return None
+        
+        # Get the last 25 commands (or all if less than 25)
+        start_index = max(0, history_length - 25)
+        commands = []
+        
+        for i in range(start_index, history_length):
+            try:
+                command = readline.get_history_item(i + 1)  # readline uses 1-based indexing
+                if command and command.strip():
+                    commands.append(command.strip())
+            except Exception:
+                continue
+        
+        # Reverse to get latest first, then get the requested command
+        if 1 <= command_number <= len(commands):
+            return commands[-(command_number)]  # Negative indexing to get from end
+        
+        return None
+        
+    except Exception:
+        return None
+
+
+def parse_policy_import_command(command: str) -> tuple:
+    """Parse a policy-import command string into components.
+    
+    Args:
+        command: Command string like "policy-import <file_or_pattern> [--quiet] [--verbose]"
+        
+    Returns:
+        Tuple of (file_pattern, quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'policy-import':
+        return None, False, False
+    
+    if len(parts) < 2:
+        return None, False, False
+    
+    file_pattern = parts[1]
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags
+    for i in range(2, len(parts)):
+        if parts[i] == '--quiet' or parts[i] == '-q':
+            quiet_mode = True
+        elif parts[i] == '--verbose' or parts[i] == '-v':
+            verbose_mode = True
+        elif parts[i] == '--help' or parts[i] == '-h':
+            print("\n" + "="*60)
+            print("POLICY-IMPORT COMMAND HELP")
+            print("="*60)
+            print("Usage: policy-import <file_or_pattern> [options]")
+            print("\nArguments:")
+            print("  <file_or_pattern>  ZIP file path or glob pattern (e.g., *.zip)")
+            print("\nOptions:")
+            print("  --quiet, -q        Quiet mode (minimal output)")
+            print("  --verbose, -v      Verbose mode (detailed output)")
+            print("  --help, -h         Show this help message")
+            print("\nExamples:")
+            print("  policy-import *.zip")
+            print("  policy-import data-quality-*.zip")
+            print("  policy-import /path/to/specific-file.zip")
+            print("  policy-import *.zip --verbose")
+            print("\nFeatures:")
+            print("  - Uploads ZIP files to policy import API")
+            print("  - Uses target environment authentication (target access key, secret key, and tenant)")
+            print("  - By default, looks for files in output-dir/policy-import directory")
+            print("  - Supports absolute paths to override default directory")
+            print("  - Supports glob patterns for multiple files")
+            print("  - Validates that files exist and are readable")
+            print("  - Aggregates statistics across all files")
+            print("  - Shows detailed import results")
+            print("="*60)
+            return None, False, False
+    
+    return file_pattern, quiet_mode, verbose_mode
+
+
+def execute_policy_import(client, logger: logging.Logger, file_pattern: str, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the policy-import command.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        file_pattern: File path or glob pattern for ZIP files
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        from glob import glob
+        import json
+        
+        if not quiet_mode:
+            print(f"\nImporting policy definitions from ZIP files")
+            print(f"File pattern: {file_pattern}")
+            print("="*80)
+            
+            # Show target environment information
+            print(f"\n🌍 TARGET ENVIRONMENT INFORMATION:")
+            print(f"  Host: {client.host}")
+            if hasattr(client, 'target_tenant') and client.target_tenant:
+                print(f"  Target Tenant: {client.target_tenant}")
+            else:
+                print(f"  Source Tenant: {client.tenant} (will be used as target)")
+            print(f"  Authentication: Target access key and secret key")
+            print("="*80)
+        
+        # Determine the search directory
+        # If file_pattern is an absolute path, use it as is
+        # Otherwise, look in the output-dir/policy-import directory
+        if os.path.isabs(file_pattern):
+            search_pattern = file_pattern
+            search_dir = os.path.dirname(file_pattern) if os.path.dirname(file_pattern) else "."
+        else:
+            # Use the global output directory or default to current directory
+            if GLOBAL_OUTPUT_DIR:
+                search_dir = GLOBAL_OUTPUT_DIR / "policy-import"
+            else:
+                # Fallback to current directory with timestamped subdirectory
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d%H%M")
+                search_dir = Path(f"adoc-migration-toolkit-{timestamp}/policy-import")
+            
+            # Ensure the search directory exists
+            if not search_dir.exists():
+                error_msg = f"Policy import directory does not exist: {search_dir}"
+                print(f"❌ {error_msg}")
+                print(f"💡 Expected location: {search_dir}")
+                print(f"💡 Use 'policy-export' first to generate ZIP files, or specify an absolute path")
+                logger.error(error_msg)
+                return
+            
+            search_pattern = str(search_dir / file_pattern)
+        
+        if not quiet_mode:
+            print(f"📁 Searching for files in: {search_dir}")
+            print(f"🔍 Search pattern: {search_pattern}")
+            print("="*80)
+        
+        # Find all matching ZIP files
+        zip_files = glob(search_pattern)
+        if not zip_files:
+            error_msg = f"No ZIP files found matching pattern: {file_pattern}"
+            print(f"❌ {error_msg}")
+            print(f"📁 Searched in: {search_dir}")
+            print(f"💡 Expected location: {search_dir}")
+            print(f"💡 Use 'policy-export' first to generate ZIP files, or specify an absolute path")
+            logger.error(error_msg)
+            return
+        
+        # Filter to only ZIP files
+        zip_files = [f for f in zip_files if f.lower().endswith('.zip')]
+        if not zip_files:
+            error_msg = f"No ZIP files found matching pattern: {file_pattern}"
+            print(f"❌ {error_msg}")
+            print(f"📁 Searched in: {search_dir}")
+            print(f"💡 Expected location: {search_dir}")
+            print(f"💡 Use 'policy-export' first to generate ZIP files, or specify an absolute path")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"Found {len(zip_files)} ZIP files to import")
+            print("="*80)
+        
+        # Statistics aggregation
+        aggregated_stats = {
+            'conflictingAssemblies': 0,
+            'conflictingPolicies': 0,
+            'conflictingSqlViews': 0,
+            'conflictingVisualViews': 0,
+            'preChecks': 0,
+            'totalAssetUDFVariablesPerAsset': 0,
+            'totalBusinessRules': 0,
+            'totalDataCadencePolicyCount': 0,
+            'totalDataDriftPolicyCount': 0,
+            'totalDataQualityPolicyCount': 0,
+            'totalDataSourceCount': 0,
+            'totalPolicyCount': 0,
+            'totalProfileAnomalyPolicyCount': 0,
+            'totalReconciliationPolicyCount': 0,
+            'totalReferenceAssets': 0,
+            'totalSchemaDriftPolicyCount': 0,
+            'totalUDFPackages': 0,
+            'totalUDFTemplates': 0,
+            'files_processed': 0,
+            'files_failed': 0,
+            'uuids': []
+        }
+        
+        successful_imports = 0
+        failed_imports = 0
+        
+        # Process each ZIP file
+        for i, zip_file in enumerate(zip_files, 1):
+            if not quiet_mode:
+                print(f"Processing file {i}/{len(zip_files)}: {zip_file}")
+            
+            try:
+                # Validate file exists and is readable
+                if not os.path.exists(zip_file):
+                    error_msg = f"File does not exist: {zip_file}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_imports += 1
+                    aggregated_stats['files_failed'] += 1
+                    continue
+                
+                if not os.path.isfile(zip_file):
+                    error_msg = f"Path is not a file: {zip_file}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_imports += 1
+                    aggregated_stats['files_failed'] += 1
+                    continue
+                
+                # Prepare the multipart form data
+                with open(zip_file, 'rb') as f:
+                    files = {'policy-config-file': (os.path.basename(zip_file), f, 'application/zip')}
+                    
+                    if verbose_mode:
+                        print(f"\nPOST Request Headers:")
+                        print(f"  Endpoint: /catalog-server/api/rules/import/policy-definitions/upload-config")
+                        print(f"  Method: POST")
+                        print(f"  Content-Type: multipart/form-data")
+                        print(f"  Accept: application/json")
+                        print(f"  Authorization: Bearer [REDACTED] (Target credentials)")
+                        if hasattr(client, 'target_tenant') and client.target_tenant:
+                            print(f"  X-Tenant: {client.target_tenant} (Target tenant)")
+                        else:
+                            print(f"  X-Tenant: {client.tenant} (Source tenant - will be used as target)")
+                        print(f"  File: {zip_file}")
+                    
+                    # Make API call with target authentication
+                    response = client.make_api_call(
+                        endpoint="/catalog-server/api/rules/import/policy-definitions/upload-config",
+                        method='POST',
+                        files=files,
+                        use_target_auth=True,
+                        use_target_tenant=True
+                    )
+                    
+                    if verbose_mode:
+                        print(f"\nResponse:")
+                        print(f"  Status: Success")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Response size: {len(response) if response else 0} bytes")
+                    
+                    if response:
+                        # Parse JSON response
+                        try:
+                            response_data = json.loads(response)
+                            
+                            # Aggregate statistics
+                            for key in aggregated_stats.keys():
+                                if key in response_data and isinstance(response_data[key], (int, float)):
+                                    if key == 'uuids':
+                                        if isinstance(response_data[key], list):
+                                            aggregated_stats[key].extend(response_data[key])
+                                    else:
+                                        aggregated_stats[key] += response_data[key]
+                            
+                            # Add UUID if present
+                            if 'uuid' in response_data:
+                                aggregated_stats['uuids'].append(response_data['uuid'])
+                            
+                            aggregated_stats['files_processed'] += 1
+                            successful_imports += 1
+                            
+                            if not quiet_mode:
+                                print(f"✅ Successfully imported: {zip_file}")
+                                if verbose_mode:
+                                    print(f"  UUID: {response_data.get('uuid', 'N/A')}")
+                                    print(f"  Total Policies: {response_data.get('totalPolicyCount', 0)}")
+                                    print(f"  Data Quality Policies: {response_data.get('totalDataQualityPolicyCount', 0)}")
+                                    print(f"  Data Sources: {response_data.get('totalDataSourceCount', 0)}")
+                        except json.JSONDecodeError as e:
+                            error_msg = f"Invalid JSON response for {zip_file}: {e}"
+                            if not quiet_mode:
+                                print(f"❌ {error_msg}")
+                            logger.error(error_msg)
+                            failed_imports += 1
+                            aggregated_stats['files_failed'] += 1
+                    else:
+                        error_msg = f"Empty response for {zip_file}"
+                        if not quiet_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        failed_imports += 1
+                        aggregated_stats['files_failed'] += 1
+                        
+            except Exception as e:
+                error_msg = f"Failed to import {zip_file}: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_imports += 1
+                aggregated_stats['files_failed'] += 1
+        
+        # Print summary
+        print("\n" + "="*80)
+        print("POLICY IMPORT SUMMARY")
+        print("="*80)
+        print(f"Files processed: {successful_imports}")
+        print(f"Files failed: {failed_imports}")
+        print(f"Total files: {len(zip_files)}")
+        
+        if successful_imports > 0:
+            print(f"\n📊 AGGREGATED STATISTICS")
+            print("-" * 50)
+            print(f"Total Policies: {aggregated_stats['totalPolicyCount']}")
+            print(f"Data Quality Policies: {aggregated_stats['totalDataQualityPolicyCount']}")
+            print(f"Data Sources: {aggregated_stats['totalDataSourceCount']}")
+            print(f"Business Rules: {aggregated_stats['totalBusinessRules']}")
+            print(f"Data Cadence Policies: {aggregated_stats['totalDataCadencePolicyCount']}")
+            print(f"Data Drift Policies: {aggregated_stats['totalDataDriftPolicyCount']}")
+            print(f"Profile Anomaly Policies: {aggregated_stats['totalProfileAnomalyPolicyCount']}")
+            print(f"Reconciliation Policies: {aggregated_stats['totalReconciliationPolicyCount']}")
+            print(f"Schema Drift Policies: {aggregated_stats['totalSchemaDriftPolicyCount']}")
+            print(f"Reference Assets: {aggregated_stats['totalReferenceAssets']}")
+            print(f"UDF Packages: {aggregated_stats['totalUDFPackages']}")
+            print(f"UDF Templates: {aggregated_stats['totalUDFTemplates']}")
+            print(f"Asset UDF Variables: {aggregated_stats['totalAssetUDFVariablesPerAsset']}")
+            
+            print(f"\n⚠️  CONFLICTS DETECTED")
+            print("-" * 30)
+            print(f"Conflicting Assemblies: {aggregated_stats['conflictingAssemblies']}")
+            print(f"Conflicting Policies: {aggregated_stats['conflictingPolicies']}")
+            print(f"Conflicting SQL Views: {aggregated_stats['conflictingSqlViews']}")
+            print(f"Conflicting Visual Views: {aggregated_stats['conflictingVisualViews']}")
+            
+            if aggregated_stats['uuids']:
+                print(f"\n🔑 IMPORTED UUIDs")
+                print("-" * 20)
+                for uuid in aggregated_stats['uuids']:
+                    print(f"  {uuid}")
+        
+        print("="*80)
+        
+        if failed_imports > 0:
+            print("⚠️  Import completed with errors. Check log file for details.")
+        else:
+            print("✅ Import completed successfully!")
+            
+    except Exception as e:
+        error_msg = f"Error executing policy import: {e}"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
 
 
 if __name__ == "__main__":

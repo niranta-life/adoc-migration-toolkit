@@ -3,8 +3,8 @@
 # ADOC Export Import Formatter Script
 # A tool for replacing substrings in JSON files and ZIP archives
 #
-# Usage: adoc-formatter <input_dir> <source_string> <target_string> [options]
-# Example: adoc-formatter data/samples "PROD_DB" "DEV_DB" --verbose
+# Usage: adoc-formatter [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]
+# Example: adoc-formatter --source-env-string "PROD_DB" --target-env-string "DEV_DB" --verbose
 #
 # Author: ADOC Export Import Team
 # Version: 1.0.0
@@ -79,26 +79,27 @@ ${SCRIPT_NAME} v${SCRIPT_VERSION} - Professional JSON String Replacer
 DESCRIPTION:
     Replace substrings in JSON files and ZIP archives with comprehensive error handling.
     Processes entire directories efficiently with professional output formatting.
+    Auto-detects input directory from policy-export subdirectory if not specified.
 
 USAGE:
-    ${SCRIPT_NAME} <input_dir> <source_string> <target_string> [options]
+    ${SCRIPT_NAME} [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]
 
 ARGUMENTS:
-    input_dir       Directory containing JSON files and ZIP files to process
-    source_string   Substring to search for (source environment)
-    target_string   Substring to replace with (target environment)
+    --source-env-string <string>  Substring to search for (source environment) [REQUIRED]
+    --target-env-string <string>  Substring to replace with (target environment) [REQUIRED]
 
 OPTIONS:
-    --output-dir <dir>  Output directory (defaults to input_dir with '_import_ready' suffix)
-    --log-level|-l     Set log level (ERROR, WARNING, INFO, SUCCESS)
-    --verbose, -v       Enable verbose logging
-    --help, -h          Show this help message
-    --version           Show version information
+    --input <dir>                 Input directory (auto-detected from policy-export if not specified)
+    --output-dir <dir>            Output directory (defaults to organized subdirectories)
+    --log-level|-l               Set log level (ERROR, WARNING, INFO, DEBUG)
+    --verbose, -v                 Enable verbose logging
+    --help, -h                    Show this help message
+    --version                     Show version information
 
 EXAMPLES:
-    ${SCRIPT_NAME} data/samples "PROD_DB" "DEV_DB"
-    ${SCRIPT_NAME} data/samples "old" "new" --output-dir data/output
-    ${SCRIPT_NAME} data/samples "COMM_APAC_ETL_PROD_DB" "NEW_DB_NAME" --verbose
+    ${SCRIPT_NAME} --source-env-string "PROD_DB" --target-env-string "DEV_DB"
+    ${SCRIPT_NAME} --input data/samples --source-env-string "old" --target-env-string "new" --output-dir data/output
+    ${SCRIPT_NAME} --source-env-string "COMM_APAC_ETL_PROD_DB" --target-env-string "NEW_DB_NAME" --verbose
 
 FEATURES:
     - Processes JSON files and ZIP archives
@@ -106,6 +107,8 @@ FEATURES:
     - Comprehensive error handling and logging
     - Professional output formatting
     - Extracts data quality policy assets to CSV
+    - Auto-detects input directory from policy-export subdirectory
+    - Organized output directory structure
 
 EXIT CODES:
     0 - Success
@@ -123,31 +126,18 @@ print_version() {
 
 # Validate arguments
 validate_arguments() {
-    local input_dir="$1"
-    local source_string="$2"
-    local target_string="$3"
-
-    # Check if input directory exists
-    if [[ ! -d "$input_dir" ]]; then
-        log_error "Input directory does not exist: $input_dir"
-        return 1
-    fi
-
-    # Check if input directory is readable
-    if [[ ! -r "$input_dir" ]]; then
-        log_error "Input directory is not readable: $input_dir"
-        return 1
-    fi
+    local source_string="$1"
+    local target_string="$2"
 
     # Validate source string
     if [[ -z "$source_string" ]]; then
-        log_error "Source string cannot be empty"
+        log_error "Source environment string cannot be empty"
         return 1
     fi
 
     # Validate target string
     if [[ -z "$target_string" ]]; then
-        log_error "Target string cannot be empty"
+        log_error "Target environment string cannot be empty"
         return 1
     fi
 
@@ -203,6 +193,14 @@ main() {
                 print_version
                 exit 0
                 ;;
+            --input)
+                if [[ -z "$2" ]]; then
+                    log_error "--input requires a directory path"
+                    exit 2
+                fi
+                input_dir="--input $2"
+                shift 2
+                ;;
             --output-dir)
                 if [[ -z "$2" ]]; then
                     log_error "--output-dir requires a directory path"
@@ -211,9 +209,25 @@ main() {
                 output_dir="--output-dir $2"
                 shift 2
                 ;;
+            --source-env-string)
+                if [[ -z "$2" ]]; then
+                    log_error "--source-env-string requires a string value"
+                    exit 2
+                fi
+                source_string="$2"
+                shift 2
+                ;;
+            --target-env-string)
+                if [[ -z "$2" ]]; then
+                    log_error "--target-env-string requires a string value"
+                    exit 2
+                fi
+                target_string="$2"
+                shift 2
+                ;;
             --log-level|-l)
                 if [[ -z "$2" ]]; then
-                    log_error "--log-level requires a level (ERROR, WARNING, INFO, SUCCESS)"
+                    log_error "--log-level requires a level (ERROR, WARNING, INFO, DEBUG)"
                     exit 2
                 fi
                 LOG_LEVEL="$2"
@@ -235,29 +249,21 @@ main() {
                 exit 2
                 ;;
             *)
-                if [[ -z "$input_dir" ]]; then
-                    input_dir="$1"
-                elif [[ -z "$source_string" ]]; then
-                    source_string="$1"
-                elif [[ -z "$target_string" ]]; then
-                    target_string="$1"
-                else
-                    additional_args+=("$1")
-                fi
+                additional_args+=("$1")
                 shift
                 ;;
         esac
     done
 
     # Check if required arguments are provided
-    if [[ -z "$input_dir" ]] || [[ -z "$source_string" ]] || [[ -z "$target_string" ]]; then
-        log_error "Missing required arguments"
+    if [[ -z "$source_string" ]] || [[ -z "$target_string" ]]; then
+        log_error "Missing required arguments: --source-env-string and --target-env-string"
         print_usage
         exit 2
     fi
 
     # Validate arguments
-    if ! validate_arguments "$input_dir" "$source_string" "$target_string"; then
+    if ! validate_arguments "$source_string" "$target_string"; then
         exit 1
     fi
 
@@ -284,10 +290,14 @@ main() {
         fi
     fi
 
-    # Add arguments
-    cmd="$cmd --input=\"$input_dir\" --source-env-string=\"$source_string\" --target-env-string=\"$target_string\""
+    # Add required arguments
+    cmd="$cmd --source-env-string=\"$source_string\" --target-env-string=\"$target_string\""
 
     # Add optional arguments
+    if [[ -n "$input_dir" ]]; then
+        cmd="$cmd $input_dir"
+    fi
+
     if [[ -n "$output_dir" ]]; then
         cmd="$cmd $output_dir"
     fi
@@ -306,7 +316,11 @@ main() {
 
     # Execute the command
     log_info "Executing: $cmd"
-    log_info "Processing directory: $input_dir"
+    if [[ -n "$input_dir" ]]; then
+        log_info "Input directory: $input_dir"
+    else
+        log_info "Input directory: auto-detected from policy-export subdirectory"
+    fi
     log_info "Replacing: '$source_string' -> '$target_string'"
 
     if eval "$cmd"; then

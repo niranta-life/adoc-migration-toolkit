@@ -206,20 +206,19 @@ class GuidedMigration:
                     errors.append(f"Invalid CSV format in {asset_uids_file}")
         
         elif step_name == 'import_profiles':
-            # Check if asset-profiles-export.csv exists
-            profiles_file = state.data.get('profiles_export_file')
-            exists, error_msg = self._verify_file_exists(profiles_file, "Asset profiles export file")
-            if not exists:
-                errors.append(error_msg)
+            # Check if asset-profiles-import-ready.csv exists
+            profiles_file = asset_uids_file.parent / 'asset-profiles-import-ready.csv'
+            if not profiles_file.exists():
+                errors.append(f"Asset profiles file not found: {profiles_file}")
             else:
-                # Check if export step was completed
-                if 'export_profiles' not in state.completed_steps:
-                    errors.append("Export Asset Profiles step must be completed before importing")
-                else:
-                    # Validate CSV format
-                    validation_result = self._validate_csv_format_with_details(profiles_file, ['target-env', 'profile_json'])
-                    if not validation_result['valid']:
-                        errors.append(f"Invalid CSV format in {profiles_file}: {validation_result['error']}")
+                # Check if file has content
+                try:
+                    with open(profiles_file, 'r') as f:
+                        lines = f.readlines()
+                        if len(lines) < 2:  # Header + at least one data row
+                            errors.append(f"Asset profiles file is empty or has no data: {profiles_file}")
+                except Exception as e:
+                    errors.append(f"Error reading asset profiles file: {e}")
         
         elif step_name == 'export_configs':
             # Check if asset_uids.csv exists
@@ -250,14 +249,18 @@ class GuidedMigration:
         
         elif step_name == 'handle_segments':
             # Check if segmented_spark_uids.csv exists
-            segments_file = state.data.get('segmented_spark_uids_file')
-            exists, error_msg = self._verify_file_exists(segments_file, "Segmented SPARK UIDs file")
-            if not exists:
-                errors.append(error_msg)
+            segments_file = asset_uids_file.parent.parent / 'policy-export' / 'segmented_spark_uids.csv'
+            if not segments_file.exists():
+                errors.append(f"Segmented SPARK UIDs file not found: {segments_file}")
             else:
-                # Validate CSV format - formatter generates source-env,target-env columns
-                if not self._validate_csv_format(segments_file, ['source-env', 'target-env']):
-                    errors.append(f"Invalid CSV format in {segments_file}")
+                # Check if file has content
+                try:
+                    with open(segments_file, 'r') as f:
+                        lines = f.readlines()
+                        if len(lines) < 2:  # Header + at least one data row
+                            errors.append(f"Segmented SPARK UIDs file is empty or has no data: {segments_file}")
+                except Exception as e:
+                    errors.append(f"Error reading segmented SPARK UIDs file: {e}")
         
         return len(errors) == 0, errors
     
@@ -395,10 +398,10 @@ This step imports profile configurations to the target environment.
 
 Prerequisites:
 - Export Asset Profiles step must be completed first
-- asset-profiles-export.csv file must exist and contain data
+- asset-profiles-import-ready.csv file must exist and contain data
 
 The guided migration will:
-- Verify that asset-profiles-export.csv exists and contains data
+- Verify that asset-profiles-import-ready.csv exists and contains data
 - Count the number of profiles available for import
 - Prepare for actual import (currently in verification mode)
 
@@ -519,18 +522,16 @@ You can delete the migration state with: delete-migration {name}
             
             stats = formatter.process_directory()
             
-            # Update state with generated file paths
-            if output_dir:
-                base_dir = Path(output_dir)
-            else:
-                base_dir = Path(input_dir).parent / f"{Path(input_dir).name}_import_ready"
+            # Update state with generated file paths using the new directory structure
+            # segmented_spark_uids.csv is in policy-export directory
+            segmented_spark_file = formatter.policy_export_dir / "segmented_spark_uids.csv"
+            if segmented_spark_file.exists():
+                state.data['segmented_spark_uids_file'] = str(segmented_spark_file)
             
-            # Find generated CSV files
-            for csv_file in base_dir.rglob('*.csv'):
-                if 'segmented_spark_uids' in csv_file.name:
-                    state.data['segmented_spark_uids_file'] = str(csv_file)
-                elif 'asset_uids' in csv_file.name:
-                    state.data['asset_uids_file'] = str(csv_file)
+            # asset_uids.csv is in asset-export directory
+            asset_uids_file = formatter.asset_export_dir / "asset_uids.csv"
+            if asset_uids_file.exists():
+                state.data['asset_uids_file'] = str(asset_uids_file)
             
             return True, f"Formatter completed successfully. Processed {stats['total_files']} files."
         except Exception as e:
@@ -543,7 +544,7 @@ You can delete the migration state with: delete-migration {name}
             if not asset_uids_file:
                 return False, "Asset UIDs file not configured"
             
-            output_file = Path(asset_uids_file).parent / 'asset-profiles-export.csv'
+            output_file = Path(asset_uids_file).parent / 'asset-profiles-import-ready.csv'
             
             # Import the actual export function from execution module
             from .execution import execute_asset_profile_export_guided
@@ -632,24 +633,25 @@ You can delete the migration state with: delete-migration {name}
     def _execute_handle_segments(self, state: MigrationState, client) -> Tuple[bool, str]:
         """Execute handle segments step."""
         try:
-            segments_file = state.data.get('segmented_spark_uids_file')
-            if not segments_file:
-                return False, "Segmented SPARK UIDs file not configured"
+            asset_uids_file = state.data.get('asset_uids_file')
+            if not asset_uids_file:
+                return False, "Asset UIDs file not configured"
             
-            if not Path(segments_file).exists():
-                return False, f"Segmented SPARK UIDs file does not exist: {segments_file}"
+            # Check if segmented_spark_uids.csv exists
+            segments_file = asset_uids_file.parent.parent / 'policy-export' / 'segmented_spark_uids.csv'
+            if not segments_file.exists():
+                return False, f"Segmented SPARK UIDs file not found: {segments_file}"
             
-            # TODO: Implement actual segments functionality
-            # For now, just verify the file exists and has content
-            with open(segments_file, 'r') as f:
-                reader = csv.reader(f)
-                header = next(reader)
-                row_count = sum(1 for row in reader)
+            # Check if file has content
+            try:
+                with open(segments_file, 'r') as f:
+                    lines = f.readlines()
+                    if len(lines) < 2:  # Header + at least one data row
+                        return False, f"Segmented SPARK UIDs file is empty or has no data: {segments_file}"
+            except Exception as e:
+                return False, f"Error reading segmented SPARK UIDs file: {e}"
             
-            if row_count == 0:
-                return False, f"Segmented SPARK UIDs file is empty: {segments_file}"
-            
-            return True, f"Segments handling verified (dry-run mode) - {row_count} segments found in {segments_file}"
+            return True, f"Segmented SPARK UIDs file validated: {segments_file}"
         except Exception as e:
             return False, f"Handle segments failed: {e}"
     

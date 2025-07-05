@@ -103,7 +103,7 @@ class AcceldataAPIClient:
             'accept': 'application/json',
             'accessKey': self.access_key,
             'secretKey': self.secret_key,
-            'ad-tenant': self.tenant,
+            'X-Tenant': self.tenant,
             'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
             'x-domain-ids': ''
         })
@@ -158,16 +158,18 @@ class AcceldataAPIClient:
         self.logger.info("API client session closed")
 
     def make_api_call(self, endpoint: str, method: str = 'GET', json_payload: Optional[Dict[str, Any]] = None, 
-                     use_target_auth: bool = False, use_target_tenant: bool = False, return_binary: bool = False) -> Any:
+                     use_target_auth: bool = False, use_target_tenant: bool = False, return_binary: bool = False,
+                     files: Optional[Dict[str, Any]] = None) -> Any:
         """Make a generic API call with configurable endpoint and method.
         
         Args:
             endpoint: The API endpoint (e.g., '/catalog-server/api/assets?uid=123')
-            method: HTTP method ('GET' or 'PUT')
+            method: HTTP method ('GET', 'PUT', or 'POST')
             json_payload: JSON payload for PUT/POST requests
             use_target_auth: Whether to use target access/secret keys instead of source
             use_target_tenant: Whether to use target tenant instead of source
             return_binary: If True, return raw response content (for binary data like ZIP files)
+            files: Files to upload for multipart/form-data requests
         
         Returns:
             Dictionary containing the API response, or bytes if return_binary is True
@@ -200,28 +202,40 @@ class AcceldataAPIClient:
             'accept': 'application/json',
             'accessKey': access_key,
             'secretKey': secret_key,
-            'ad-tenant': tenant,
+            'X-Tenant': tenant,
             'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
             'x-domain-ids': ''
         }
+        
+        # Set Content-Type for multipart requests
+        if files:
+            headers['Content-Type'] = 'multipart/form-data'
         
         self.logger.info(f"Making {method} request to: {url}")
         if use_target_auth:
             self.logger.info("Using target authentication")
         if use_target_tenant:
             self.logger.info("Using target tenant")
+        if files:
+            self.logger.info("Uploading files in multipart/form-data format")
         
         try:
             if method.upper() == 'GET':
                 response = self.session.get(url, headers=headers)
             elif method.upper() == 'PUT':
-                if json_payload is None:
-                    raise ValueError("JSON payload is required for PUT requests")
-                response = self.session.put(url, headers=headers, json=json_payload)
+                if json_payload is None and files is None:
+                    raise ValueError("JSON payload or files are required for PUT requests")
+                if files:
+                    response = self.session.put(url, headers=headers, files=files)
+                else:
+                    response = self.session.put(url, headers=headers, json=json_payload)
             elif method.upper() == 'POST':
-                if json_payload is None:
-                    raise ValueError("JSON payload is required for POST requests")
-                response = self.session.post(url, headers=headers, json=json_payload)
+                if json_payload is None and files is None:
+                    raise ValueError("JSON payload or files are required for POST requests")
+                if files:
+                    response = self.session.post(url, headers=headers, files=files)
+                else:
+                    response = self.session.post(url, headers=headers, json=json_payload)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
@@ -237,6 +251,17 @@ class AcceldataAPIClient:
             
         except RequestException as e:
             self.logger.error(f"Failed to make {method} request to {endpoint}: {e}")
+            
+            # Log response content for debugging
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_content = e.response.text
+                    self.logger.error(f"Response status code: {e.response.status_code}")
+                    self.logger.error(f"Response headers: {dict(e.response.headers)}")
+                    self.logger.error(f"Response content: {error_content}")
+                except Exception as log_error:
+                    self.logger.error(f"Could not log response content: {log_error}")
+            
             raise
 
 

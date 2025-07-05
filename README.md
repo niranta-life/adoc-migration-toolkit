@@ -108,7 +108,8 @@ This opens an interactive session where you can run specialized commands.
 **Purpose:** Extract profile configurations from source environment
 
 ```bash
-ADOC> asset-profile-export data/samples_import_ready/asset_uids.csv --verbose
+ADOC> asset-profile-export
+ADOC> asset-profile-export --verbose
 ```
 
 **What this does:**
@@ -116,14 +117,14 @@ ADOC> asset-profile-export data/samples_import_ready/asset_uids.csv --verbose
 - Makes API calls to get profile configurations for each asset
 - Exports profile configurations to CSV format
 
-**Output:** `asset-profiles-export.csv` file with profile configurations
+**Output:** `asset-profiles-import-ready.csv` file with profile configurations
 
 ### Step 5: Import Asset Profiles
 
 **Purpose:** Import profile configurations to target environment
 
 ```bash
-ADOC> asset-profile-import data/samples_import_ready/asset-profiles-export.csv --dry-run --verbose
+ADOC> asset-profile-import --dry-run --verbose
 ```
 
 **What this does:**
@@ -167,7 +168,9 @@ ADOC> asset-config-import data/samples_import_ready/asset-config-export.csv --dr
 **Purpose:** Import segment configurations for SPARK assets
 
 ```bash
-ADOC> segments-export data/samples_import_ready/segmented_spark_uids.csv --verbose
+ADOC> segments-export
+ADOC> segments-export --verbose
+ADOC> segments-import segments_output.csv --dry-run --verbose
 ```
 
 **What this does:**
@@ -214,11 +217,11 @@ python -m adoc_export_import interactive --env-file config.env [--verbose]
 ```
 
 **Available Commands:**
-- `asset-profile-export <csv_file> [--output-file <file>] [--quiet] [--verbose]`
-- `asset-profile-import <csv_file> [--dry-run] [--quiet] [--verbose]`
-- `asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]`
-- `segments-export <csv_file> [--output-file <file>] [--quiet]`
+- `segments-export [<csv_file>] [--output-file <file>] [--quiet]`
 - `segments-import <csv_file> [--dry-run] [--quiet] [--verbose]`
+- `asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose]`
+- `asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose]`
+- `asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]`
 - `set-output-dir <directory>`: Set global output directory
 - `help`: Show detailed help
 - `exit`: Exit interactive mode
@@ -235,10 +238,22 @@ project/
 │   │   ├── [translated ZIP files]
 │   │   ├── segmented_spark_uids.csv
 │   │   ├── asset_uids.csv
-│   │   ├── asset-profiles-export.csv
+│   │   ├── asset-profiles-import-ready.csv
 │   │   ├── asset-config-export.csv
 │   │   └── segments_output.csv
-│   └── output/                   # Custom output directory
+│   ├── asset-export/
+│   │   ├── asset_uids.csv
+│   │   ├── asset-all-export.csv
+│   │   └── asset-config-export.csv
+│   ├── asset-import/
+│   │   ├── asset-profiles-import-ready.csv
+│   │   └── segments_output.csv
+│   ├── policy-export/
+│   │   ├── policies-all-export.csv
+│   │   ├── segmented_spark_uids.csv
+│   │   └── *.zip files
+│   └── policy-import/
+│       └── processed files
 ├── config.env                    # Environment configuration
 └── README.md
 ```
@@ -259,16 +274,18 @@ python -m adoc_export_import formatter \
 python -m adoc_export_import interactive --env-file config.env
 
 # 3. Export and import profiles
-ADOC> asset-profile-export data/samples_import_ready/asset_uids.csv --verbose
-ADOC> asset-profile-import data/samples_import_ready/asset-profiles-export.csv --dry-run --verbose
+ADOC> asset-profile-export
+ADOC> asset-profile-export --verbose
+ADOC> asset-profile-import --dry-run --verbose
 
 # 4. Export and import configurations
 ADOC> asset-config-export data/samples_import_ready/asset_uids.csv --verbose
 # asset-config-import command will be available in future update
 
 # 5. Handle segmented assets (if any)
-ADOC> segments-export data/samples_import_ready/segmented_spark_uids.csv --verbose
-ADOC> segments-import data/samples_import_ready/segments_output.csv --dry-run --verbose
+ADOC> segments-export
+ADOC> segments-export --verbose
+ADOC> segments-import segments_output.csv --dry-run --verbose
 ```
 
 ### Testing Environment Migration
@@ -310,7 +327,7 @@ python -m adoc_export_import formatter \
 The tool provides comprehensive logging:
 - Console output with `--verbose` flag
 - Log files: `adoc-migration-toolkit-YYYYMMDD.log` (rotates daily)
-- Interactive mode history: `~/.adoc_history`
+- Interactive mode history: `~/.adoc_migration_toolkit_history`
 
 ### Getting Help
 

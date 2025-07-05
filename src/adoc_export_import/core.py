@@ -70,10 +70,10 @@ def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Lo
     file_handler.setFormatter(formatter)
     handlers.append(file_handler)
     
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    handlers.append(console_handler)
+    # Console handler - REMOVED to prevent breaking progress bars
+    # console_handler = logging.StreamHandler(sys.stdout)
+    # console_handler.setFormatter(formatter)
+    # handlers.append(console_handler)
     
     # Configure root logger
     logging.basicConfig(
@@ -130,19 +130,32 @@ class PolicyExportFormatter:
         if not self.input_dir.is_dir():
             raise ValueError(f"Input path is not a directory: {self.input_dir}")
         
-        # Setup output directory
+        # Setup output directory structure
         if output_dir:
-            self.output_dir = Path(output_dir).resolve()
+            self.base_output_dir = Path(output_dir).resolve()
         else:
-            self.output_dir = self.input_dir.parent / f"{self.input_dir.name}_import_ready"
+            # Use the same logic as other commands to find/create the output directory
+            from .cli import GLOBAL_OUTPUT_DIR
+            if GLOBAL_OUTPUT_DIR:
+                self.base_output_dir = GLOBAL_OUTPUT_DIR
+            else:
+                from datetime import datetime
+                self.base_output_dir = Path.cwd() / f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d%H%M')}"
         
-        # Create output directory
+        # Create organized output directory structure
+        self.output_dir = self.base_output_dir / "policy-import"  # For processed ZIP/JSON files
+        self.asset_export_dir = self.base_output_dir / "asset-export"  # For asset_uids.csv
+        self.policy_export_dir = self.base_output_dir / "policy-export"  # For segmented_spark_uids.csv
+        
+        # Create all output directories
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
+            self.asset_export_dir.mkdir(parents=True, exist_ok=True)
+            self.policy_export_dir.mkdir(parents=True, exist_ok=True)
         except PermissionError:
-            raise PermissionError(f"Permission denied: Cannot create output directory {self.output_dir}")
+            raise PermissionError(f"Permission denied: Cannot create output directories")
         except Exception as e:
-            raise RuntimeError(f"Failed to create output directory {self.output_dir}: {e}")
+            raise RuntimeError(f"Failed to create output directories: {e}")
         
         # Initialize statistics
         self.stats = {
@@ -164,7 +177,9 @@ class PolicyExportFormatter:
         
         self.logger.info("PolicyExportFormatter initialized successfully")
         self.logger.info(f"Input directory: {self.input_dir}")
-        self.logger.info(f"Output directory: {self.output_dir}")
+        self.logger.info(f"Output directory (processed files): {self.output_dir}")
+        self.logger.info(f"Asset export directory: {self.asset_export_dir}")
+        self.logger.info(f"Policy export directory: {self.policy_export_dir}")
         self.logger.info(f"Search string: '{self.search_string}'")
         self.logger.info(f"Replace string: '{self.replace_string}'")
     
@@ -309,7 +324,7 @@ class PolicyExportFormatter:
             self.logger.info("No assets extracted, skipping CSV creation")
             return
         
-        csv_file = self.output_dir / "segmented_spark_uids.csv"
+        csv_file = self.policy_export_dir / "segmented_spark_uids.csv"
         
         try:
             with open(csv_file, 'w', newline='', encoding='utf-8') as f:
@@ -337,7 +352,7 @@ class PolicyExportFormatter:
             self.logger.info("No assets found, skipping asset_uids.csv creation")
             return
         
-        csv_file = self.output_dir / "asset_uids.csv"
+        csv_file = self.asset_export_dir / "asset_uids.csv"
         
         try:
             with open(csv_file, 'w', newline='', encoding='utf-8') as f:
