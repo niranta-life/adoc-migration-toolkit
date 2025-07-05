@@ -10,6 +10,30 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
+from tqdm import tqdm
+
+
+def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False):
+    """Create a tqdm progress bar with consistent styling.
+    
+    Args:
+        total: Total number of items to process
+        desc: Description for the progress bar
+        unit: Unit of measurement (items, rules, files, etc.)
+        disable: Whether to disable the progress bar (for verbose mode)
+        
+    Returns:
+        tqdm progress bar instance
+    """
+    return tqdm(
+        total=total,
+        desc=desc,
+        unit=unit,
+        disable=disable,
+        bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+        colour='green',
+        ncols=100
+    )
 
 
 def execute_asset_profile_export_guided(
@@ -47,6 +71,14 @@ def execute_asset_profile_export_guided(
         failed = 0
         total_assets_processed = 0
         
+        # Create progress bar using tqdm utility
+        progress_bar = create_progress_bar(
+            total=len(env_mappings),
+            desc="Exporting asset profiles",
+            unit="assets",
+            disable=verbose_mode
+        )
+        
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
@@ -59,7 +91,8 @@ def execute_asset_profile_export_guided(
                     print(f"Target-env: {target_env}")
                     print("-" * 60)
                 else:
-                    print(f"Processing [{i}/{len(env_mappings)}] UID: {source_env}")
+                    # Update progress bar with current asset UID using set_postfix
+                    progress_bar.set_postfix(asset=source_env)
                 
                 try:
                     # Step 1: Get asset details by source-env (UID)
@@ -117,8 +150,6 @@ def execute_asset_profile_export_guided(
                     
                     if verbose_mode:
                         print(f"✅ Written to file: {target_env}")
-                    else:
-                        print(f"✅ [{i}/{len(env_mappings)}] {source_env}: Profile exported successfully")
                     
                     successful += 1
                     total_assets_processed += 1
@@ -127,10 +158,14 @@ def execute_asset_profile_export_guided(
                     error_msg = f"Failed to process source-env {source_env}: {e}"
                     if verbose_mode:
                         print(f"❌ {error_msg}")
-                    else:
-                        print(f"❌ [{i}/{len(env_mappings)}] {source_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
+                
+                # Update progress bar
+                progress_bar.update(1)
+        
+        # Close progress bar
+        progress_bar.close()
         
         # Print summary
         if verbose_mode:

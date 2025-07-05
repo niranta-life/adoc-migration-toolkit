@@ -14,6 +14,7 @@ import os
 import pickle
 from pathlib import Path
 from datetime import datetime
+from tqdm import tqdm
 from .core import PolicyExportFormatter, setup_logging
 from .api_client import create_api_client
 from .guided_migration import GuidedMigration, MigrationState
@@ -21,6 +22,29 @@ from typing import Optional
 
 # Global variable to store the output directory
 GLOBAL_OUTPUT_DIR: Optional[Path] = None
+
+
+def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False):
+    """Create a tqdm progress bar with consistent styling.
+    
+    Args:
+        total: Total number of items to process
+        desc: Description for the progress bar
+        unit: Unit of measurement (items, rules, files, etc.)
+        disable: Whether to disable the progress bar (for verbose mode)
+        
+    Returns:
+        tqdm progress bar instance
+    """
+    return tqdm(
+        total=total,
+        desc=desc,
+        unit=unit,
+        disable=disable,
+        bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+        colour='green',
+        ncols=100
+    )
 
 def create_asset_export_parser(subparsers):
     """Create the asset-export subcommand parser."""
@@ -350,8 +374,8 @@ def run_formatter(args):
         if stats['zip_files'] > 0:
             print(f"ZIP files:           {stats['zip_files']}")
         
-        print(f"Files investigated:  {stats['files_investigated']}")
-        print(f"Changes made:        {stats['changes_made']}")
+        print(f"Files investigated:  {stats.get('files_investigated', 0)}")
+        print(f"Changes made:        {stats.get('changes_made', 0)}")
         print(f"Successful:          {stats['successful']}")
         print(f"Failed:              {stats['failed']}")
         
@@ -968,6 +992,7 @@ def setup_autocomplete():
         'policy-export',
         'policy-import',
         'policy-xfr',
+        'rule-tag-export',
         'set-output-dir',
         'guided-migration',
         'resume-migration',
@@ -1295,7 +1320,7 @@ def run_interactive(args):
                     'segments-export', 'segments-import',
                     'asset-profile-export', 'asset-profile-import',
                     'asset-config-export', 'asset-list-export',
-                    'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr',
+                    'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
                     'set-output-dir', 'guided-migration', 'resume-migration',
                     'delete-migration', 'list-migrations',
                     # Utility commands (will be filtered anyway)
@@ -1382,6 +1407,12 @@ def run_interactive(args):
                     file_pattern, quiet_mode, verbose_mode = parse_policy_import_command(command)
                     if file_pattern:
                         execute_policy_import(client, logger, file_pattern, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's a rule-tag-export command
+                if command.lower().startswith('rule-tag-export'):
+                    quiet_mode, verbose_mode = parse_rule_tag_export_command(command)
+                    execute_rule_tag_export(client, logger, quiet_mode, verbose_mode)
                     continue
                 
                 # Check if it's a policy-xfr command
@@ -1908,12 +1939,13 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         failed = 0
         total_assets_processed = 0
         
-        # Track failed indices for progress bar coloring
-        failed_indices = set()
-        
-        # Print initial progress bar and status line
-        # Always show progress bar regardless of quiet mode
-        print(f"Exporting: [{'░' * 50}] 0/{len(env_mappings)} (0.0%) - Status: Initializing...")
+        # Create progress bar using tqdm utility
+        progress_bar = create_progress_bar(
+            total=len(env_mappings),
+            desc="Exporting asset profiles",
+            unit="assets",
+            disable=verbose_mode
+        )
         
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
@@ -1927,26 +1959,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     print(f"Target-env: {target_env}")
                     print("-" * 60)
                 else:
-                    # Calculate progress
-                    percentage = (i / len(env_mappings)) * 100
-                    bar_width = 50
-                    filled_blocks = int((i / len(env_mappings)) * bar_width)
-                    
-                    # Build the current bar state
-                    bar = ''
-                    for j in range(bar_width):
-                        if j < filled_blocks:
-                            # This block should be filled - check if it's a failed asset
-                            asset_index_for_block = int((j / bar_width) * len(env_mappings))
-                            if asset_index_for_block in failed_indices:
-                                bar += '\033[31m█\033[0m'  # Red for failed
-                            else:
-                                bar += '\033[32m█\033[0m'  # Green for success
-                        else:
-                            bar += '░'  # Empty block
-                    
-                    # Update progress bar and status on the same line using carriage return
-                    print(f"\rExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%) - Status: Processing UID: {source_env}", end='', flush=True)
+                    # Update progress bar with current asset UID using set_postfix
+                    progress_bar.set_postfix(asset=source_env)
                 
                 try:
                     # Step 1: Get asset details by source-env (UID)
@@ -2037,9 +2051,6 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     
                     if verbose_mode:
                         print(f"✅ Written to file: {target_env}")
-                    else:
-                        # Update status message for success - update the same line
-                        print(f"\rExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%) - Status: ✅ {source_env} - Profile exported successfully", end='', flush=True)
                     
                     successful += 1
                     total_assets_processed += 1
@@ -2048,31 +2059,18 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     error_msg = f"Failed to process source-env {source_env}: {e}"
                     if verbose_mode:
                         print(f"❌ {error_msg}")
-                    else:
-                        # Update status message for failure - update the same line
-                        print(f"\rExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%) - Status: ❌ {source_env} - {error_msg}", end='', flush=True)
                     logger.error(error_msg)
                     failed += 1
-                    failed_indices.add(i - 1)  # Add to failed indices (0-based)
+                
+                # Update progress bar
+                progress_bar.update(1)
             
-            # Print final progress bar and status
-            # Always show final progress bar regardless of quiet mode
-            bar_width = 50
-            bar = ''
-            for j in range(bar_width):
-                # Map the block index back to asset index
-                asset_index_for_block = int((j / bar_width) * len(env_mappings))
-                if asset_index_for_block in failed_indices:
-                    bar += '\033[31m█\033[0m'  # Red for failed
-                else:
-                    bar += '\033[32m█\033[0m'  # Green for success
+            # Close progress bar
+            progress_bar.close()
             
-            if quiet_mode:
-                # Add newline for quiet mode since we used \r for updates
-                print()
-            
-            print(f"Exporting: [{bar}] {len(env_mappings)}/{len(env_mappings)} (100.0%)")
-            print(f"Status: ✅ Export completed - {successful} successful, {failed} failed")
+            # Print completion status
+            if not quiet_mode:
+                print(f"✅ Export completed - {successful} successful, {failed} failed")
             
             # Print comprehensive statistics
             if not quiet_mode:
@@ -2279,7 +2277,17 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
         successful = 0
         failed = 0
         
+        # Create progress bar using tqdm utility
+        progress_bar = create_progress_bar(
+            total=len(import_mappings),
+            desc="Importing asset profiles",
+            unit="assets",
+            disable=verbose_mode
+        )
+        
         for i, (target_env, profile_json) in enumerate(import_mappings, 1):
+            # Update progress bar with current asset UID using set_postfix
+            progress_bar.set_postfix(asset=target_env)
             if not quiet_mode:
                 print(f"\n[{i}/{len(import_mappings)}] Processing target-env: {target_env}")
                 print("-" * 60)
@@ -2333,6 +2341,7 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
+                    progress_bar.update(1)
                     continue
                 
                 data_array = asset_response['data']
@@ -2341,6 +2350,7 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
+                    progress_bar.update(1)
                     continue
                 
                 first_asset = data_array[0]
@@ -2349,6 +2359,7 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
+                    progress_bar.update(1)
                     continue
                 
                 asset_id = first_asset['id']
@@ -2363,6 +2374,7 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
+                    progress_bar.update(1)
                     continue
                 
                 # Step 4: Make PUT request to update profile configuration
@@ -2396,8 +2408,6 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     
                     if not quiet_mode:
                         print("✅ Import successful")
-                    else:
-                        print(f"✅ [{i}/{len(import_mappings)}] {target_env}: Profile updated successfully")
                 else:
                     # Show detailed dry-run information for second API call
                     print(f"\n🔍 DRY RUN - API CALL #2: Update Profile Configuration")
@@ -2419,6 +2429,7 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                         print(f"🔍 [{i}/{len(import_mappings)}] {target_env}: Would update profile (dry-run)")
                 
                 successful += 1
+                progress_bar.update(1)
                 logger.info(f"Successfully processed target-env {target_env} (asset ID: {asset_id})")
                 
             except Exception as e:
@@ -2426,6 +2437,10 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                 print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                 logger.error(error_msg)
                 failed += 1
+                progress_bar.update(1)
+        
+        # Close progress bar
+        progress_bar.close()
         
         # Print summary
         if not quiet_mode:
@@ -3120,6 +3135,25 @@ def show_interactive_help():
     print("      • Tracks UUIDs of imported policy definitions")
     print("      • Reports conflicts (assemblies, policies, SQL views, visual views)")
     
+    print(f"\n  {BOLD}rule-tag-export{RESET} [--quiet] [--verbose]")
+    print("    Description: Export rule tags for all policies from policies-all-export.csv")
+    print("    Arguments:")
+    print("      --quiet: Suppress console output, show only summary with progress bar")
+    print("      --verbose: Show detailed output including headers and responses")
+    print("    Examples:")
+    print("      rule-tag-export")
+    print("      rule-tag-export --quiet")
+    print("      rule-tag-export --verbose")
+    print("    Behavior:")
+    print("      • Automatically runs policy-list-export if policies-all-export.csv doesn't exist")
+    print("      • Reads rule IDs from policies-all-export.csv (first column)")
+    print("      • Makes API calls to '/catalog-server/api/rules/<id>/tags' for each rule")
+    print("      • Extracts tag names from the response")
+    print("      • Outputs to rule-tags-export.csv with rule ID and comma-separated tags")
+    print("      • Shows progress bar in quiet mode")
+    print("      • Shows detailed API calls in verbose mode")
+    print("      • Provides comprehensive statistics upon completion")
+    
     print(f"\n  {BOLD}policy-xfr{RESET} [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
     print("    Description: Format policy export files by replacing substrings in JSON files and ZIP archives")
     print("    Arguments:")
@@ -3233,6 +3267,7 @@ def show_interactive_help():
     print("  • policy-list-export: Always exports from source environment")
     print("  • policy-export: Always exports from source environment")
     print("  • policy-import: Always imports to target environment")
+    print("  • rule-tag-export: Always exports from source environment")
     print(f"\n{BOLD}💡 TIPS:{RESET}")
     print("  • Use TAB key for command autocomplete")
     print("  • Use ↑/↓ arrow keys to navigate command history")
@@ -4172,7 +4207,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         output_file = get_output_file_path("", "policies-all-export.csv", category="policy-export")
         
         if not quiet_mode:
-            print(f"\nExporting all policies from ADOC environment")
+            print(f"\nExporting all rules from ADOC environment")
             print(f"Output will be written to: {output_file}")
 
             if verbose_mode:
@@ -4181,7 +4216,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         # Step 1: Get total count of policies
         if not quiet_mode:
-            print("Getting total policy count...")
+            print("Getting total rules count...")
         
         if verbose_mode:
             print("\nGET Request Headers:")
@@ -4203,7 +4238,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         # Extract total count
         if not count_response or 'meta' not in count_response or 'count' not in count_response['meta']:
-            error_msg = "Failed to get total policy count from response"
+            error_msg = "Failed to get total rules count from response"
             print(f"❌ {error_msg}")
             logger.error(error_msg)
             return
@@ -4213,7 +4248,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
         
         if not quiet_mode:
-            print(f"Total policies found: {total_count}")
+            print(f"Total rules found: {total_count}")
             print(f"Page size: {page_size}")
             print(f"Total pages to retrieve: {total_pages}")
             print("="*80)
@@ -4225,7 +4260,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         for page in range(total_pages):
             if not quiet_mode:
-                print(f"\n[Page {page + 1}/{total_pages}] Retrieving policies...")
+                print(f"\n[Page {page + 1}/{total_pages}] Retrieving rules...")
             
             try:
                 if verbose_mode:
@@ -4261,13 +4296,13 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                     all_policies.extend(actual_policies)
                     
                     if not quiet_mode:
-                        print(f"✅ Page {page + 1}: Retrieved {len(actual_policies)} policies")
+                        print(f"✅ Page {page + 1}: Retrieved {len(actual_policies)} rules")
                     else:
-                        print(f"✅ Page {page + 1}/{total_pages}: {len(actual_policies)} policies")
+                        print(f"✅ Page {page + 1}/{total_pages}: {len(actual_policies)} polrulesicies")
                     
                     successful_pages += 1
                 else:
-                    error_msg = f"Invalid response format for page {page + 1} - no policies found"
+                    error_msg = f"Invalid response format for page {page + 1} - no rules found"
                     if not quiet_mode:
                         print(f"❌ {error_msg}")
                     logger.error(error_msg)
@@ -4282,7 +4317,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         # Step 3: Process each policy to get asset details
         if not quiet_mode:
-            print(f"\nProcessing {len(all_policies)} policies to extract asset information...")
+            print(f"\nProcessing {len(all_policies)} rules to extract asset information...")
         
         processed_policies = []
         total_asset_calls = 0
@@ -4290,18 +4325,17 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         failed_asset_calls = 0
         failed_rules = []  # Track rules that failed to retrieve assemblies
         
+        # Create progress bar using tqdm utility
+        progress_bar = create_progress_bar(
+            total=len(all_policies),
+            desc="Processing rule",
+            unit="rules",
+            disable=verbose_mode
+        )
+        
         for i, policy in enumerate(all_policies, 1):
-            if not quiet_mode:
-                # Calculate percentage
-                percentage = (i / len(all_policies)) * 100
-                
-                # Create progress bar (50 characters wide)
-                bar_width = 50
-                filled_width = int(bar_width * i / len(all_policies))
-                bar = '\033[32m' + '█' * filled_width + '\033[0m' + '░' * (bar_width - filled_width)
-                
-                # Clear line and show progress
-                print(f"\rProcessing: [{bar}] {i}/{len(all_policies)} ({percentage:.1f}%)", end='', flush=True)
+            # Update progress bar with current policy ID using set_postfix
+            progress_bar.set_postfix(rule_id=policy.get('id', 'unknown'))
             
             # Extract tableAssetIds from backingAssets for this policy
             table_asset_ids = []
@@ -4376,10 +4410,15 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
             policy['_asset_details'] = asset_details
             policy['_assembly_details'] = assembly_details
             processed_policies.append(policy)
+            
+            # Update progress bar
+            progress_bar.update(1)
         
-        # Clear the progress line and show completion
+        # Close progress bar
+        progress_bar.close()
+        
+        # Show completion summary
         if not quiet_mode:
-            print(f"\rProcessing: [\033[32m{'█' * 50}\033[0m] {len(all_policies)}/{len(all_policies)} (100.0%)")
             print(f"\nAsset API calls completed:")
             print(f"  Total API calls made: {total_asset_calls}")
             print(f"  Successful calls: {successful_asset_calls}")
@@ -4390,8 +4429,8 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 print(f"\n❌ Failed Rules Summary ({len(failed_rules)} rules):")
                 print("="*80)
                 for failed_rule in failed_rules:
-                    print(f"Policy ID: {failed_rule['policy_id']}")
-                    print(f"Policy Type: {failed_rule['policy_type']}")
+                    print(f"Rule ID: {failed_rule['policy_id']}")
+                    print(f"Rule Type: {failed_rule['policy_type']}")
                     print(f"Table Asset IDs: {', '.join(map(str, failed_rule['table_asset_ids']))}")
                     print(f"Error: {failed_rule['error']}")
                     print("-" * 40)
@@ -4399,7 +4438,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         # Step 4: Write policies to CSV file with additional columns
         if not quiet_mode:
-            print(f"\nWriting {len(processed_policies)} policies to CSV file...")
+            print(f"\nWriting {len(processed_policies)} rules to CSV file...")
         
         # Create output directory if needed
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -4493,10 +4532,10 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         # Step 6: Print statistics
         if not quiet_mode:
             print("\n" + "="*80)
-            print("POLICY LIST EXPORT COMPLETED")
+            print("RULES LIST EXPORT SUMMARY")
             print("="*80)
             print(f"Output file: {output_file}")
-            print(f"Total policies exported: {len(processed_policies)}")
+            print(f"Total rules exported: {len(processed_policies)}")
             print(f"Successful pages: {successful_pages}")
             print(f"Failed pages: {failed_pages}")
             print(f"Total pages processed: {total_pages}")
@@ -4543,7 +4582,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
             
             print(f"\n📊 DETAILED STATISTICS SUMMARY")
             print("="*80)
-            print(f"Total policies processed: {len(processed_policies)}")
+            print(f"Total rules processed: {len(processed_policies)}")
             print(f"Total asset API calls: {total_asset_calls}")
             print(f"Successful asset calls: {successful_asset_calls}")
             print(f"Failed asset calls: {failed_asset_calls}")
@@ -4607,7 +4646,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
             
             print("="*80)
         else:
-            print(f"✅ Policy list export completed: {len(processed_policies)} policies exported to {output_file}")
+            print(f"✅ Policies list export completed: {len(processed_policies)} policies exported to {output_file}")
         
     except Exception as e:
         error_msg = f"Error in policy-list-export: {e}"
@@ -5298,8 +5337,8 @@ def execute_formatter(input_dir: str, source_string: str, target_string: str, ou
             if stats['zip_files'] > 0:
                 print(f"ZIP files:           {stats['zip_files']}")
             
-            print(f"Files investigated:  {stats['files_investigated']}")
-            print(f"Changes made:        {stats['changes_made']}")
+            print(f"Files investigated:  {stats.get('files_investigated', 0)}")
+            print(f"Changes made:        {stats.get('changes_made', 0)}")
             print(f"Successful:          {stats['successful']}")
             print(f"Failed:              {stats['failed']}")
             
@@ -5512,6 +5551,54 @@ def parse_policy_import_command(command: str) -> tuple:
             return None, False, False
     
     return file_pattern, quiet_mode, verbose_mode
+
+
+def parse_rule_tag_export_command(command: str) -> tuple:
+    """Parse the rule-tag-export command and extract arguments.
+    
+    Args:
+        command: The full command string
+        
+    Returns:
+        tuple: (quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'rule-tag-export':
+        return False, False
+    
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags
+    for i in range(1, len(parts)):
+        if parts[i] == '--quiet' or parts[i] == '-q':
+            quiet_mode = True
+        elif parts[i] == '--verbose' or parts[i] == '-v':
+            verbose_mode = True
+        elif parts[i] == '--help' or parts[i] == '-h':
+            print("\n" + "="*60)
+            print("RULE-TAG-EXPORT COMMAND HELP")
+            print("="*60)
+            print("Usage: rule-tag-export [options]")
+            print("\nOptions:")
+            print("  --quiet, -q        Quiet mode (minimal output with progress bar)")
+            print("  --verbose, -v      Verbose mode (detailed output)")
+            print("  --help, -h         Show this help message")
+            print("\nExamples:")
+            print("  rule-tag-export")
+            print("  rule-tag-export --quiet")
+            print("  rule-tag-export --verbose")
+            print("\nFeatures:")
+            print("  - Exports rule tags for all policies from policies-all-export.csv")
+            print("  - Automatically runs policy-list-export if policies-all-export.csv doesn't exist")
+            print("  - Makes API calls to /catalog-server/api/rules/<id>/tags for each rule")
+            print("  - Outputs to rule-tags-export.csv with rule ID and comma-separated tags")
+            print("  - Shows progress bar in quiet mode")
+            print("  - Shows detailed API calls in verbose mode")
+            print("="*60)
+            return False, False
+    
+    return quiet_mode, verbose_mode
 
 
 def execute_policy_import(client, logger: logging.Logger, file_pattern: str, quiet_mode: bool = False, verbose_mode: bool = False):
@@ -5789,6 +5876,253 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
     except Exception as e:
         error_msg = f"Error executing policy import: {e}"
         print(f"❌ {error_msg}")
+        logger.error(error_msg)
+
+
+def execute_rule_tag_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the rule-tag-export command.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Determine output file path using the policy-export category
+        output_file = get_output_file_path("", "rule-tags-export.csv", category="policy-export")
+        
+        if not quiet_mode:
+            print(f"\nExporting rule tags from ADOC environment")
+            print(f"Output will be written to: {output_file}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Check if policies-all-export.csv exists
+        if GLOBAL_OUTPUT_DIR:
+            policies_file = GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+        else:
+            # Look for the most recent adoc-migration-toolkit-YYYYMMDDHHMM directory
+            current_dir = Path.cwd()
+            toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+            
+            if not toolkit_dirs:
+                error_msg = "No adoc-migration-toolkit directory found. Please run 'policy-list-export' first."
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            # Sort by creation time and use the most recent
+            toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+            latest_toolkit_dir = toolkit_dirs[0]
+            policies_file = latest_toolkit_dir / "policy-export" / "policies-all-export.csv"
+        
+        # Check if policies file exists
+        if not policies_file.exists():
+            if not quiet_mode:
+                print(f"❌ Policy list file not found: {policies_file}")
+                print("💡 Running policy-list-export first to generate the required file...")
+                print("="*80)
+            
+            # Run policy-list-export internally
+            execute_policy_list_export(client, logger, quiet_mode, verbose_mode)
+            
+            # Check again if the file was created
+            if not policies_file.exists():
+                error_msg = "Failed to generate policies-all-export.csv file"
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+        
+        # Read policies from CSV file
+        if not quiet_mode:
+            print(f"Reading policies from: {policies_file}")
+        
+        rule_ids = []
+        try:
+            with open(policies_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader)  # Skip header
+                
+                for row in reader:
+                    if len(row) > 0 and row[0].strip():  # First column should be the rule ID
+                        try:
+                            rule_id = int(row[0].strip())
+                            rule_ids.append(rule_id)
+                        except ValueError:
+                            # Skip non-numeric IDs
+                            continue
+        except Exception as e:
+            error_msg = f"Failed to read policies file: {e}"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not rule_ids:
+            error_msg = "No valid rule IDs found in policies file"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"Found {len(rule_ids)} rules to process")
+            print("="*80)
+        
+        # Create output directory if needed
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Process each rule to get tags
+        successful_calls = 0
+        failed_calls = 0
+        rule_tags_data = []
+        
+        # Create progress bar
+        progress_bar = create_progress_bar(
+            total=len(rule_ids),
+            desc="Exporting rule tags",
+            unit="rules",
+            disable=verbose_mode
+        )
+        
+        for rule_id in rule_ids:
+            # Update progress bar with current rule ID using set_postfix
+            progress_bar.set_postfix(rule_id=rule_id)
+            
+            try:
+                if verbose_mode:
+                    print(f"\n\n[Rule {i}/{len(rule_ids)}] Processing rule ID: {rule_id}")
+                    print(f"\nGET Request Headers:")
+                    print(f"  Endpoint: /catalog-server/api/rules/{rule_id}/tags")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(client, 'tenant') and client.tenant:
+                        print(f"  X-Tenant: {client.tenant}")
+                
+                # Make API call to get tags for this rule
+                response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/rules/{rule_id}/tags",
+                    method='GET'
+                )
+                
+                if verbose_mode:
+                    print(f"\nResponse:")
+                    print(json.dumps(response, indent=2, ensure_ascii=False))
+                
+                # Extract tag names from response
+                tag_names = []
+                if response and 'ruleTags' in response:
+                    for tag in response['ruleTags']:
+                        tag_name = tag.get('name')
+                        if tag_name:
+                            tag_names.append(tag_name)
+                
+                # Only store the data if there are tags
+                if tag_names:
+                    rule_tags_data.append({
+                        'rule_id': rule_id,
+                        'tag_names': tag_names
+                    })
+                
+                successful_calls += 1
+                
+                # Update progress bar
+                progress_bar.update(1)
+                
+                if verbose_mode:
+                    print(f"✅ Rule {rule_id}: Found {len(tag_names)} tags")
+                    if tag_names:
+                        print(f"   Tags: {', '.join(tag_names)}")
+                    else:
+                        print(f"   No tags found - skipping output")
+                
+            except Exception as e:
+                error_msg = f"Failed to get tags for rule {rule_id}: {e}"
+                if verbose_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_calls += 1
+                
+                # Don't store rules that failed to retrieve tags
+                # Update progress bar
+                progress_bar.update(1)
+        
+        # Close progress bar
+        progress_bar.close()
+        
+        # Write results to CSV file
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['rule_id', 'tags'])
+            
+            # Write data
+            for data in rule_tags_data:
+                rule_id = data['rule_id']
+                tag_names = data['tag_names']
+                tags_str = ','.join(tag_names) if tag_names else ''
+                writer.writerow([rule_id, tags_str])
+        
+        # Print statistics
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("RULE TAG EXPORT COMPLETED")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total rules processed: {len(rule_ids)}")
+            print(f"Successful API calls: {successful_calls}")
+            print(f"Failed API calls: {failed_calls}")
+            
+            # Calculate statistics
+            rules_with_tags = len(rule_tags_data)  # All stored rules have tags
+            rules_without_tags = len(rule_ids) - rules_with_tags
+            
+            print(f"Rules with tags (written to output): {rules_with_tags}")
+            print(f"Rules without tags (skipped): {rules_without_tags}")
+            
+            # Calculate success rate
+            if len(rule_ids) > 0:
+                success_rate = (successful_calls / len(rule_ids)) * 100
+                print(f"API success rate: {success_rate:.1f}%")
+            
+            # Show tag statistics
+            all_tags = []
+            for data in rule_tags_data:
+                all_tags.extend(data['tag_names'])
+            
+            if all_tags:
+                tag_counts = {}
+                for tag in all_tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                
+                print(f"\n📊 TAG STATISTICS")
+                print("-" * 50)
+                print(f"Total unique tags: {len(tag_counts)}")
+                print(f"Total tag occurrences: {len(all_tags)}")
+                
+                # Show top 10 most common tags
+                if tag_counts:
+                    print(f"\n🏷️  TOP 10 MOST COMMON TAGS:")
+                    print("-" * 40)
+                    sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+                    for tag_name, count in sorted_tags[:10]:
+                        percentage = (count / len(rule_ids)) * 100
+                        print(f"  {tag_name:<30} {count:>5} rules ({percentage:>5.1f}%)")
+            else:
+                print(f"\n📊 TAG STATISTICS")
+                print("-" * 50)
+                print("No tags found in any rules")
+            
+            print("="*80)
+        else:
+            print(f"✅ Rule tag export completed: {len(rule_ids)} rules processed, {len(rule_tags_data)} rules with tags written to output")
+        
+    except Exception as e:
+        error_msg = f"Error in rule-tag-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
         logger.error(error_msg)
 
 

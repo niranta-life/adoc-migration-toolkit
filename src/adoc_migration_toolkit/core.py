@@ -859,8 +859,8 @@ Features:
         if stats['zip_files'] > 0:
             print(f"ZIP files:           {stats['zip_files']}")
         
-        print(f"Files investigated:  {stats['files_investigated']}")
-        print(f"Changes made:        {stats['changes_made']}")
+        print(f"Files investigated:  {stats.get('files_investigated', 0)}")
+        print(f"Changes made:        {stats.get('changes_made', 0)}")
         print(f"Successful:          {stats['successful']}")
         print(f"Failed:              {stats['failed']}")
         
