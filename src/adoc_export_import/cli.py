@@ -577,7 +577,7 @@ def parse_segments_export_command(command: str) -> tuple:
     
     # Generate default output file if not provided
     if not output_file:
-        output_file = get_output_file_path(csv_file, f"{Path(csv_file).stem}_segments_output.csv")
+        output_file = get_output_file_path(csv_file, f"{Path(csv_file).stem}_segments_output.csv", category="asset-export")
     
     return csv_file, output_file, quiet_mode
 
@@ -602,7 +602,7 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
         
         # Generate default output file if not provided
         if not output_file:
-            output_file = get_output_file_path(csv_file, f"{Path(csv_file).stem}_segments_output.csv")
+            output_file = get_output_file_path(csv_file, f"{Path(csv_file).stem}_segments_output.csv", category="asset-export")
         
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} environment mappings from CSV file: {csv_file}")
@@ -823,15 +823,17 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
 
 def setup_autocomplete():
     """Setup autocomplete for the interactive session."""
+    import glob
     # Available commands and their completions
     commands = [
-        # 'GET',
-        # 'PUT', 
         'segments-export',
         'segments-import',
         'asset-profile-export',
         'asset-profile-import',
         'asset-config-export',
+        'asset-list-export',
+        'policy-list-export',
+        'policy-export',
         'set-output-dir',
         'guided-migration',
         'resume-migration',
@@ -843,22 +845,6 @@ def setup_autocomplete():
         'q'
     ]
     
-    # Common endpoints for completion
-    endpoints = [
-        '/catalog-server/api/assets',
-        '/catalog-server/api/assets?uid=',
-        '/catalog-server/api/assets/',
-        '/catalog-server/api/health',
-        '/catalog-server/api/connections',
-        '/catalog-server/api/assets/<asset-id>/metadata',
-        '/catalog-server/api/assets/<asset-id>/rulesWithLatestExecution',
-        '/catalog-server/api/assets/<asset-id>/scores',
-        '/catalog-server/api/assets/discover',
-        '/catalog-server/api/assets/byUid/<asset-uid>',
-        '/catalog-server/api/assets/byUid/<asset-uid>/scores',
-        '/catalog-server/api/profile/<asset-id>/config'
-    ]
-    
     # Flags for completion
     flags = [
         '--quiet',
@@ -866,82 +852,153 @@ def setup_autocomplete():
         '--dry-run',
         '--verbose'
     ]
-    
+
+    # Commands that expect a file or directory path as the next argument
+    path_arg_commands = [
+        'segments-export', 'segments-import',
+        'asset-profile-export', 'asset-profile-import',
+        'asset-config-export', 'set-output-dir',
+        'guided-migration', 'resume-migration', 'delete-migration'
+    ]
+
+    def complete_path(text):
+        """Return a list of file/directory completions for the given text."""
+        # If text is empty, list everything in current dir
+        if not text:
+            text = '.'
+        # Expand ~ to home
+        text = os.path.expanduser(text)
+        # Handle partial paths properly
+        if '/' in text:
+            # This is a partial path, split it into directory and prefix
+            dirname = os.path.dirname(text)
+            prefix = os.path.basename(text)
+            # Ensure dirname is not empty
+            if not dirname:
+                dirname = '.'
+            try:
+                if os.path.isdir(dirname):
+                    entries = [os.path.join(dirname, f) for f in os.listdir(dirname) if f.startswith(prefix)]
+                else:
+                    entries = []
+            except Exception:
+                entries = []
+        else:
+            # Single word - check if it's a directory or needs prefix matching
+            if os.path.isdir(text):
+                entries = [os.path.join(text, f) for f in os.listdir(text)]
+            else:
+                dirname = '.'
+                prefix = text
+                try:
+                    entries = [os.path.join(dirname, f) for f in os.listdir(dirname) if f.startswith(prefix)]
+                except Exception:
+                    entries = []
+        # Add trailing slash for directories
+        completions = []
+        for entry in entries:
+            if os.path.isdir(entry):
+                completions.append(entry + '/')
+            else:
+                completions.append(entry)
+        return completions
+
     def completer(text, state):
-        """Completer function for readline."""
         options = []
-        
-        # Get the current line and cursor position
         line = readline.get_line_buffer()
         words = line.split()
-        
-        if not words:
-            # If no words, suggest commands
+        # Handle empty line or just whitespace
+        if not line.strip():
+            options = commands
+        elif len(words) == 0:
             options = [cmd for cmd in commands if cmd.lower().startswith(text.lower())]
         elif len(words) == 1:
-            # First word - suggest commands
-            options = [cmd for cmd in commands if cmd.lower().startswith(text.lower())]
+            current_word = words[0]
+            if text == current_word:
+                options = [cmd for cmd in commands if cmd.lower().startswith(current_word.lower())]
+            else:
+                options = [cmd for cmd in commands if cmd.lower().startswith(text.lower())]
         elif len(words) == 2:
-            if words[0].lower() in ['segments-export', 'segments-import', 'asset-profile-export', 'asset-profile-import', 'asset-config-export']:
-                # Second word for segments-export/segments-import/asset-profile-export/asset-profile-import/asset-config-export - suggest CSV files
-                # This is a simple suggestion - could be enhanced to scan directory
-                options = ['data/samples_import_ready/segmented_spark_uids.csv', 'data/samples_import_ready/asset_uids.csv', 'data/samples_import_ready/asset-profiles-export.csv', 'data/samples/assets.csv', 'segments_output.csv']
-            elif words[0].lower() == 'set-output-dir':
-                # Second word for set-output-dir - suggest directory paths
-                options = ['data/output', 'data/custom_output', 'output', 'exports', 'data/exports', 'data/samples_import_ready']
-            elif words[0].lower() in ['guided-migration', 'resume-migration', 'delete-migration']:
-                # Second word for migration commands - suggest migration names
-                # This could be enhanced to scan actual migration files
+            cmd = words[0].lower()
+            # If the command expects a path, complete with filesystem
+            if cmd in path_arg_commands:
+                # For path completion, we need to handle the case where the user is typing
+                # a partial path like "data/sam". The text parameter might only be "sam"
+                # but we need the full context.
+                if '/' in words[1]:
+                    # User is typing a path with slashes, reconstruct the full path
+                    if text == words[1]:
+                        # User is at the end of the word, use it as is
+                        full_path = words[1]
+                    elif text.startswith(words[1]):
+                        # User is continuing to type the same word
+                        full_path = text
+                    else:
+                        # The text is just the last part, reconstruct the full path
+                        full_path = words[1][:words[1].rfind('/')+1] + text
+                    options = complete_path(full_path)
+                else:
+                    options = complete_path(text)
+            elif cmd == 'set-output-dir':
+                # Same logic for set-output-dir
+                if '/' in words[1]:
+                    if text == words[1]:
+                        full_path = words[1]
+                    elif text.startswith(words[1]):
+                        full_path = text
+                    else:
+                        full_path = words[1][:words[1].rfind('/')+1] + text
+                    options = complete_path(full_path)
+                else:
+                    options = complete_path(text)
+            elif cmd in ['guided-migration', 'resume-migration', 'delete-migration']:
+                # Could enhance to list migration state files
                 options = ['prod-to-dev', 'test-migration', 'my-migration', 'migration-1']
         elif len(words) >= 2:
-            # Additional words - suggest flags
+            cmd = words[0].lower()
             if text.startswith('--'):
                 options = [flag for flag in flags if flag.startswith(text)]
-            elif words[0].upper() == 'PUT' and len(words) == 3:
-                # Third word for PUT - suggest JSON payload start
-                options = ['{"', '{']
-            elif words[0].lower() in ['segments-export', 'segments-import', 'asset-profile-export', 'asset-profile-import', 'asset-config-export'] and len(words) >= 3:
-                # For segments-export/segments-import/asset-profile-export/asset-profile-import/asset-config-export, suggest flags after CSV file
+            elif cmd in path_arg_commands and len(words) == 2:
+                # Same path reconstruction logic
+                if '/' in words[1]:
+                    dirname = words[1][:words[1].rfind('/')+1]
+                    # If text already starts with dirname, use text as is
+                    if text.startswith(dirname):
+                        full_path = text
+                    else:
+                        full_path = dirname + text
+                    options = complete_path(full_path)
+                else:
+                    options = complete_path(text)
+            elif cmd in path_arg_commands and len(words) > 2:
+                # After the path, suggest flags
                 if text.startswith('--'):
-                    if words[0].lower() == 'segments-export':
-                        # segments-export supports --output-file and --quiet
-                        options = [flag for flag in flags if flag.startswith(text) and flag in ['--output-file', '--quiet']]
-                    elif words[0].lower() == 'asset-profile-export':
-                        # asset-profile-export supports --output-file, --quiet, and --verbose
-                        options = [flag for flag in flags if flag.startswith(text) and flag in ['--output-file', '--quiet', '--verbose']]
-                    elif words[0].lower() == 'asset-config-export':
-                        # asset-config-export supports --output-file, --quiet, and --verbose
-                        options = [flag for flag in flags if flag.startswith(text) and flag in ['--output-file', '--quiet', '--verbose']]
-                    elif words[0].lower() == 'asset-profile-import':
-                        # asset-profile-import supports --dry-run, --quiet, and --verbose
-                        options = [flag for flag in flags if flag.startswith(text) and flag in ['--dry-run', '--quiet', '--verbose']]
-                    else:
-                        # segments-import supports --dry-run, --quiet, and --verbose
-                        options = [flag for flag in flags if flag.startswith(text) and flag in ['--dry-run', '--quiet', '--verbose']]
-                elif words[-2] == '--output-file' and len(words) >= 3:
-                    # After --output-file, suggest output file names
-                    if words[0].lower() == 'asset-profile-export':
-                        options = ['data/output/output_import_ready/asset-profiles-export.csv', 'asset-profiles-export.csv', 'output.csv']
-                    elif words[0].lower() == 'asset-config-export':
-                        options = ['data/output/output_import_ready/asset-config-export.csv', 'asset-config-export.csv', 'output.csv']
-                    else:
-                        options = ['data/output/output_import_ready/segments_output.csv', 'my_segments.csv', 'output.csv']
-        
-        # Return the option at the requested state index
+                    options = [flag for flag in flags if flag.startswith(text)]
+            elif cmd == 'asset-list-export' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose']]
+            elif cmd == 'policy-list-export' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose']]
+            elif cmd == 'policy-export' and len(words) >= 2:
+                if text.startswith('--'):
+                    options = [flag for flag in flags if flag.startswith(text) and flag in ['--quiet', '--verbose', '--batch-size']]
+            elif words[-2] == '--output-file' and len(words) >= 3:
+                # After --output-file, suggest output file names
+                options = complete_path(text)
+            elif words[-2] == '--batch-size' and len(words) >= 3:
+                # After --batch-size, suggest common batch sizes
+                options = ['50', '100', '200', '500', '1000']
         if state < len(options):
             return options[state]
         else:
             return None
-    
-    # Set the completer function
     readline.set_completer(completer)
-    
-    # Enable tab completion with basic configuration
     try:
-        # Basic tab completion setup
         readline.parse_and_bind('tab: complete')
+        readline.parse_and_bind('bind ^I rl_complete')
+        print("✅ Tab completion configured successfully")
     except Exception as e:
-        # Fallback if readline configuration fails
         print(f"Warning: Could not configure tab completion: {e}")
         print("Tab completion may not work on this system.")
 
@@ -963,6 +1020,22 @@ def run_interactive(args):
             logger.error("Failed to connect to API")
             return 1
         
+        # Load global output directory from configuration
+        global GLOBAL_OUTPUT_DIR
+        GLOBAL_OUTPUT_DIR = load_global_output_directory()
+        
+        # Display current output directory status
+        print("\n" + "="*80)
+        print("ADOC INTERACTIVE MIGRATION TOOLKIT")
+        print("="*80)
+        if GLOBAL_OUTPUT_DIR:
+            print(f"📁 Output Directory: {GLOBAL_OUTPUT_DIR}")
+            print(f"💾 Configuration: Loaded from ~/.adoc_migration_config.json")
+        else:
+            print(f"📁 Output Directory: Not set (will use default timestamped directories)")
+            print(f"💡 Use 'set-output-dir <directory>' to set a persistent output directory")
+        print("="*80)
+        
         # Setup command history
         history_file = os.path.expanduser("~/.adoc_history")
         try:
@@ -979,7 +1052,7 @@ def run_interactive(args):
         while True:
             try:
                 # Get user input
-                command = input("\nADOC> ").strip()
+                command = input("\n\033[1m\033[36mADOC\033[0m > ").strip()
                 
                 if not command:
                     continue
@@ -1026,6 +1099,24 @@ def run_interactive(args):
                     csv_file, output_file, quiet_mode, verbose_mode = parse_asset_config_export_command(command)
                     if csv_file:
                         execute_asset_config_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's an asset-list-export command
+                if command.lower().startswith('asset-list-export'):
+                    quiet_mode, verbose_mode = parse_asset_list_export_command(command)
+                    execute_asset_list_export(client, logger, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's a policy-list-export command
+                if command.lower().startswith('policy-list-export'):
+                    quiet_mode, verbose_mode = parse_policy_list_export_command(command)
+                    execute_policy_list_export(client, logger, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's a policy-export command
+                if command.lower().startswith('policy-export'):
+                    quiet_mode, verbose_mode, batch_size = parse_policy_export_command(command)
+                    execute_policy_export(client, logger, quiet_mode, verbose_mode, batch_size)
                     continue
                 
                 # Check if it's a set-output-dir command
@@ -1469,7 +1560,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     
     # Generate default output file if not provided
     if not output_file:
-        output_file = get_output_file_path(csv_file, "asset-profiles-export.csv")
+        output_file = get_output_file_path(csv_file, "asset-profiles-export.csv", category="asset-export")
     
     return csv_file, output_file, quiet_mode, verbose_mode
 
@@ -1495,7 +1586,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         
         # Generate default output file if not provided
         if not output_file:
-            output_file = get_output_file_path(csv_file, "asset-profiles-export.csv")
+            output_file = get_output_file_path(csv_file, "asset-profiles-export.csv", category="asset-export")
         
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file: {csv_file}")
@@ -2056,7 +2147,7 @@ def parse_asset_config_export_command(command: str) -> tuple:
     
     # Generate default output file if not provided
     if not output_file:
-        output_file = get_output_file_path(csv_file, "asset-config-export.csv")
+        output_file = get_output_file_path(csv_file, "asset-config-export.csv", category="asset-export")
     
     return csv_file, output_file, quiet_mode, verbose_mode
 
@@ -2082,7 +2173,7 @@ def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, o
         
         # Generate default output file if not provided
         if not output_file:
-            output_file = get_output_file_path(csv_file, "asset-config-export.csv")
+            output_file = get_output_file_path(csv_file, "asset-config-export.csv", category="asset-export")
         
         if not quiet_mode:
             print(f"\nProcessing {len(uids)} asset config exports from CSV file: {csv_file}")
@@ -2561,6 +2652,69 @@ def show_interactive_help():
     print("      • Shows HTTP headers and response objects in verbose mode")
     print("      • Output format: target-env, config_json (compressed)")
     
+    print(f"\n  {BOLD}asset-list-export{RESET} [--quiet] [--verbose]")
+    print("    Description: Export all assets from source environment to CSV file")
+    print("    Arguments:")
+    print("      --quiet: Suppress console output, show only summary")
+    print("      --verbose: Show detailed output including headers and responses")
+    print("    Examples:")
+    print("      asset-list-export")
+    print("      asset-list-export --quiet")
+    print("      asset-list-export --verbose")
+    print("    Behavior:")
+    print("      • Uses '/catalog-server/api/assets/discover' endpoint with pagination")
+    print("      • First call gets total count with size=0&page=0")
+    print("      • Retrieves all pages with size=500 (default)")
+    print("      • Output file: asset-all-export.csv in global output directory")
+    print("      • CSV columns: uid, id")
+    print("      • Sorts output by uid first, then by id")
+    print("      • Shows page-by-page progress in quiet mode")
+    print("      • Shows detailed request/response in verbose mode")
+    print("      • Provides comprehensive statistics upon completion")
+    
+    print(f"\n  {BOLD}policy-list-export{RESET} [--quiet] [--verbose]")
+    print("    Description: Export all policies from source environment to CSV file")
+    print("    Arguments:")
+    print("      --quiet: Suppress console output, show only summary")
+    print("      --verbose: Show detailed output including headers and responses")
+    print("    Examples:")
+    print("      policy-list-export")
+    print("      policy-list-export --quiet")
+    print("      policy-list-export --verbose")
+    print("    Behavior:")
+    print("      • Uses '/catalog-server/api/rules' endpoint with pagination")
+    print("      • First call gets total count with page=0&size=0")
+    print("      • Retrieves all pages with size=1000 (default)")
+    print("      • Output file: policies-all-export.csv in global output directory")
+    print("      • CSV columns: id, type, engineType")
+    print("      • Sorts output by id")
+    print("      • Shows page-by-page progress in quiet mode")
+    print("      • Shows detailed request/response in verbose mode")
+    print("      • Provides comprehensive statistics upon completion")
+    
+    print(f"\n  {BOLD}policy-export{RESET} [--quiet] [--verbose] [--batch-size <size>]")
+    print("    Description: Export policy definitions by type from source environment to ZIP files")
+    print("    Arguments:")
+    print("      --quiet: Suppress console output, show only summary")
+    print("      --verbose: Show detailed output including headers and responses")
+    print("      --batch-size: Number of policies to export in each batch (default: 100)")
+    print("    Examples:")
+    print("      policy-export")
+    print("      policy-export --quiet")
+    print("      policy-export --verbose")
+    print("      policy-export --batch-size 50")
+    print("      policy-export --batch-size 200 --quiet")
+    print("    Behavior:")
+    print("      • Reads policies from policies-all-export.csv (generated by policy-list-export)")
+    print("      • Groups policies by type (data-quality, data-governance, etc.)")
+    print("      • Exports each type in batches using '/catalog-server/api/rules/export/policy-definitions'")
+    print("      • Output files: <type>-<timestamp>-<range>.zip in global output directory")
+    print("      • Default batch size: 100 policies per ZIP file")
+    print("      • Filename format: data-quality-07-04-2025-17-21-0-99.zip")
+    print("      • Shows batch-by-batch progress in quiet mode")
+    print("      • Shows detailed request/response in verbose mode")
+    print("      • Provides comprehensive statistics upon completion")
+    
     print(f"\n{BOLD}🛠️ UTILITY COMMANDS:{RESET}")
     print(f"  {BOLD}set-output-dir{RESET} <directory>")
     print("    Description: Set global output directory for all export commands")
@@ -2569,6 +2723,13 @@ def show_interactive_help():
     print("    Examples:")
     print("      set-output-dir /path/to/my/output")
     print("      set-output-dir data/custom_output")
+    print("    Features:")
+    print("      • Sets the output directory for all export commands")
+    print("      • Creates the directory if it doesn't exist")
+    print("      • Validates write permissions")
+    print("      • Saves configuration to ~/.adoc_migration_config.json")
+    print("      • Persists across multiple interactive sessions")
+    print("      • Can be changed anytime with another set-output-dir command")
     
     print(f"\n{BOLD}🚀 GUIDED MIGRATION COMMANDS:{RESET}")
     print(f"  {BOLD}guided-migration{RESET} <name>")
@@ -2629,6 +2790,9 @@ def show_interactive_help():
     print("  • asset-profile-export: Always exports from source environment")
     print("  • asset-profile-import: Always imports to target environment")
     print("  • asset-config-export: Always exports from source environment")
+    print("  • asset-list-export: Always exports from source environment")
+    print("  • policy-list-export: Always exports from source environment")
+    print("  • policy-export: Always exports from source environment")
     print(f"\n{BOLD}💡 TIPS:{RESET}")
     print("  • Use TAB key for command autocomplete")
     print("  • Use ↑/↓ arrow keys to navigate command history")
@@ -2641,7 +2805,7 @@ def show_interactive_help():
     print(f"\n{BOLD}📁 FILE LOCATIONS:{RESET}")
     print("  • Input CSV files: data/samples_import_ready/")
     print("  • Output CSV files: *_import_ready/ directories (or custom output directory)")
-    print("  • Log files: policy_export_formatter_*.log")
+    print("  • Log files: adoc-migration-toolkit-YYYYMMDD.log")
     
     print("="*80)
 
@@ -2649,56 +2813,77 @@ def show_interactive_help():
 # Global output directory for all export commands
 GLOBAL_OUTPUT_DIR = None
 
+# Configuration file for persistent settings
+CONFIG_FILE = Path.home() / ".adoc_migration_config.json"
 
-def set_global_output_directory(directory: str, logger: logging.Logger) -> bool:
-    """Set the global output directory for all export commands.
+
+def load_global_output_directory() -> Path:
+    """Load the global output directory from configuration file.
     
-    Args:
-        directory: Path to the output directory
-        logger: Logger instance
-        
     Returns:
-        bool: True if successful, False otherwise
+        Path: The loaded output directory or None if not found
     """
     try:
-        output_path = Path(directory).resolve()
-        
-        # Create directory if it doesn't exist
-        output_path.mkdir(parents=True, exist_ok=True)
-        
-        # Verify it's a directory and writable
-        if not output_path.is_dir():
-            raise ValueError(f"Path is not a directory: {directory}")
-        
-        # Test write permissions
-        test_file = output_path / ".test_write"
-        try:
-            test_file.write_text("test")
-            test_file.unlink()
-        except Exception as e:
-            raise PermissionError(f"Cannot write to directory {directory}: {e}")
-        
-        global GLOBAL_OUTPUT_DIR
-        GLOBAL_OUTPUT_DIR = output_path
-        
-        logger.info(f"Global output directory set to: {GLOBAL_OUTPUT_DIR}")
-        print(f"✅ Global output directory set to: {GLOBAL_OUTPUT_DIR}")
-        return True
-        
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                output_dir = config.get('output_directory')
+                if output_dir:
+                    output_path = Path(output_dir)
+                    # Verify the directory still exists and is writable
+                    if output_path.exists() and output_path.is_dir():
+                        # Test write permissions
+                        test_file = output_path / ".test_write"
+                        try:
+                            test_file.write_text("test")
+                            test_file.unlink()
+                            return output_path
+                        except Exception:
+                            # Directory exists but not writable, remove from config
+                            save_global_output_directory(None)
+                            return None
+                    else:
+                        # Directory doesn't exist, remove from config
+                        save_global_output_directory(None)
+                        return None
     except Exception as e:
-        error_msg = f"Failed to set output directory '{directory}': {e}"
-        print(f"❌ {error_msg}")
-        logger.error(error_msg)
-        return False
+        # If there's any error reading the config, just return None
+        return None
+    return None
 
 
-def get_output_file_path(csv_file: str, default_filename: str, custom_output_file: str = None) -> Path:
+def save_global_output_directory(output_dir: Path):
+    """Save the global output directory to configuration file.
+    
+    Args:
+        output_dir: The output directory to save, or None to clear
+    """
+    try:
+        config = {}
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+        
+        if output_dir:
+            config['output_directory'] = str(output_dir.resolve())
+        else:
+            config.pop('output_directory', None)
+        
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        # Silently fail if we can't save the config
+        pass
+
+
+def get_output_file_path(csv_file: str, default_filename: str, custom_output_file: str = None, category: str = None) -> Path:
     """Get the output file path based on global output directory and custom settings.
     
     Args:
         csv_file: Path to the input CSV file
         default_filename: Default filename to use
         custom_output_file: Custom output file path (overrides global directory)
+        category: Subdirectory under output dir (e.g., 'policy-export', 'asset-export')
         
     Returns:
         Path: Output file path
@@ -2708,16 +2893,18 @@ def get_output_file_path(csv_file: str, default_filename: str, custom_output_fil
         return Path(custom_output_file)
     
     if GLOBAL_OUTPUT_DIR:
-        # Use global output directory
-        return GLOBAL_OUTPUT_DIR / default_filename
-    
-    # Fall back to original logic
-    csv_path = Path(csv_file)
-    if "_import_ready" in csv_path.parent.name:
-        return csv_path.parent / default_filename
+        base_dir = GLOBAL_OUTPUT_DIR
     else:
-        import_ready_dir = csv_path.parent / f"{csv_path.parent.name}_import_ready"
-        return import_ready_dir / default_filename
+        from datetime import datetime
+        base_dir = Path.cwd() / f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d%H%M')}"
+        base_dir.mkdir(parents=True, exist_ok=True)
+    
+    if category:
+        category_dir = base_dir / category
+        category_dir.mkdir(parents=True, exist_ok=True)
+        return category_dir / default_filename
+    else:
+        return base_dir / default_filename
 
 
 def execute_guided_migration(migration_name: str, client, logger: logging.Logger):
@@ -3204,6 +3391,892 @@ def execute_list_migrations(logger: logging.Logger):
             print(f"Current step: {step_info['title']}")
             print(f"Completed: {len(state.completed_steps)}/{len(guided_migration.STEPS)} steps")
             print("-" * 40)
+
+
+def parse_asset_list_export_command(command: str) -> tuple:
+    """Parse an asset-list-export command string into components.
+    
+    Args:
+        command: Command string like "asset-list-export [--quiet] [--verbose]"
+        
+    Returns:
+        Tuple of (quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'asset-list-export':
+        return False, False
+    
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags
+    if '--quiet' in parts:
+        quiet_mode = True
+        verbose_mode = False  # Quiet overrides verbose
+        parts.remove('--quiet')
+    
+    if '--verbose' in parts:
+        verbose_mode = True
+        quiet_mode = False  # Verbose overrides quiet
+        parts.remove('--verbose')
+    
+    return quiet_mode, verbose_mode
+
+
+def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the asset-list-export command.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Determine output file path
+        if GLOBAL_OUTPUT_DIR:
+            output_file = GLOBAL_OUTPUT_DIR / "asset-all-export.csv"
+        else:
+            output_file = Path("asset-all-export.csv")
+        
+        if not quiet_mode:
+            print(f"\nExporting all assets from ADOC environment")
+            print(f"Output will be written to: {output_file}")
+            if GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Step 1: Get total count of assets
+        if not quiet_mode:
+            print("Getting total asset count...")
+        
+        if verbose_mode:
+            print("\nGET Request Headers:")
+            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0")
+            print(f"  Method: GET")
+            print(f"  Content-Type: application/json")
+            print(f"  Authorization: Bearer [REDACTED]")
+            if hasattr(client, 'tenant') and client.tenant:
+                print(f"  X-Tenant: {client.tenant}")
+        
+        count_response = client.make_api_call(
+            endpoint="/catalog-server/api/assets/discover?size=0&page=0",
+            method='GET'
+        )
+        
+        if verbose_mode:
+            print("\nCount Response:")
+            print(json.dumps(count_response, indent=2, ensure_ascii=False))
+        
+        # Extract total count
+        if not count_response or 'meta' not in count_response or 'count' not in count_response['meta']:
+            error_msg = "Failed to get total asset count from response"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        total_count = count_response['meta']['count']
+        page_size = 500  # Default page size
+        total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+        
+        if not quiet_mode:
+            print(f"Total assets found: {total_count}")
+            print(f"Page size: {page_size}")
+            print(f"Total pages to retrieve: {total_pages}")
+            print("="*80)
+        
+        # Step 2: Retrieve all pages and collect assets
+        all_assets = []
+        successful_pages = 0
+        failed_pages = 0
+        
+        for page in range(total_pages):
+            if not quiet_mode:
+                print(f"\n[Page {page + 1}/{total_pages}] Retrieving assets...")
+            
+            try:
+                if verbose_mode:
+                    print(f"\nGET Request Headers:")
+                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(client, 'tenant') and client.tenant:
+                        print(f"  X-Tenant: {client.tenant}")
+                
+                page_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}",
+                    method='GET'
+                )
+                
+                if verbose_mode:
+                    print(f"\nPage {page + 1} Response:")
+                    print(json.dumps(page_response, indent=2, ensure_ascii=False))
+                
+                # Extract assets from response
+                if page_response and 'data' in page_response and 'assets' in page_response['data']:
+                    page_assets = page_response['data']['assets']
+                    # Extract the actual asset objects from the nested structure
+                    actual_assets = []
+                    for asset_wrapper in page_assets:
+                        if 'asset' in asset_wrapper:
+                            actual_assets.append(asset_wrapper['asset'])
+                        else:
+                            # Fallback: if no 'asset' wrapper, use the object directly
+                            actual_assets.append(asset_wrapper)
+                    
+                    all_assets.extend(actual_assets)
+                    
+                    if not quiet_mode:
+                        print(f"✅ Page {page + 1}: Retrieved {len(actual_assets)} assets")
+                    else:
+                        print(f"✅ Page {page + 1}/{total_pages}: {len(actual_assets)} assets")
+                    
+                    successful_pages += 1
+                else:
+                    # Debug: Let's see what the actual response structure looks like
+                    if not quiet_mode:
+                        print(f"❌ Page {page + 1}: Unexpected response structure")
+                        print("Response keys:", list(page_response.keys()) if page_response else "No response")
+                        if page_response and 'data' in page_response:
+                            print("Data keys:", list(page_response['data'].keys()))
+                        if page_response:
+                            print("Sample response structure:")
+                            print(json.dumps(page_response, indent=2, ensure_ascii=False)[:1000] + "...")
+                    
+                    # Try alternative response structures
+                    assets_found = False
+                    if page_response and 'data' in page_response:
+                        # Try different possible locations for assets
+                        possible_asset_locations = ['assets', 'asset', 'items', 'results']
+                        for location in possible_asset_locations:
+                            if location in page_response['data']:
+                                page_assets = page_response['data'][location]
+                                if isinstance(page_assets, list):
+                                    # Handle nested asset structure
+                                    actual_assets = []
+                                    for asset_wrapper in page_assets:
+                                        if 'asset' in asset_wrapper:
+                                            actual_assets.append(asset_wrapper['asset'])
+                                        else:
+                                            actual_assets.append(asset_wrapper)
+                                    
+                                    all_assets.extend(actual_assets)
+                                    if not quiet_mode:
+                                        print(f"✅ Page {page + 1}: Found {len(actual_assets)} assets in 'data.{location}'")
+                                    else:
+                                        print(f"✅ Page {page + 1}/{total_pages}: {len(actual_assets)} assets")
+                                    successful_pages += 1
+                                    assets_found = True
+                                    break
+                    
+                    if not assets_found:
+                        error_msg = f"Invalid response format for page {page + 1} - no assets found"
+                        if not quiet_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        failed_pages += 1
+                    
+            except Exception as e:
+                error_msg = f"Failed to retrieve page {page + 1}: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_pages += 1
+        
+        # Step 3: Write assets to CSV file
+        if not quiet_mode:
+            print(f"\nWriting {len(all_assets)} assets to CSV file...")
+        
+        # Create output directory if needed
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['uid', 'id'])
+            
+            # Write asset data
+            for asset in all_assets:
+                uid = asset.get('uid', '')
+                asset_id = asset.get('id', '')
+                
+                writer.writerow([uid, asset_id])
+        
+        # Step 4: Sort the CSV file by uid, then id
+        if not quiet_mode:
+            print("Sorting CSV file by uid, then id...")
+        
+        # Read all rows
+        rows = []
+        with open(output_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            rows = list(reader)
+        
+        # Sort rows: first by uid, then by id
+        def sort_key(row):
+            uid = row[0] if len(row) > 0 else ''
+            asset_id = row[1] if len(row) > 1 else ''
+            # Convert asset_id to int for proper numeric sorting, fallback to string
+            try:
+                asset_id_int = int(asset_id) if asset_id else 0
+            except (ValueError, TypeError):
+                asset_id_int = 0
+            return (uid, asset_id_int)
+        
+        rows.sort(key=sort_key)
+        
+        # Write sorted data back to file
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(header)
+            writer.writerows(rows)
+        
+        # Step 5: Print statistics
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("ASSET LIST EXPORT COMPLETED")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total assets exported: {len(all_assets)}")
+            print(f"Successful pages: {successful_pages}")
+            print(f"Failed pages: {failed_pages}")
+            print(f"Total pages processed: {total_pages}")
+            
+            # Additional statistics
+            print(f"\nAsset Statistics:")
+            print(f"  Total assets exported: {len(all_assets)}")
+            print("="*80)
+        else:
+            print(f"✅ Asset list export completed: {len(all_assets)} assets exported to {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error in asset-list-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+
+
+def parse_guided_migration_command(command: str) -> str:
+    """Parse a guided-migration command string into components.
+    
+    Args:
+        command: Command string like "guided-migration <name>"
+        
+    Returns:
+        str: Migration name or None if invalid
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'guided-migration':
+        return None
+    
+    if len(parts) < 2:
+        raise ValueError("Migration name is required for guided-migration command")
+    
+    # Join remaining parts in case name contains spaces
+    name = ' '.join(parts[1:])
+    return name
+
+
+def parse_policy_list_export_command(command: str) -> tuple:
+    """Parse a policy-list-export command string into components.
+    
+    Args:
+        command: Command string like "policy-list-export [--quiet] [--verbose]"
+        
+    Returns:
+        Tuple of (quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'policy-list-export':
+        return False, False
+    
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags
+    if '--quiet' in parts:
+        quiet_mode = True
+        verbose_mode = False  # Quiet overrides verbose
+        parts.remove('--quiet')
+    
+    if '--verbose' in parts:
+        verbose_mode = True
+        quiet_mode = False  # Verbose overrides quiet
+        parts.remove('--verbose')
+    
+    return quiet_mode, verbose_mode
+
+
+def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the policy-list-export command.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Determine output file path using the policy-export category
+        output_file = get_output_file_path("", "policies-all-export.csv", category="policy-export")
+        
+        if not quiet_mode:
+            print(f"\nExporting all policies from ADOC environment")
+            print(f"Output will be written to: {output_file}")
+            if GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Step 1: Get total count of policies
+        if not quiet_mode:
+            print("Getting total policy count...")
+        
+        if verbose_mode:
+            print("\nGET Request Headers:")
+            print(f"  Endpoint: /catalog-server/api/rules?page=0&size=0")
+            print(f"  Method: GET")
+            print(f"  Content-Type: application/json")
+            print(f"  Authorization: Bearer [REDACTED]")
+            if hasattr(client, 'tenant') and client.tenant:
+                print(f"  X-Tenant: {client.tenant}")
+        
+        count_response = client.make_api_call(
+            endpoint="/catalog-server/api/rules?page=0&size=0",
+            method='GET'
+        )
+        
+        if verbose_mode:
+            print("\nCount Response:")
+            print(json.dumps(count_response, indent=2, ensure_ascii=False))
+        
+        # Extract total count
+        if not count_response or 'meta' not in count_response or 'count' not in count_response['meta']:
+            error_msg = "Failed to get total policy count from response"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        total_count = count_response['meta']['count']
+        page_size = 1000  # Default page size
+        total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+        
+        if not quiet_mode:
+            print(f"Total policies found: {total_count}")
+            print(f"Page size: {page_size}")
+            print(f"Total pages to retrieve: {total_pages}")
+            print("="*80)
+        
+        # Step 2: Retrieve all pages and collect policies
+        all_policies = []
+        successful_pages = 0
+        failed_pages = 0
+        
+        for page in range(total_pages):
+            if not quiet_mode:
+                print(f"\n[Page {page + 1}/{total_pages}] Retrieving policies...")
+            
+            try:
+                if verbose_mode:
+                    print(f"\nGET Request Headers:")
+                    print(f"  Endpoint: /catalog-server/api/rules?page={page}&size={page_size}")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(client, 'tenant') and client.tenant:
+                        print(f"  X-Tenant: {client.tenant}")
+                
+                page_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}",
+                    method='GET'
+                )
+                
+                if verbose_mode:
+                    print(f"\nPage {page + 1} Response:")
+                    print(json.dumps(page_response, indent=2, ensure_ascii=False))
+                
+                # Extract policies from response
+                if page_response and 'rules' in page_response:
+                    page_policies = page_response['rules']
+                    # Extract the actual policy objects from the nested structure
+                    actual_policies = []
+                    for policy_wrapper in page_policies:
+                        if 'rule' in policy_wrapper:
+                            actual_policies.append(policy_wrapper['rule'])
+                        else:
+                            # Fallback: if no 'rule' wrapper, use the object directly
+                            actual_policies.append(policy_wrapper)
+                    
+                    all_policies.extend(actual_policies)
+                    
+                    if not quiet_mode:
+                        print(f"✅ Page {page + 1}: Retrieved {len(actual_policies)} policies")
+                    else:
+                        print(f"✅ Page {page + 1}/{total_pages}: {len(actual_policies)} policies")
+                    
+                    successful_pages += 1
+                else:
+                    error_msg = f"Invalid response format for page {page + 1} - no policies found"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_pages += 1
+                    
+            except Exception as e:
+                error_msg = f"Failed to retrieve page {page + 1}: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_pages += 1
+        
+        # Step 3: Write policies to CSV file
+        if not quiet_mode:
+            print(f"\nWriting {len(all_policies)} policies to CSV file...")
+        
+        # Create output directory if needed
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['id', 'type', 'engineType'])
+            
+            # Write policy data
+            for policy in all_policies:
+                policy_id = policy.get('id', '')
+                policy_type = policy.get('type', '') or ''  # Convert None to empty string
+                engine_type = policy.get('engineType', '') or ''  # Convert None to empty string
+                
+                writer.writerow([policy_id, policy_type, engine_type])
+        
+        # Step 4: Sort the CSV file by id
+        if not quiet_mode:
+            print("Sorting CSV file by id...")
+        
+        # Read all rows
+        rows = []
+        with open(output_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            rows = list(reader)
+        
+        # Sort rows by id
+        def sort_key(row):
+            policy_id = row[0] if len(row) > 0 else ''
+            # Convert policy_id to int for proper numeric sorting, fallback to string
+            try:
+                policy_id_int = int(policy_id) if policy_id else 0
+            except (ValueError, TypeError):
+                policy_id_int = 0
+            return policy_id_int
+        
+        rows.sort(key=sort_key)
+        
+        # Write sorted data back to file
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(header)
+            writer.writerows(rows)
+        
+        # Step 5: Print statistics
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("POLICY LIST EXPORT COMPLETED")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total policies exported: {len(all_policies)}")
+            print(f"Successful pages: {successful_pages}")
+            print(f"Failed pages: {failed_pages}")
+            print(f"Total pages processed: {total_pages}")
+            
+            # Additional statistics
+            type_counts = {}
+            engine_type_counts = {}
+            
+            for policy in all_policies:
+                policy_type = policy.get('type', '') or 'UNKNOWN'
+                engine_type = policy.get('engineType', '') or 'UNKNOWN'
+                
+                type_counts[policy_type] = type_counts.get(policy_type, 0) + 1
+                engine_type_counts[engine_type] = engine_type_counts.get(engine_type, 0) + 1
+            
+            print(f"\nPolicy Statistics:")
+            print(f"  Total policies exported: {len(all_policies)}")
+            print(f"  Policy types: {len(type_counts)}")
+            for policy_type, count in sorted(type_counts.items()):
+                print(f"    {policy_type}: {count}")
+            print(f"  Engine types: {len(engine_type_counts)}")
+            for engine_type, count in sorted(engine_type_counts.items()):
+                print(f"    {engine_type}: {count}")
+            print("="*80)
+        else:
+            print(f"✅ Policy list export completed: {len(all_policies)} policies exported to {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error in policy-list-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+
+
+def parse_policy_export_command(command: str) -> tuple:
+    """Parse a policy-export command string into components.
+    
+    Args:
+        command: Command string like "policy-export [--quiet] [--verbose] [--batch-size <size>]"
+        
+    Returns:
+        Tuple of (quiet_mode, verbose_mode, batch_size)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'policy-export':
+        return False, False, 100
+    
+    quiet_mode = False
+    verbose_mode = False
+    batch_size = 100  # Default batch size
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--batch-size' and i + 1 < len(parts):
+            try:
+                batch_size = int(parts[i + 1])
+                if batch_size <= 0:
+                    raise ValueError("Batch size must be positive")
+                parts.pop(i)  # Remove --batch-size
+                parts.pop(i)  # Remove the batch size value
+            except (ValueError, IndexError):
+                raise ValueError("Invalid batch size. Must be a positive integer")
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        else:
+            i += 1
+    
+    return quiet_mode, verbose_mode, batch_size
+
+
+def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 100):
+    """Execute the policy-export command.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        batch_size: Number of policies to export in each batch
+    """
+    try:
+        # Determine input and output file paths
+        if GLOBAL_OUTPUT_DIR:
+            input_file = GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+            output_dir = GLOBAL_OUTPUT_DIR / "policy-export"
+        else:
+            # Use the same logic as policy-list-export to find the input file
+            # Look for the most recent adoc-migration-toolkit-YYYYMMDDHHMM directory
+            current_dir = Path.cwd()
+            toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+            
+            if not toolkit_dirs:
+                error_msg = "No adoc-migration-toolkit directory found. Please run 'policy-list-export' first."
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            # Sort by creation time and use the most recent
+            toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+            latest_toolkit_dir = toolkit_dirs[0]
+            
+            input_file = latest_toolkit_dir / "policy-export" / "policies-all-export.csv"
+            output_dir = latest_toolkit_dir / "policy-export"
+        
+        if not quiet_mode:
+            print(f"\nExporting policy definitions by type")
+            print(f"Input file: {input_file}")
+            print(f"Output directory: {output_dir}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Check if input file exists
+        if not input_file.exists():
+            error_msg = f"Input file does not exist: {input_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'policy-list-export' first to generate the input file")
+            logger.error(error_msg)
+            return
+        
+        # Read policies from CSV file
+        if not quiet_mode:
+            print("Reading policies from CSV file...")
+        
+        policies_by_type = {}
+        total_policies = 0
+        
+        with open(input_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            
+            if len(header) != 3 or header[0] != 'id' or header[1] != 'type' or header[2] != 'engineType':
+                error_msg = f"Invalid CSV format. Expected header: ['id', 'type', 'engineType'], got: {header}"
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            for row_num, row in enumerate(reader, start=2):
+                if len(row) != 3:
+                    logger.warning(f"Row {row_num}: Expected 3 columns, got {len(row)}")
+                    continue
+                
+                policy_id = row[0].strip()
+                policy_type = row[1].strip()
+                engine_type = row[2].strip()
+                
+                if policy_id and policy_type:
+                    if policy_type not in policies_by_type:
+                        policies_by_type[policy_type] = []
+                    policies_by_type[policy_type].append(policy_id)
+                    total_policies += 1
+                else:
+                    logger.warning(f"Row {row_num}: Empty policy ID or type")
+        
+        if not policies_by_type:
+            error_msg = "No valid policies found in CSV file"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"Found {total_policies} policies across {len(policies_by_type)} types")
+            print("="*80)
+        
+        # Generate timestamp for all files
+        timestamp = datetime.now().strftime("%m-%d-%Y-%H-%M")
+        
+        # Export policies by type in batches
+        successful_exports = 0
+        failed_exports = 0
+        export_results = {}
+        
+        for policy_type, policy_ids in policies_by_type.items():
+            if not quiet_mode:
+                print(f"\nProcessing policy type: {policy_type}")
+                print(f"Number of policies: {len(policy_ids)}")
+            else:
+                print(f"Processing {policy_type}: {len(policy_ids)} policies")
+            
+            # Process policies in batches
+            total_batches = (len(policy_ids) + batch_size - 1) // batch_size  # Ceiling division
+            
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min((batch_num + 1) * batch_size, len(policy_ids))
+                batch_ids = policy_ids[start_idx:end_idx]
+                
+                if not quiet_mode:
+                    print(f"  Batch {batch_num + 1}/{total_batches}: IDs {start_idx}-{end_idx-1} ({len(batch_ids)} policies)")
+                else:
+                    print(f"  Batch {batch_num + 1}/{total_batches}: {len(batch_ids)} policies")
+                
+                # Generate filename with range information
+                filename = f"{policy_type.lower()}-{timestamp}-{start_idx}-{end_idx-1}.zip"
+                output_file = output_dir / filename
+                
+                # Prepare query parameters
+                ids_param = ','.join(batch_ids)
+                query_params = {
+                    'ruleStatus': 'ALL',
+                    'includeTags': 'true',
+                    'ids': ids_param,
+                    'filename': filename
+                }
+                
+                # Build endpoint with query parameters
+                endpoint = "/catalog-server/api/rules/export/policy-definitions"
+                query_string = '&'.join([f"{k}={v}" for k, v in query_params.items()])
+                full_endpoint = f"{endpoint}?{query_string}"
+                
+                if verbose_mode:
+                    print(f"\nGET Request Headers:")
+                    print(f"  Endpoint: {full_endpoint}")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/zip")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(client, 'tenant') and client.tenant:
+                        print(f"  X-Tenant: {client.tenant}")
+                    print(f"  Query Parameters:")
+                    for k, v in query_params.items():
+                        if k == 'ids':
+                            print(f"    {k}: {len(batch_ids)} IDs (first few: {', '.join(batch_ids[:3])}{'...' if len(batch_ids) > 3 else ''})")
+                        else:
+                            print(f"    {k}: {v}")
+                
+                try:
+                    # Make API call to get ZIP file
+                    response = client.make_api_call(
+                        endpoint=full_endpoint,
+                        method='GET',
+                        return_binary=True
+                    )
+                    
+                    if verbose_mode:
+                        print(f"\nResponse:")
+                        print(f"  Status: Success")
+                        print(f"  Content-Type: application/zip")
+                        print(f"  File size: {len(response) if response else 0} bytes")
+                    
+                    # Write ZIP file to output directory
+                    if response:
+                        with open(output_file, 'wb') as f:
+                            f.write(response)
+                        
+                        if not quiet_mode:
+                            print(f"✅ Exported to: {filename}")
+                        else:
+                            print(f"✅ {filename}")
+                        
+                        # Store result for this batch
+                        batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                        export_results[batch_key] = {
+                            'success': True,
+                            'filename': filename,
+                            'count': len(batch_ids),
+                            'file_size': len(response),
+                            'range': f"{start_idx}-{end_idx-1}"
+                        }
+                        successful_exports += 1
+                    else:
+                        error_msg = f"Empty response for {policy_type} batch {batch_num + 1}"
+                        if not quiet_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        
+                        batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                        export_results[batch_key] = {
+                            'success': False,
+                            'filename': filename,
+                            'count': len(batch_ids),
+                            'error': error_msg,
+                            'range': f"{start_idx}-{end_idx-1}"
+                        }
+                        failed_exports += 1
+                        
+                except Exception as e:
+                    error_msg = f"Failed to export {policy_type} batch {batch_num + 1}: {e}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    
+                    batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                    export_results[batch_key] = {
+                        'success': False,
+                        'filename': filename,
+                        'count': len(batch_ids),
+                        'error': str(e),
+                        'range': f"{start_idx}-{end_idx-1}"
+                    }
+                    failed_exports += 1
+        
+        # Print summary
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("POLICY EXPORT COMPLETED")
+            print("="*80)
+            print(f"Output directory: {output_dir}")
+            print(f"Timestamp: {timestamp}")
+            print(f"Batch size: {batch_size}")
+            print(f"Total policy types processed: {len(policies_by_type)}")
+            print(f"Successful exports: {successful_exports}")
+            print(f"Failed exports: {failed_exports}")
+            
+            print(f"\nExport Results:")
+            # Group results by policy type for better display
+            results_by_type = {}
+            for batch_key, result in export_results.items():
+                policy_type = batch_key.split('_batch_')[0]
+                if policy_type not in results_by_type:
+                    results_by_type[policy_type] = []
+                results_by_type[policy_type].append(result)
+            
+            for policy_type, batch_results in results_by_type.items():
+                print(f"  {policy_type}:")
+                for result in batch_results:
+                    if result['success']:
+                        print(f"    ✅ Batch {result['range']}: {result['count']} policies -> {result['filename']} ({result['file_size']} bytes)")
+                    else:
+                        print(f"    ❌ Batch {result['range']}: {result['count']} policies -> {result['error']}")
+            
+            print("="*80)
+        else:
+            print(f"\n✅ Policy export completed: {successful_exports} successful, {failed_exports} failed")
+            print(f"Output directory: {output_dir}")
+            print(f"Timestamp: {timestamp}")
+            print(f"Batch size: {batch_size}")
+        
+    except Exception as e:
+        error_msg = f"Error in policy-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+
+
+def set_global_output_directory(directory: str, logger: logging.Logger) -> bool:
+    """Set the global output directory for all export commands.
+    
+    Args:
+        directory: Path to the output directory
+        logger: Logger instance
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        output_path = Path(directory).resolve()
+        
+        # Create directory if it doesn't exist
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # Verify it's a directory and writable
+        if not output_path.is_dir():
+            raise ValueError(f"Path is not a directory: {directory}")
+        
+        # Test write permissions
+        test_file = output_path / ".test_write"
+        try:
+            test_file.write_text("test")
+            test_file.unlink()
+        except Exception as e:
+            raise PermissionError(f"Cannot write to directory {directory}: {e}")
+        
+        global GLOBAL_OUTPUT_DIR
+        GLOBAL_OUTPUT_DIR = output_path
+        
+        # Save to configuration file for persistence
+        save_global_output_directory(output_path)
+        
+        logger.info(f"Global output directory set to: {GLOBAL_OUTPUT_DIR}")
+        print(f"✅ Global output directory set to: {GLOBAL_OUTPUT_DIR}")
+        print(f"💾 Directory saved to configuration for future sessions")
+        return True
+        
+    except Exception as e:
+        error_msg = f"Failed to set output directory '{directory}': {e}"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        return False
 
 
 if __name__ == "__main__":

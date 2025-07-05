@@ -158,19 +158,20 @@ class AcceldataAPIClient:
         self.logger.info("API client session closed")
 
     def make_api_call(self, endpoint: str, method: str = 'GET', json_payload: Optional[Dict[str, Any]] = None, 
-                     use_target_auth: bool = False, use_target_tenant: bool = False) -> Dict[str, Any]:
+                     use_target_auth: bool = False, use_target_tenant: bool = False, return_binary: bool = False) -> Any:
         """Make a generic API call with configurable endpoint and method.
         
         Args:
             endpoint: The API endpoint (e.g., '/catalog-server/api/assets?uid=123')
             method: HTTP method ('GET' or 'PUT')
-            json_payload: JSON payload for PUT requests
+            json_payload: JSON payload for PUT/POST requests
             use_target_auth: Whether to use target access/secret keys instead of source
             use_target_tenant: Whether to use target tenant instead of source
-            
+            return_binary: If True, return raw response content (for binary data like ZIP files)
+        
         Returns:
-            Dictionary containing the API response
-            
+            Dictionary containing the API response, or bytes if return_binary is True
+        
         Raises:
             RequestException: If the API call fails
         """
@@ -226,9 +227,13 @@ class AcceldataAPIClient:
             
             response.raise_for_status()
             
-            data = response.json()
-            self.logger.info(f"Successfully completed {method} request to {endpoint}")
-            return data
+            if return_binary:
+                self.logger.info(f"Returning binary content for {endpoint}")
+                return response.content
+            else:
+                data = response.json()
+                self.logger.info(f"Successfully completed {method} request to {endpoint}")
+                return data
             
         except RequestException as e:
             self.logger.error(f"Failed to make {method} request to {endpoint}: {e}")

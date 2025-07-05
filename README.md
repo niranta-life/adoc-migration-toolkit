@@ -229,6 +229,8 @@ python -m adoc_export_import interactive --env-file config.env [--verbose]
 project/
 ├── data/
 │   ├── policy_exports/           # Input: Policy export ZIP files
+│   │   ├── policy_export.zip
+│   │   └── metadata.json
 │   ├── samples_import_ready/     # Output: Processed files
 │   │   ├── [translated ZIP files]
 │   │   ├── segmented_spark_uids.csv
@@ -307,7 +309,7 @@ python -m adoc_export_import formatter \
 
 The tool provides comprehensive logging:
 - Console output with `--verbose` flag
-- Log files: `policy_export_formatter_*.log`
+- Log files: `adoc-migration-toolkit-YYYYMMDD.log` (rotates daily)
 - Interactive mode history: `~/.adoc_history`
 
 ### Getting Help

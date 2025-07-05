@@ -64,9 +64,9 @@ def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Lo
     # Setup handlers
     handlers = []
     
-    # File handler
-    log_file = f"policy_export_formatter_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    # File handler with date-based rotation
+    log_file = f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d')}.log"
+    file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')  # Append mode
     file_handler.setFormatter(formatter)
     handlers.append(file_handler)
     
