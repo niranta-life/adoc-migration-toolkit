@@ -1,5 +1,5 @@
 """
-ADOC Export Import - A professional tool for replacing substrings in JSON files and ZIP archives.
+ADOC Migration Toolkit - A professional tool for replacing substrings in JSON files and ZIP archives.
 
 This package provides functionality to process policy export files by replacing
 substrings in JSON files and ZIP archives with comprehensive error handling.

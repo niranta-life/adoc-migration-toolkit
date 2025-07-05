@@ -108,11 +108,12 @@ class AcceldataAPIClient:
             'x-domain-ids': ''
         })
     
-    def get_asset_by_uid(self, uid: str) -> Dict[str, Any]:
+    def get_asset_by_uid(self, uid: str, timeout: int = 30) -> Dict[str, Any]:
         """Get asset details by UID.
         
         Args:
             uid: The asset UID to search for
+            timeout: Request timeout in seconds (default: 30)
             
         Returns:
             Dictionary containing the asset response
@@ -122,10 +123,10 @@ class AcceldataAPIClient:
         """
         url = f"{self.host}/catalog-server/api/assets?uid={uid}"
         
-        self.logger.info(f"Getting asset details for UID: {uid}")
+        self.logger.info(f"Getting asset details for UID: {uid} (timeout: {timeout}s)")
         
         try:
-            response = self.session.get(url)
+            response = self.session.get(url, timeout=timeout)
             response.raise_for_status()
             
             data = response.json()
@@ -159,7 +160,7 @@ class AcceldataAPIClient:
 
     def make_api_call(self, endpoint: str, method: str = 'GET', json_payload: Optional[Dict[str, Any]] = None, 
                      use_target_auth: bool = False, use_target_tenant: bool = False, return_binary: bool = False,
-                     files: Optional[Dict[str, Any]] = None) -> Any:
+                     files: Optional[Dict[str, Any]] = None, timeout: int = 30) -> Any:
         """Make a generic API call with configurable endpoint and method.
         
         Args:
@@ -170,6 +171,7 @@ class AcceldataAPIClient:
             use_target_tenant: Whether to use target tenant instead of source
             return_binary: If True, return raw response content (for binary data like ZIP files)
             files: Files to upload for multipart/form-data requests
+            timeout: Request timeout in seconds (default: 30)
         
         Returns:
             Dictionary containing the API response, or bytes if return_binary is True
@@ -207,11 +209,10 @@ class AcceldataAPIClient:
             'x-domain-ids': ''
         }
         
-        # Set Content-Type for multipart requests
-        if files:
-            headers['Content-Type'] = 'multipart/form-data'
+        # Note: Don't set Content-Type for multipart requests - requests library handles this automatically
+        # with the proper boundary parameter when files parameter is used
         
-        self.logger.info(f"Making {method} request to: {url}")
+        self.logger.info(f"Making {method} request to: {url} (timeout: {timeout}s)")
         if use_target_auth:
             self.logger.info("Using target authentication")
         if use_target_tenant:
@@ -221,21 +222,21 @@ class AcceldataAPIClient:
         
         try:
             if method.upper() == 'GET':
-                response = self.session.get(url, headers=headers)
+                response = self.session.get(url, headers=headers, timeout=timeout)
             elif method.upper() == 'PUT':
                 if json_payload is None and files is None:
                     raise ValueError("JSON payload or files are required for PUT requests")
                 if files:
-                    response = self.session.put(url, headers=headers, files=files)
+                    response = self.session.put(url, headers=headers, files=files, timeout=timeout)
                 else:
-                    response = self.session.put(url, headers=headers, json=json_payload)
+                    response = self.session.put(url, headers=headers, json=json_payload, timeout=timeout)
             elif method.upper() == 'POST':
                 if json_payload is None and files is None:
                     raise ValueError("JSON payload or files are required for POST requests")
                 if files:
-                    response = self.session.post(url, headers=headers, files=files)
+                    response = self.session.post(url, headers=headers, files=files, timeout=timeout)
                 else:
-                    response = self.session.post(url, headers=headers, json=json_payload)
+                    response = self.session.post(url, headers=headers, json=json_payload, timeout=timeout)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             

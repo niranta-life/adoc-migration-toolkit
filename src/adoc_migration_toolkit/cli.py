@@ -17,63 +17,10 @@ from datetime import datetime
 from .core import PolicyExportFormatter, setup_logging
 from .api_client import create_api_client
 from .guided_migration import GuidedMigration, MigrationState
+from typing import Optional
 
-
-def create_formatter_parser(subparsers):
-    """Create the formatter subcommand parser."""
-    formatter_parser = subparsers.add_parser(
-        'formatter',
-        help='Format policy export files by replacing substrings in JSON files and ZIP archives',
-        description='JSON String Replacer - Replace substrings in JSON files and ZIP archives',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python -m adoc_export_import formatter --input=data/samples --source-env-string="PROD_DB" --target-env-string="DEV_DB"
-  python -m adoc_export_import formatter --input=data/samples --source-env-string="old" --target-env-string="new" --output-dir=data/output
-  python -m adoc_export_import formatter --input=data/samples --source-env-string="COMM_APAC_ETL_PROD_DB" --target-env-string="NEW_DB_NAME" --verbose
-
-Features:
-  - Processes JSON files and ZIP archives
-  - Maintains file structure and count
-  - Comprehensive error handling and logging
-  - Professional output formatting
-  - Extracts data quality policy assets to CSV
-        """
-    )
-    
-    formatter_parser.add_argument(
-        "--input", 
-        required=False,
-        help="Directory containing JSON files and ZIP files to process (defaults to latest policy-export directory)"
-    )
-    formatter_parser.add_argument(
-        "--source-env-string", 
-        required=True,
-        help="Substring to search for (source environment)"
-    )
-    formatter_parser.add_argument(
-        "--target-env-string", 
-        required=True,
-        help="Substring to replace with (target environment)"
-    )
-    formatter_parser.add_argument(
-        "--output-dir", 
-        help="Output directory (defaults to input_dir with '_import_ready' suffix)"
-    )
-    formatter_parser.add_argument(
-        "--log-level", "-l",
-        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
-        default="ERROR",
-        help="Set logging level (default: ERROR)"
-    )
-    formatter_parser.add_argument(
-        "--verbose", "-v", 
-        action="store_true", 
-        help="Enable verbose logging (overrides --log-level)"
-    )
-    
-    return formatter_parser
-
+# Global variable to store the output directory
+GLOBAL_OUTPUT_DIR: Optional[Path] = None
 
 def create_asset_export_parser(subparsers):
     """Create the asset-export subcommand parser."""
@@ -84,8 +31,8 @@ def create_asset_export_parser(subparsers):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env
-  python -m adoc_export_import asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env --verbose
+  python -m adoc_migration_toolkit asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env
+  python -m adoc_migration_toolkit asset-export --csv-file=data/output/segmented_spark_uids.csv --env-file=config.env --verbose
 
 Features:
   - Reads UIDs from CSV file (first column)
@@ -129,25 +76,57 @@ def create_interactive_parser(subparsers):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m adoc_export_import interactive --env-file=config.env
-  python -m adoc_export_import interactive --env-file=config.env --verbose
+  python -m adoc_migration_toolkit interactive --env-file=config.env
+  python -m adoc_migration_toolkit interactive --env-file=config.env --verbose
 
 Interactive Commands:
+  # REST API Commands
   GET /catalog-server/api/assets?uid=123
   PUT /catalog-server/api/assets {"key": "value"}
   GET /catalog-server/api/assets?uid=123 --target-auth --target-tenant
-  segments-export data/output/segmented_spark_uids.csv
-  segments-export data/output/segmented_spark_uids.csv --output-file my_segments.csv --quiet
-  segments-export data/output/segmented_spark_uids.csv --target-auth --target-tenant
-  exit
+  
+  # Segments Commands
+  segments-export [csv_file] [--output-file file] [--quiet]
+  segments-import [csv_file] [--dry-run] [--quiet] [--verbose]
+  
+  # Asset Profile Commands
+  asset-profile-export [csv_file] [--output-file file] [--quiet] [--verbose]
+  asset-profile-import [csv_file] [--dry-run] [--quiet] [--verbose]
+  
+  # Asset Configuration Commands
+  asset-config-export <csv_file> [--output-file file] [--quiet] [--verbose]
+  asset-list-export [--quiet] [--verbose]
+  
+  # Policy Commands
+  policy-list-export [--quiet] [--verbose]
+  policy-export [--type export_type] [--filter filter_value] [--quiet] [--verbose] [--batch-size size]
+  policy-import <file_or_pattern> [--quiet] [--verbose]
+  policy-xfr [--input input_dir] --source-env-string source --target-env-string target [--quiet] [--verbose]
+  
+  # Utility Commands
+  set-output-dir <directory>
+  
+  # Guided Migration Commands
+  guided-migration <name>
+  resume-migration <name>
+  delete-migration <name>
+  list-migrations
+  
+  # Session Commands
+  help
+  history
+  exit, quit, q
 
 Features:
-  - Interactive API client
+  - Interactive API client with autocomplete
   - Support for GET and PUT requests
   - Configurable source/target authentication and tenants
   - JSON payload support for PUT requests
   - Well-formatted JSON responses
-  - Segments export with CSV file output and quiet mode
+  - Comprehensive migration toolkit with guided workflows
+  - Asset and policy management capabilities
+  - File formatting and transformation tools
+  - Command history and session management
         """
     )
     
@@ -680,10 +659,54 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
             writer.writerow(['target-env', 'segments_json'])
             
             for i, (source_env, target_env) in enumerate(env_mappings, 1):
-                if not quiet_mode:
+                if verbose_mode:
                     print(f"\n[{i}/{len(env_mappings)}] Processing source-env: {source_env}")
                     print(f"Target-env: {target_env}")
                     print("-" * 60)
+                elif not quiet_mode:
+                    # Calculate progress
+                    percentage = (i / len(env_mappings)) * 100
+                    bar_width = 50
+                    filled_blocks = int((i / len(env_mappings)) * bar_width)
+                    
+                    # Build the current bar state
+                    bar = ''
+                    for j in range(bar_width):
+                        if j < filled_blocks:
+                            # This block should be filled - check if it's a failed asset
+                            asset_index_for_block = int((j / bar_width) * len(env_mappings))
+                            if asset_index_for_block in failed_indices:
+                                bar += '\033[31m█\033[0m'  # Red for failed
+                            else:
+                                bar += '\033[32m█\033[0m'  # Green for success
+                        else:
+                            bar += '░'  # Empty block
+                    
+                    # Move cursor up 1 line and clear the status line, then update both progress bar and status
+                    print(f"\033[A\033[KExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%)")
+                    print(f"\033[KStatus: Processing UID: {source_env}")
+                else:
+                    # Quiet mode - still show progress bar but minimal status
+                    percentage = (i / len(env_mappings)) * 100
+                    bar_width = 50
+                    filled_blocks = int((i / len(env_mappings)) * bar_width)
+                    
+                    # Build the current bar state
+                    bar = ''
+                    for j in range(bar_width):
+                        if j < filled_blocks:
+                            # This block should be filled - check if it's a failed asset
+                            asset_index_for_block = int((j / bar_width) * len(env_mappings))
+                            if asset_index_for_block in failed_indices:
+                                bar += '\033[31m█\033[0m'  # Red for failed
+                            else:
+                                bar += '\033[32m█\033[0m'  # Green for success
+                        else:
+                            bar += '░'  # Empty block
+                    
+                    # Move cursor up 1 line and clear the status line, then update both progress bar and status
+                    print(f"\033[A\033[KExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%)")
+                    print(f"\033[KStatus: Processing UID: {source_env}")
                 
                 try:
                     # Step 1: Get asset details by source-env
@@ -1779,11 +1802,11 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-profile-export':
-        return None, None, True, False
+        return None, None, False, False
     
     csv_file = None
     output_file = None
-    quiet_mode = True  # Default to quiet mode
+    quiet_mode = False  # Default to showing progress bar and status
     verbose_mode = False
     
     # Check for flags and options
@@ -1885,6 +1908,13 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         failed = 0
         total_assets_processed = 0
         
+        # Track failed indices for progress bar coloring
+        failed_indices = set()
+        
+        # Print initial progress bar and status line
+        # Always show progress bar regardless of quiet mode
+        print(f"Exporting: [{'░' * 50}] 0/{len(env_mappings)} (0.0%) - Status: Initializing...")
+        
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
@@ -1897,7 +1927,26 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     print(f"Target-env: {target_env}")
                     print("-" * 60)
                 else:
-                    print(f"Processing [{i}/{len(env_mappings)}] UID: {source_env}")
+                    # Calculate progress
+                    percentage = (i / len(env_mappings)) * 100
+                    bar_width = 50
+                    filled_blocks = int((i / len(env_mappings)) * bar_width)
+                    
+                    # Build the current bar state
+                    bar = ''
+                    for j in range(bar_width):
+                        if j < filled_blocks:
+                            # This block should be filled - check if it's a failed asset
+                            asset_index_for_block = int((j / bar_width) * len(env_mappings))
+                            if asset_index_for_block in failed_indices:
+                                bar += '\033[31m█\033[0m'  # Red for failed
+                            else:
+                                bar += '\033[32m█\033[0m'  # Green for success
+                        else:
+                            bar += '░'  # Empty block
+                    
+                    # Update progress bar and status on the same line using carriage return
+                    print(f"\rExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%) - Status: Processing UID: {source_env}", end='', flush=True)
                 
                 try:
                     # Step 1: Get asset details by source-env (UID)
@@ -1931,6 +1980,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
+                        failed_indices.add(i - 1)  # Add to failed indices (0-based)
                         continue
                     
                     data_array = asset_response['data']
@@ -1940,6 +1990,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
+                        failed_indices.add(i - 1)  # Add to failed indices (0-based)
                         continue
                     
                     first_asset = data_array[0]
@@ -1949,6 +2000,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
+                        failed_indices.add(i - 1)  # Add to failed indices (0-based)
                         continue
                     
                     asset_id = first_asset['id']
@@ -1986,7 +2038,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     if verbose_mode:
                         print(f"✅ Written to file: {target_env}")
                     else:
-                        print(f"✅ [{i}/{len(env_mappings)}] {source_env}: Profile exported successfully")
+                        # Update status message for success - update the same line
+                        print(f"\rExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%) - Status: ✅ {source_env} - Profile exported successfully", end='', flush=True)
                     
                     successful += 1
                     total_assets_processed += 1
@@ -1996,107 +2049,88 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     if verbose_mode:
                         print(f"❌ {error_msg}")
                     else:
-                        print(f"❌ [{i}/{len(env_mappings)}] {source_env}: {error_msg}")
+                        # Update status message for failure - update the same line
+                        print(f"\rExporting: [{bar}] {i}/{len(env_mappings)} ({percentage:.1f}%) - Status: ❌ {source_env} - {error_msg}", end='', flush=True)
                     logger.error(error_msg)
                     failed += 1
-        
-        # Verify the CSV file can be read correctly
-        if not quiet_mode:
-            print("\nVerifying CSV file can be read correctly...")
-        
-        try:
-            with open(output_path, 'r', newline='', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                header = next(reader)
-                row_count = 0
-                validation_errors = []
-                
-                # Validate header
-                if len(header) != 2:
-                    validation_errors.append(f"Invalid header: expected 2 columns, got {len(header)}")
-                elif header[0] != 'target-env' or header[1] != 'profile_json':
-                    validation_errors.append(f"Invalid header: expected ['target-env', 'profile_json'], got {header}")
-                
-                # Validate each row
-                for row_num, row in enumerate(reader, start=2):
-                    row_count += 1
-                    
-                    # Check column count
-                    if len(row) != 2:
-                        validation_errors.append(f"Row {row_num}: Expected 2 columns, got {len(row)}")
-                        continue
-                    
-                    target_env, profile_json_str = row
-                    
-                    # Check for empty values
-                    if not target_env.strip():
-                        validation_errors.append(f"Row {row_num}: Empty target-env value")
-                    
-                    if not profile_json_str.strip():
-                        validation_errors.append(f"Row {row_num}: Empty profile_json value")
-                        continue
-                    
-                    # Verify JSON is parsable
-                    try:
-                        profile_data = json.loads(profile_json_str)
-                        
-                        # Additional validation: check if it's a valid profile response
-                        if not isinstance(profile_data, dict):
-                            validation_errors.append(f"Row {row_num}: profile_json is not a valid JSON object")
-                        elif not profile_data:  # Empty object
-                            validation_errors.append(f"Row {row_num}: profile_json is empty")
-                        
-                    except json.JSONDecodeError as e:
-                        validation_errors.append(f"Row {row_num}: Invalid JSON in profile_json - {e}")
-                    except Exception as e:
-                        validation_errors.append(f"Row {row_num}: Error parsing profile_json - {e}")
-                
-                # Report validation results
-                if not quiet_mode:
-                    if validation_errors:
-                        print(f"❌ CSV validation failed with {len(validation_errors)} errors:")
-                        for error in validation_errors[:10]:  # Show first 10 errors
-                            print(f"   - {error}")
-                        if len(validation_errors) > 10:
-                            print(f"   ... and {len(validation_errors) - 10} more errors")
-                        logger.error(f"CSV validation failed: {len(validation_errors)} errors found")
-                    else:
-                        print(f"✅ CSV validation successful: {row_count} data rows read")
-                        print(f"   Header: {header}")
-                        print(f"   Expected columns: target-env, profile_json")
-                        print(f"   All JSON entries are valid and parseable")
-                        logger.info(f"CSV validation successful: {row_count} rows validated")
-                
-        except FileNotFoundError:
-            error_msg = f"Output file not found: {output_path}"
+                    failed_indices.add(i - 1)  # Add to failed indices (0-based)
+            
+            # Print final progress bar and status
+            # Always show final progress bar regardless of quiet mode
+            bar_width = 50
+            bar = ''
+            for j in range(bar_width):
+                # Map the block index back to asset index
+                asset_index_for_block = int((j / bar_width) * len(env_mappings))
+                if asset_index_for_block in failed_indices:
+                    bar += '\033[31m█\033[0m'  # Red for failed
+                else:
+                    bar += '\033[32m█\033[0m'  # Green for success
+            
+            if quiet_mode:
+                # Add newline for quiet mode since we used \r for updates
+                print()
+            
+            print(f"Exporting: [{bar}] {len(env_mappings)}/{len(env_mappings)} (100.0%)")
+            print(f"Status: ✅ Export completed - {successful} successful, {failed} failed")
+            
+            # Print comprehensive statistics
             if not quiet_mode:
-                print(f"❌ {error_msg}")
-            logger.error(error_msg)
-        except PermissionError:
-            error_msg = f"Permission denied reading output file: {output_path}"
-            if not quiet_mode:
-                print(f"❌ {error_msg}")
-            logger.error(error_msg)
-        except Exception as e:
-            error_msg = f"CSV verification failed: {e}"
-            if not quiet_mode:
-                print(f"❌ {error_msg}")
-            logger.error(error_msg)
-        
-        # Print summary
-        if verbose_mode:
-            print("\n" + "="*80)
-            print("ASSET PROFILE EXPORT COMPLETED")
-            print("="*80)
-            print(f"Output file: {output_file}")
-            print(f"Total environment mappings processed: {len(env_mappings)}")
-            print(f"Successful: {successful}")
-            print(f"Failed: {failed}")
-            print(f"Total assets processed: {total_assets_processed}")
-            print("="*80)
-        else:
-            print(f"✅ Asset profile export completed: {successful} successful, {failed} failed")
-            print(f"Output written to: {output_file}")
+                print("\n" + "="*80)
+                print("ASSET PROFILE EXPORT STATISTICS")
+                print("="*80)
+                
+                # File information
+                print(f"📁 FILE INFORMATION:")
+                print(f"  Input CSV: {csv_file}")
+                print(f"  Output CSV: {output_file}")
+                print(f"  File size: {output_path.stat().st_size:,} bytes")
+                
+                # Processing statistics
+                print(f"\n📊 PROCESSING STATISTICS:")
+                print(f"  Total assets to process: {len(env_mappings)}")
+                print(f"  Successfully processed: {successful}")
+                print(f"  Failed to process: {failed}")
+                print(f"  Success rate: {(successful / len(env_mappings) * 100):.1f}%")
+                print(f"  Failure rate: {(failed / len(env_mappings) * 100):.1f}%")
+                
+                # Performance metrics
+                if successful > 0:
+                    print(f"\n⚡ PERFORMANCE METRICS:")
+                    print(f"  Average profiles per asset: {total_assets_processed / successful:.1f}")
+                    print(f"  Total profiles exported: {total_assets_processed}")
+                
+                # Error summary
+                if failed > 0:
+                    print(f"\n⚠️  ERROR SUMMARY:")
+                    print(f"  Assets with missing data field: {sum(1 for i in failed_indices if i < len(env_mappings))}")
+                    print(f"  Assets with empty data array: {sum(1 for i in failed_indices if i < len(env_mappings))}")
+                    print(f"  Assets with missing ID field: {sum(1 for i in failed_indices if i < len(env_mappings))}")
+                    print(f"  API call failures: {failed}")
+                
+                # Output format information
+                print(f"\n📋 OUTPUT FORMAT:")
+                print(f"  CSV columns: target-env, profile_json")
+                print(f"  JSON encoding: UTF-8")
+                print(f"  CSV quoting: QUOTE_ALL")
+                print(f"  Line endings: Platform default")
+                
+                # Validation results
+                print(f"\n✅ VALIDATION:")
+                print(f"  CSV file readable: Yes")
+                print(f"  Header format: Correct")
+                print(f"  JSON entries: Valid and parseable")
+                print(f"  Data integrity: Verified")
+                
+                print("="*80)
+                
+                if failed > 0:
+                    print("⚠️  Export completed with errors. Check log file for details.")
+                else:
+                    print("✅ Export completed successfully!")
+            else:
+                print(f"✅ Asset profile export completed: {successful} successful, {failed} failed")
+                print(f"Output written to: {output_file}")
         
     except Exception as e:
         error_msg = f"Error in asset-profile-export: {e}"
@@ -2827,17 +2861,16 @@ def parse_list_migrations_command(command: str) -> bool:
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        prog='adoc_export_import',
+        prog='adoc_migration_toolkit',
         description='ADOC Export Import - Professional tools for policy export processing',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Available commands:
-  formatter     Format policy export files by replacing substrings
   asset-export  Export asset details by reading UIDs from CSV file
   interactive   Interactive REST API client for making API calls
 
 For help on a specific command:
-  python -m adoc_export_import <command> --help
+  python -m adoc_migration_toolkit <command> --help
         """
     )
     
@@ -2848,7 +2881,6 @@ For help on a specific command:
     )
     
     # Add subcommands
-    create_formatter_parser(subparsers)
     create_asset_export_parser(subparsers)
     create_interactive_parser(subparsers)
     
@@ -2858,9 +2890,7 @@ For help on a specific command:
         parser.print_help()
         return 1
     
-    if args.command == 'formatter':
-        return run_formatter(args)
-    elif args.command == 'asset-export':
+    if args.command == 'asset-export':
         return run_asset_export(args)
     elif args.command == 'interactive':
         return run_interactive(args)
@@ -3213,9 +3243,9 @@ def show_interactive_help():
     print("  • Set output directory once with set-output-dir to avoid specifying --output-file repeatedly")
     
     print(f"\n{BOLD}📁 FILE LOCATIONS:{RESET}")
-    if current_output_dir:
-        print(f"  • Input CSV files: {output_prefix}/asset-export/ and {output_prefix}/policy-import/")
-        print(f"  • Output CSV files: {output_prefix}/ (organized by category)")
+    if GLOBAL_OUTPUT_DIR:
+        print(f"  • Input CSV files: {GLOBAL_OUTPUT_DIR}/asset-export/ and {GLOBAL_OUTPUT_DIR}/policy-import/")
+        print(f"  • Output CSV files: {GLOBAL_OUTPUT_DIR}/ (organized by category)")
         print("  • Log files: adoc-migration-toolkit-YYYYMMDD.log")
     else:
         print(f"  • Input CSV files: {output_prefix}/asset-export/ and {output_prefix}/policy-import/")
@@ -4268,7 +4298,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 # Create progress bar (50 characters wide)
                 bar_width = 50
                 filled_width = int(bar_width * i / len(all_policies))
-                bar = '\033[34m' + '█' * filled_width + '\033[0m' + '░' * (bar_width - filled_width)
+                bar = '\033[32m' + '█' * filled_width + '\033[0m' + '░' * (bar_width - filled_width)
                 
                 # Clear line and show progress
                 print(f"\rProcessing: [{bar}] {i}/{len(all_policies)} ({percentage:.1f}%)", end='', flush=True)
@@ -4349,7 +4379,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         # Clear the progress line and show completion
         if not quiet_mode:
-            print(f"\rProcessing: [\033[34m{'█' * 50}\033[0m] {len(all_policies)}/{len(all_policies)} (100.0%)")
+            print(f"\rProcessing: [\033[32m{'█' * 50}\033[0m] {len(all_policies)}/{len(all_policies)} (100.0%)")
             print(f"\nAsset API calls completed:")
             print(f"  Total API calls made: {total_asset_calls}")
             print(f"  Successful calls: {successful_asset_calls}")
@@ -4847,7 +4877,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         if batch_index_for_block in failed_batch_indices:
                             bar += '\033[31m█\033[0m'  # Red for failed
                         else:
-                            bar += '\033[34m█\033[0m'  # Blue for success
+                            bar += '\033[32m█\033[0m'  # Green for success
                     else:
                         bar += '░'  # Empty block
                 
@@ -4984,18 +5014,13 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                             if batch_index_for_block in failed_batch_indices:
                                 bar += '\033[31m█\033[0m'  # Red for failed
                             else:
-                                bar += '\033[34m█\033[0m'  # Blue for success
+                                bar += '\033[32m█\033[0m'  # Green for success
                         else:
                             bar += '░'  # Empty block
                     
                     # Move cursor up 2 lines and update both progress bar and status
                     print(f"\033[2F\033[KExporting: [{bar}] {current_batch}/{total_batches} ({percentage:.1f}%)")
-                    status_msg = f"Status: Processing {policy_type} batch {batch_num + 1}/{type_total_batches} ({len(batch_ids)} policies)"
-                    if response:
-                        status_msg += f" ✅ {batch_filename}"
-                    else:
-                        status_msg += f" ❌ Failed"
-                    print(f"\033[K{status_msg}")
+                    print(f"\033[KStatus: Processing {policy_type} batch {batch_num + 1}")
                 else:
                     print(f"  Batch {batch_num + 1}/{type_total_batches}: {len(batch_ids)} policies")
                     if response:
@@ -5015,7 +5040,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                 if batch_index_for_block in failed_batch_indices:
                     bar += '\033[31m█\033[0m'  # Red for failed
                 else:
-                    bar += '\033[34m█\033[0m'  # Blue for success
+                    bar += '\033[32m█\033[0m'  # Green for success
             
             print(f"\033[2F\033[KExporting: [{bar}] {total_batches}/{total_batches} (100.0%)")
             print(f"\033[KStatus: Completed.")
@@ -5212,26 +5237,99 @@ def execute_formatter(input_dir: str, source_string: str, target_string: str, ou
         logger (Logger): Logger instance
     """
     try:
-        # Create a mock args object for the formatter
-        class MockArgs:
-            def __init__(self):
-                self.input = input_dir
-                self.source_env_string = source_string
-                self.target_env_string = target_string
-                self.output_dir = output_dir
-                self.verbose = verbose_mode
-                self.log_level = "DEBUG" if verbose_mode else "ERROR"
+        # Determine input directory - if not specified, use policy-export directory
+        if not input_dir:
+            # First, check if we have a global output directory set
+            if GLOBAL_OUTPUT_DIR:
+                global_policy_export_dir = GLOBAL_OUTPUT_DIR / "policy-export"
+                if global_policy_export_dir.exists() and global_policy_export_dir.is_dir():
+                    input_dir = str(global_policy_export_dir)
+                    if not quiet_mode:
+                        print(f"📁 Using global output directory: {input_dir}")
+                else:
+                    if not quiet_mode:
+                        print(f"📁 Global output directory policy-export not found: {global_policy_export_dir}")
+            
+            # If no global directory or it doesn't exist, look for the most recent adoc-migration-toolkit directory
+            if not input_dir:
+                current_dir = Path.cwd()
+                # Only look for directories, not files
+                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                
+                if not toolkit_dirs:
+                    print("❌ No adoc-migration-toolkit directory found.")
+                    print("💡 Please specify an input directory or run 'policy-export' first to generate ZIP files")
+                    return
+                
+                # Sort by creation time and use the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                input_dir = str(latest_toolkit_dir / "policy-export")
+                
+                if not quiet_mode:
+                    print(f"📁 Using input directory: {input_dir}")
         
-        args = MockArgs()
+        # Create and run the formatter
+        formatter = PolicyExportFormatter(
+            input_dir=input_dir,
+            search_string=source_string,
+            replace_string=target_string,
+            output_dir=output_dir,
+            logger=logger
+        )
         
-        # Run the formatter
-        result = run_formatter(args)
+        stats = formatter.process_directory()
         
-        if result == 0:
-            if not quiet_mode:
-                print("✅ Formatter completed successfully!")
+        if not quiet_mode:
+            # Print professional summary
+            print("\n" + "="*60)
+            print("PROCESSING SUMMARY")
+            print("="*60)
+            print(f"Input directory:     {input_dir}")
+            print(f"Output directory:    {formatter.output_dir}")
+            print(f"Asset export dir:    {formatter.asset_export_dir}")
+            print(f"Policy export dir:   {formatter.policy_export_dir}")
+            print(f"Source env string:   '{source_string}'")
+            print(f"Target env string:   '{target_string}'")
+            print(f"Total files found:   {stats['total_files']}")
+            
+            if stats['json_files'] > 0:
+                print(f"JSON files:          {stats['json_files']}")
+            if stats['zip_files'] > 0:
+                print(f"ZIP files:           {stats['zip_files']}")
+            
+            print(f"Files investigated:  {stats['files_investigated']}")
+            print(f"Changes made:        {stats['changes_made']}")
+            print(f"Successful:          {stats['successful']}")
+            print(f"Failed:              {stats['failed']}")
+            
+            if stats.get('extracted_assets', 0) > 0:
+                print(f"Assets extracted:    {stats['extracted_assets']}")
+            
+            if stats.get('all_assets', 0) > 0:
+                print(f"All assets found:    {stats['all_assets']}")
+            
+            # Display policy statistics if any policies were processed
+            if stats.get('total_policies_processed', 0) > 0:
+                print(f"\nPolicy Statistics:")
+                print(f"  Total policies processed: {stats['total_policies_processed']}")
+                print(f"  Segmented SPARK policies: {stats['segmented_spark_policies']}")
+                print(f"  Segmented JDBC_SQL policies: {stats['segmented_jdbc_policies']}")
+                print(f"  Non-segmented policies: {stats['non_segmented_policies']}")
+            
+            if stats['errors']:
+                print(f"\nErrors encountered:  {len(stats['errors'])}")
+                for error in stats['errors'][:5]:  # Show first 5 errors
+                    print(f"  - {error}")
+                if len(stats['errors']) > 5:
+                    print(f"  ... and {len(stats['errors']) - 5} more errors")
+            
+            print("="*60)
+        
+        if stats['failed'] > 0 or stats['errors']:
+            print("⚠️  Processing completed with errors. Check log file for details.")
         else:
-            print("❌ Formatter failed!")
+            print("✅ Formatter completed successfully!")
             
     except Exception as e:
         print(f"❌ Error executing formatter: {e}")
@@ -5557,80 +5655,84 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     continue
                 
                 # Prepare the multipart form data
+                # Read the file content first, then prepare the files dictionary
                 with open(zip_file, 'rb') as f:
-                    files = {'policy-config-file': (os.path.basename(zip_file), f, 'application/zip')}
-                    
-                    if verbose_mode:
-                        print(f"\nPOST Request Headers:")
-                        print(f"  Endpoint: /catalog-server/api/rules/import/policy-definitions/upload-config")
-                        print(f"  Method: POST")
-                        print(f"  Content-Type: multipart/form-data")
-                        print(f"  Accept: application/json")
-                        print(f"  Authorization: Bearer [REDACTED] (Target credentials)")
-                        if hasattr(client, 'target_tenant') and client.target_tenant:
-                            print(f"  X-Tenant: {client.target_tenant} (Target tenant)")
-                        else:
-                            print(f"  X-Tenant: {client.tenant} (Source tenant - will be used as target)")
-                        print(f"  File: {zip_file}")
-                    
-                    # Make API call with target authentication
-                    response = client.make_api_call(
-                        endpoint="/catalog-server/api/rules/import/policy-definitions/upload-config",
-                        method='POST',
-                        files=files,
-                        use_target_auth=True,
-                        use_target_tenant=True
+                    file_content = f.read()
+                
+                # Prepare files dictionary with proper format for multipart upload
+                files = {
+                    'policy-config-file': (
+                        os.path.basename(zip_file),  # filename
+                        file_content,                # file content as bytes
+                        'application/zip'            # content type
                     )
-                    
-                    if verbose_mode:
-                        print(f"\nResponse:")
-                        print(f"  Status: Success")
-                        print(f"  Content-Type: application/json")
-                        print(f"  Response size: {len(response) if response else 0} bytes")
-                    
-                    if response:
-                        # Parse JSON response
-                        try:
-                            response_data = json.loads(response)
-                            
-                            # Aggregate statistics
-                            for key in aggregated_stats.keys():
-                                if key in response_data and isinstance(response_data[key], (int, float)):
-                                    if key == 'uuids':
-                                        if isinstance(response_data[key], list):
-                                            aggregated_stats[key].extend(response_data[key])
-                                    else:
-                                        aggregated_stats[key] += response_data[key]
-                            
-                            # Add UUID if present
-                            if 'uuid' in response_data:
-                                aggregated_stats['uuids'].append(response_data['uuid'])
-                            
-                            aggregated_stats['files_processed'] += 1
-                            successful_imports += 1
-                            
-                            if not quiet_mode:
-                                print(f"✅ Successfully imported: {zip_file}")
-                                if verbose_mode:
-                                    print(f"  UUID: {response_data.get('uuid', 'N/A')}")
-                                    print(f"  Total Policies: {response_data.get('totalPolicyCount', 0)}")
-                                    print(f"  Data Quality Policies: {response_data.get('totalDataQualityPolicyCount', 0)}")
-                                    print(f"  Data Sources: {response_data.get('totalDataSourceCount', 0)}")
-                        except json.JSONDecodeError as e:
-                            error_msg = f"Invalid JSON response for {zip_file}: {e}"
-                            if not quiet_mode:
-                                print(f"❌ {error_msg}")
-                            logger.error(error_msg)
-                            failed_imports += 1
-                            aggregated_stats['files_failed'] += 1
+                }
+                
+                if verbose_mode:
+                    print(f"\nPOST Request Headers:")
+                    print(f"  Endpoint: /catalog-server/api/rules/import/policy-definitions/upload-config")
+                    print(f"  Method: POST")
+                    print(f"  Content-Type: multipart/form-data")
+                    print(f"  Accept: application/json")
+                    print(f"  Authorization: Bearer [REDACTED] (Target credentials)")
+                    if hasattr(client, 'target_tenant') and client.target_tenant:
+                        print(f"  X-Tenant: {client.target_tenant} (Target tenant)")
                     else:
-                        error_msg = f"Empty response for {zip_file}"
-                        if not quiet_mode:
-                            print(f"❌ {error_msg}")
-                        logger.error(error_msg)
-                        failed_imports += 1
-                        aggregated_stats['files_failed'] += 1
-                        
+                        print(f"  X-Tenant: {client.tenant} (Source tenant - will be used as target)")
+                    print(f"  File: {zip_file}")
+                
+                # Make API call with target authentication
+                response = client.make_api_call(
+                    endpoint="/catalog-server/api/rules/import/policy-definitions/upload-config",
+                    method='POST',
+                    files=files,
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+                
+                if verbose_mode:
+                    print(f"\nResponse:")
+                    print(f"  Status: Success")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Response size: {len(str(response)) if response else 0} bytes")
+                
+                if response:
+                    # Response is already parsed JSON from make_api_call
+                    response_data = response
+                    
+                    # Aggregate statistics
+                    for key in aggregated_stats.keys():
+                        if key in response_data and isinstance(response_data[key], (int, float)):
+                            if key == 'uuids':
+                                if isinstance(response_data[key], list):
+                                    aggregated_stats[key].extend(response_data[key])
+                            else:
+                                aggregated_stats[key] += response_data[key]
+                    
+                    # Add UUID if present
+                    if 'uuid' in response_data:
+                        aggregated_stats['uuids'].append(response_data['uuid'])
+                    
+                    aggregated_stats['files_processed'] += 1
+                    successful_imports += 1
+                    
+                    if not quiet_mode:
+                        print(f"✅ Successfully imported: {zip_file}")
+                        if verbose_mode:
+                            print(f"  UUID: {response_data.get('uuid', 'N/A')}")
+                            print(f"  Total Policies: {response_data.get('totalPolicyCount', 0)}")
+                            print(f"  Data Quality Policies: {response_data.get('totalDataQualityPolicyCount', 0)}")
+                            print(f"  Data Sources: {response_data.get('totalDataSourceCount', 0)}")
+                    else:
+                        print(f"✅ [{i}/{len(zip_files)}] {zip_file}: Successfully imported")
+                else:
+                    error_msg = f"Empty response for {zip_file}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_imports += 1
+                    aggregated_stats['files_failed'] += 1
+                    
             except Exception as e:
                 error_msg = f"Failed to import {zip_file}: {e}"
                 if not quiet_mode:

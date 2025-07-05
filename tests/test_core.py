@@ -1,12 +1,12 @@
 """
-Tests for the core functionality of adoc_export_import.
+Tests for the core functionality of adoc_migration_toolkit.
 """
 
 import pytest
 import tempfile
 import json
 from pathlib import Path
-from adoc_export_import import PolicyExportFormatter
+from adoc_migration_toolkit import PolicyExportFormatter
 
 
 class TestPolicyExportFormatter:

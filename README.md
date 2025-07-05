@@ -1,705 +1,1264 @@
-# ADOC Export Import Tool
+# ADOC Migration Toolkit Guide
 
-A comprehensive tool for migrating Acceldata policies and configurations between environments. This tool processes policy export ZIP files, extracts asset configurations, and provides interactive commands for managing asset profiles and configurations.
+The ADOC Migration Toolkit simplifies moving ADOC configurations between environments. 
+It lets you export policies from one environment, adjust them for a new environment, 
+and import them smoothly. The toolkit also handles segment management and asset-level 
+configuration migration. In the future, it will support pipelines and other ADOC features 
+to improve migration between environments. Its interactive interfaces make migration 
+workflows clear and efficient, with a guided migration feature that allows you to 
+start multiple migrations, pause, and resume them independently.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Command Line Interface](#command-line-interface)
+- [Interactive Mode](#interactive-mode)
+- [Guided Migration](#guided-migration)
+- [Asset Management](#asset-management)
+- [Policy Management](#policy-management)
+- [Segments Management](#segments-management)
+- [Utility Commands](#utility-commands)
+- [File Structure](#file-structure)
+- [Examples](#examples)
+- [Troubleshooting](#troubleshooting)
 
 ## Overview
 
-The ADOC Export Import Tool automates the complex process of migrating policies and asset configurations from one Acceldata environment to another. It handles the translation of environment-specific strings, extracts specialized configurations for segmented assets, and provides interactive commands for profile and configuration management.
+The ADOC Migration Toolkit is designed to facilitate the migration of policies, 
+assets, and configurations between Acceldata environments. It provides:
 
-## Prerequisites
-
-- Python 3.8 or higher
-- uv (install from https://github.com/astral-sh/uv)
-- Access to source and target Acceldata environments
-- Policy export ZIP files from the source environment
+- **Interactive CLI**: Full-featured interactive mode with autocomplete and command history
+- **Guided Migration**: Step-by-step migration workflows with state management
+- **Asset Management**: Export and import asset profiles and configurations
+- **Policy Management**: Comprehensive policy export/import capabilities
+- **Segments Management**: Specialized handling for segmented Spark assets
+- **File Processing**: JSON and ZIP file processing with string replacement
 
 ## Installation
 
-1. **Clone the repository:**
+### Prerequisites
+
+- Python 3.9 or higher
+- Access to Acceldata environments (source and target)
+
+### Install from Source
+
 ```bash
+# Clone the repository
 git clone <repository-url>
 cd adoc-export-import
+
+# Install in development mode
+pip install -e .
+
+# Make scripts executable
+chmod +x bin/adoc-migration-toolkit
+chmod +x bin/sjson
 ```
 
-2. **Install dependencies:**
+### Using the Migration Toolkit Script
+
 ```bash
-uv sync
+# Use the provided script for easy access
+./bin/adoc-migration-toolkit
+
+# With custom config
+./bin/adoc-migration-toolkit -c /path/to/config.env
+
+# Check environment configuration
+./bin/adoc-migration-toolkit --check-env
 ```
 
-3. **Activate the virtual environment:**
-```bash
-source .venv/bin/activate  # On Unix/macOS
-# or
-.venv\Scripts\activate     # On Windows
-```
+## Configuration
 
-4. **Configure environment variables:**
-Create a `config.env` file with your environment credentials:
-```bash
-# Host URL for the Acceldata environment
-AD_HOST=https://your-acceldata-instance.com
+### Environment Setup
 
-# Source environment credentials
+1. Copy the example configuration:
+   ```bash
+   cp config/config.env.example config/config.env
+   ```
+
+2. Edit `config/config.env` with your environment details:
+   ```bash
+   # Acceldata Environment Configuration
+   AD_HOST=https://your-acceldata-host.com
+   
+   # Source Environment
+   AD_SOURCE_ACCESS_KEY=your_source_access_key
+   AD_SOURCE_SECRET_KEY=your_source_secret_key
+   AD_SOURCE_TENANT=your_source_tenant
+   
+   # Target Environment
+   AD_TARGET_ACCESS_KEY=your_target_access_key
+   AD_TARGET_SECRET_KEY=your_target_secret_key
+   AD_TARGET_TENANT=your_target_tenant
+   ```
+
+### Configuration File Details
+
+The `config.env` file contains all the necessary credentials and connection information for both source and target Acceldata environments. This file is critical for authentication and API access.
+
+#### Required Environment Variables
+
+**`AD_HOST`**
+- **Purpose**: The base URL of your Acceldata environment
+- **Format**: Full HTTPS URL (e.g., `https://your-instance.acceldata.app`)
+- **Required**: Yes
+- **Example**: `https://se-demo.acceldata.app`
+- **Notes**: 
+  - Must include the protocol (https://)
+  - Should not include trailing slashes
+  - Must be accessible from your local machine
+  - Used for both source and target environments
+
+**Source Environment Variables**
+
+**`AD_SOURCE_ACCESS_KEY`**
+- **Purpose**: Access key for authenticating with the source environment
+- **Format**: String (typically alphanumeric)
+- **Required**: Yes
+- **Example**: `ak_1234567890abcdef`
+- **Notes**:
+  - Used for all export operations (policies, assets, profiles, configurations)
+  - Must have read permissions on the source environment
+  - Should be kept secure and not shared
+
+**`AD_SOURCE_SECRET_KEY`**
+- **Purpose**: Secret key for authenticating with the source environment
+- **Format**: String (typically alphanumeric)
+- **Required**: Yes
+- **Example**: `sk_abcdef1234567890`
+- **Notes**:
+  - Used in combination with access key for authentication
+  - Must have read permissions on the source environment
+  - Highly sensitive - should be kept secure
+  - Never commit to version control
+
+**`AD_SOURCE_TENANT`**
+- **Purpose**: Tenant identifier for the source environment
+- **Format**: String (typically lowercase with hyphens)
+- **Required**: Yes
+- **Example**: `my-company-dev`
+- **Notes**:
+  - Identifies the specific tenant in multi-tenant environments
+  - Used for API endpoint routing
+  - Must match the tenant configuration in Acceldata
+
+**Target Environment Variables**
+
+**`AD_TARGET_ACCESS_KEY`**
+- **Purpose**: Access key for authenticating with the target environment
+- **Format**: String (typically alphanumeric)
+- **Required**: Yes (for import operations)
+- **Example**: `ak_0987654321fedcba`
+- **Notes**:
+  - Used for all import operations (policies, assets, profiles, configurations)
+  - Must have write permissions on the target environment
+  - Should be kept secure and not shared
+
+**`AD_TARGET_SECRET_KEY`**
+- **Purpose**: Secret key for authenticating with the target environment
+- **Format**: String (typically alphanumeric)
+- **Required**: Yes (for import operations)
+- **Example**: `sk_fedcba0987654321`
+- **Notes**:
+  - Used in combination with access key for authentication
+  - Must have write permissions on the target environment
+  - Highly sensitive - should be kept secure
+  - Never commit to version control
+
+**`AD_TARGET_TENANT`**
+- **Purpose**: Tenant identifier for the target environment
+- **Format**: String (typically lowercase with hyphens)
+- **Required**: Yes (for import operations)
+- **Example**: `my-company-uat`
+- **Notes**:
+  - Identifies the specific tenant in multi-tenant environments
+  - Used for API endpoint routing
+  - Must match the tenant configuration in Acceldata
+
+#### Configuration Scenarios
+
+**Single Environment (Export Only)**
+If you only need to export data from a source environment:
+```bash
+# Required for export operations
+AD_HOST=https://source.acceldata.app
 AD_SOURCE_ACCESS_KEY=your_source_access_key
 AD_SOURCE_SECRET_KEY=your_source_secret_key
 AD_SOURCE_TENANT=your_source_tenant
 
-# Target environment credentials (for import operations)
+# Optional - can be empty or omitted
+AD_TARGET_ACCESS_KEY=
+AD_TARGET_SECRET_KEY=
+AD_TARGET_TENANT=
+```
+
+**Dual Environment (Full Migration)**
+For complete migration workflows:
+```bash
+# Source environment (for export)
+AD_HOST=https://source.acceldata.app
+AD_SOURCE_ACCESS_KEY=your_source_access_key
+AD_SOURCE_SECRET_KEY=your_source_secret_key
+AD_SOURCE_TENANT=your_source_tenant
+
+# Target environment (for import)
 AD_TARGET_ACCESS_KEY=your_target_access_key
 AD_TARGET_SECRET_KEY=your_target_secret_key
 AD_TARGET_TENANT=your_target_tenant
 ```
 
-## Complete Migration Workflow
-
-### Step 1: Export Policies from Source Environment
-
-**Action Required:** Use the Acceldata UI to export policies from your source environment.
-
-1. Navigate to the Acceldata UI in your source environment
-2. Go to the Policies section
-3. Select the policies you want to migrate
-4. Export them as ZIP files
-5. Download the ZIP files to your local machine
-
-**Output:** Policy export ZIP files containing JSON configurations
-
-### Step 2: Process ZIP Files with Formatter
-
-**Purpose:** Translate environment strings and extract asset information
-
+**Different Hosts**
+If source and target are on different hosts:
 ```bash
-python -m adoc_export_import formatter \
-  --input data/policy_exports \
-  --source-env-string "PROD_DB" \
-  --target-env-string "DEV_DB" \
-  --verbose
+# Source environment
+AD_HOST=https://source.acceldata.app
+AD_SOURCE_ACCESS_KEY=your_source_access_key
+AD_SOURCE_SECRET_KEY=your_source_secret_key
+AD_SOURCE_TENANT=your_source_tenant
+
+# Target environment (different host)
+AD_TARGET_HOST=https://target.acceldata.app  # Note: This would require code modification
+AD_TARGET_ACCESS_KEY=your_target_access_key
+AD_TARGET_SECRET_KEY=your_target_secret_key
+AD_TARGET_TENANT=your_target_tenant
 ```
 
-**What this does:**
-- Reads policy export ZIP files from the input directory
-- Extracts JSON files while maintaining structure
-- Replaces source environment strings with target environment strings
-- Generates import-ready ZIP files
-- Creates specialized CSV files for asset management
+#### Security Best Practices
 
-**Output:**
-- `*_import_ready/` directories with translated ZIP files
-- `segmented_spark_uids.csv` - UIDs of segmented SPARK assets
-- `asset_uids.csv` - All asset UIDs for profile/configuration management
+1. **File Permissions**
+   ```bash
+   # Set restrictive permissions on config file
+   chmod 600 config/config.env
+   ```
 
-**Important Notes:**
-- Environment strings must match exactly (case-sensitive)
-- Example: If your source uses "PROD_DB" and target uses "DEV_DB", specify exactly these strings
-- The formatter identifies assets that need special handling during import
+2. **Environment Variable Usage**
+   ```bash
+   # Instead of hardcoding, use environment variables
+   export AD_SOURCE_ACCESS_KEY="your_key"
+   export AD_SOURCE_SECRET_KEY="your_secret"
+   ```
 
-### Step 3: Start Interactive Mode
+3. **Version Control**
+   - Never commit `config.env` to version control
+   - Use `config.env.example` as a template
+   - Add `config.env` to `.gitignore`
 
-**Purpose:** Access interactive commands for asset management
+4. **Key Rotation**
+   - Regularly rotate access and secret keys
+   - Use temporary keys for testing
+   - Monitor key usage and permissions
+
+#### Troubleshooting Configuration Issues
+
+**Common Issues:**
+
+1. **Authentication Errors**
+   - Verify access and secret keys are correct
+   - Check tenant names match exactly
+   - Ensure keys have appropriate permissions
+
+2. **Connection Errors**
+   - Verify `AD_HOST` is accessible from your machine
+   - Check network connectivity and firewalls
+   - Ensure HTTPS is properly configured
+
+3. **Permission Errors**
+   - Source keys need read permissions
+   - Target keys need write permissions
+   - Verify tenant access and permissions
+
+4. **Validation Errors**
+   ```bash
+   # Use the validation command
+   ./bin/adoc-migration-toolkit --check-env
+   ```
+
+#### Configuration Validation
+
+The toolkit provides built-in configuration validation:
+
+```bash
+# Validate configuration without starting the tool
+./bin/adoc-migration-toolkit --check-env
+
+# Expected output for valid configuration:
+# [SUCCESS] Configuration file validated: config/config.env
+# [SUCCESS] Python module 'adoc_export_import' found.
+# [SUCCESS] Environment configuration is valid.
+```
+
+**Validation Checks:**
+- File existence and readability
+- Required environment variables present
+- Variable format validation
+- Basic connectivity testing
+- Authentication verification
+
+### Configuration Validation
+
+```bash
+# Validate configuration without starting the tool
+./bin/adoc-migration-toolkit --check-env
+```
+
+## Command Line Interface
+
+### Main Commands
+
+```bash
+# Asset Export - Export asset details from CSV UIDs
+python -m adoc_export_import asset-export --csv-file data/uids.csv --env-file config.env
+
+# Interactive Mode - Full-featured interactive client
+python -m adoc_export_import interactive --env-file config.env
+```
+
+## Interactive Mode
+
+Start the interactive client:
 
 ```bash
 python -m adoc_export_import interactive --env-file config.env
 ```
 
-This opens an interactive session where you can run specialized commands.
+### Interactive Features
 
-### Step 4: Export Asset Profiles
+The interactive mode provides a powerful command-line interface with advanced features for managing complex migration workflows:
 
-**Purpose:** Extract profile configurations from source environment
+- **Command Autocomplete**: Use TAB key for command and path completion - suggests available commands, file paths, and API endpoints
+- **Command History**: Use ↑/↓ arrow keys to navigate through previous commands - persists across sessions
+- **Session Management**: Commands and settings persist across multiple interactive sessions
+- **Output Directory Management**: Set global output directory for all operations to avoid repeated path specifications
+- **Real-time API Testing**: Test API endpoints directly with authentication switching
+- **Batch Operations**: Execute complex workflows with multiple commands in sequence
+- **Error Recovery**: Comprehensive error handling with detailed logging and recovery options
 
-```bash
-ADOC> asset-profile-export
-ADOC> asset-profile-export --verbose
-```
+### REST API Commands
 
-**What this does:**
-- Reads UIDs from the `asset_uids.csv` file generated in Step 2
-- Makes API calls to get profile configurations for each asset
-- Exports profile configurations to CSV format
-
-**Output:** `asset-profiles-import-ready.csv` file with profile configurations
-
-### Step 5: Import Asset Profiles
-
-**Purpose:** Import profile configurations to target environment
+The interactive mode allows direct REST API calls to the Acceldata environment with full authentication control and response formatting:
 
 ```bash
-ADOC> asset-profile-import --dry-run --verbose
+# Basic API calls
+GET /catalog-server/api/assets?uid=123
+PUT /catalog-server/api/assets {"key": "value"}
+
+# With authentication targeting
+GET /catalog-server/api/assets?uid=123 --target-auth --target-tenant
 ```
 
-**What this does:**
-- Reads profile configurations from the CSV file generated in Step 4
-- Imports profile configurations to the target environment
-- Supports dry-run mode to preview changes before applying
+**Purpose:**
+- Test API endpoints directly without external tools
+- Debug authentication and permission issues
+- Validate data structures and responses
+- Perform ad-hoc data operations
 
-**Options:**
-- `--dry-run`: Preview changes without applying them
-- `--verbose`: Show detailed API calls and responses
-- `--quiet`: Minimal output (default)
+**Features:**
+- **Authentication Switching**: Use `--target-auth` and `--target-tenant` to switch between source and target environments
+- **JSON Payload Support**: PUT requests accept JSON payloads for data modification
+- **Formatted Responses**: All responses are automatically formatted for readability
+- **Error Handling**: Comprehensive error reporting with HTTP status codes
+- **Session Persistence**: Authentication tokens are cached for efficient API calls
 
-### Step 6: Export Asset Configurations
+## Asset Management
 
-**Purpose:** Extract detailed asset configurations from source environment
+### Asset Profile Commands
+
+Asset profiles contain metadata and configuration settings that define how assets behave in the Acceldata environment. These commands handle the export and import of asset profile configurations.
 
 ```bash
-ADOC> asset-config-export data/samples_import_ready/asset_uids.csv --verbose
+# Export asset profiles from source environment
+asset-profile-export [csv_file] [--output-file file] [--quiet] [--verbose]
+
+# Import asset profiles to target environment
+asset-profile-import [csv_file] [--dry-run] [--quiet] [--verbose]
 ```
 
-**What this does:**
-- Reads UIDs from the `asset_uids.csv` file
-- Makes API calls to get asset details and extract asset IDs
-- Fetches detailed configurations using asset IDs
-- Exports compressed JSON configurations to CSV
+**Purpose:**
+- **Export**: Extract asset profile configurations from source environment for migration
+- **Import**: Apply asset profile configurations to target environment
+- **Validation**: Ensure profile configurations are compatible and valid
+- **Backup**: Create backups of asset configurations before migration
 
-**Output:** `asset-config-export.csv` file with detailed configurations
+**What Asset Profiles Include:**
+- Asset metadata and properties
+- Configuration settings and parameters
+- Connection information and credentials
+- Performance tuning parameters
+- Custom attributes and tags
 
-### Step 7: Import Asset Configurations
+**Examples:**
+```bash
+# Export with default files
+asset-profile-export
 
-**Purpose:** Import detailed configurations to target environment
+# Export with custom files
+asset-profile-export data/uids.csv --output-file profiles.csv --verbose
+
+# Import with dry-run
+asset-profile-import data/profiles.csv --dry-run --verbose
+```
+
+**Important Notes:**
+- Export always uses source environment authentication
+- Import always uses target environment authentication
+- Use `--dry-run` to preview changes before applying
+- Profile configurations may contain environment-specific settings that need validation
+
+### Asset Configuration Commands
+
+Asset configurations contain the detailed technical settings and parameters that define how assets connect to and interact with data sources. These commands handle the extraction and management of detailed asset configurations.
 
 ```bash
-ADOC> asset-config-import data/samples_import_ready/asset-config-export.csv --dry-run --verbose
+# Export asset configurations from source
+asset-config-export <csv_file> [--output-file file] [--quiet] [--verbose]
+
+# Export all assets from source environment
+asset-list-export [--quiet] [--verbose]
 ```
 
-**Note:** This command will be implemented in a future update.
+**Purpose:**
+- **Configuration Export**: Extract detailed technical configurations for migration
+- **Asset Discovery**: Identify all assets in the source environment
+- **Configuration Analysis**: Analyze asset configurations for compatibility
+- **Migration Planning**: Prepare detailed asset inventories for migration
 
-### Step 8: Handle Segmented Assets (if applicable)
+**What Asset Configurations Include:**
+- Connection strings and parameters
+- Authentication credentials and methods
+- Data source configurations
+- Query and transformation settings
+- Performance and tuning parameters
+- Custom configuration properties
 
-**Purpose:** Import segment configurations for SPARK assets
+**Examples:**
+```bash
+# Export configurations
+asset-config-export data/asset_uids.csv --verbose
+
+# Export all assets
+asset-list-export --quiet
+```
+
+**Technical Details:**
+- Uses `/catalog-server/api/assets/discover` endpoint with pagination
+- Retrieves all pages with configurable batch sizes
+- Sorts output by UID and ID for consistency
+- Provides comprehensive statistics upon completion
+- Handles large asset inventories efficiently
+
+## Policy Management
+
+### Policy Export Commands
+
+Policy management is a core component of Acceldata environments. These commands handle the comprehensive export and categorization of policies for migration and analysis purposes.
 
 ```bash
-ADOC> segments-export
-ADOC> segments-export --verbose
-ADOC> segments-import segments_output.csv --dry-run --verbose
+# Export all policies from source environment
+policy-list-export [--quiet] [--verbose]
+
+# Export policy definitions by categories
+policy-export [--type export_type] [--filter filter_value] [--quiet] [--verbose] [--batch-size size]
 ```
 
-**What this does:**
-- Reads UIDs of segmented SPARK assets from the CSV generated in Step 2
-- Exports segment configurations that aren't included in standard imports
+**Purpose:**
+- **Policy Inventory**: Create comprehensive lists of all policies
+- **Categorized Export**: Export policies by specific criteria for targeted migration
+- **Batch Processing**: Handle large policy sets efficiently
+- **Migration Preparation**: Prepare policies for environment transfer
 
-**Output:** `segments_output.csv` file with segment configurations
+**Export Types and Use Cases:**
+- `rule-types`: Export by rule type (e.g., data quality, governance) - Useful for migrating specific policy categories
+- `engine-types`: Export by engine type (e.g., JDBC_URL, SPARK) - Essential for engine-specific migrations
+- `assemblies`: Export by assembly (e.g., production-db, test-env) - Critical for environment-specific migrations
+- `source-types`: Export by source type (e.g., PostgreSQL, MySQL) - Important for database-specific migrations
+
+**Examples:**
+```bash
+# Export all policies
+policy-list-export --quiet
+
+# Export by rule types
+policy-export --type rule-types --batch-size 100
+
+# Export specific engine type
+policy-export --type engine-types --filter JDBC_URL
+
+# Export specific assembly
+policy-export --type assemblies --filter production-db
+```
+
+**Technical Details:**
+- Uses `/catalog-server/api/rules` endpoint with pagination
+- Supports configurable batch sizes for large policy sets
+- Generates ZIP files with policy definitions
+- Creates timestamped files for version control
+- Provides detailed progress reporting and statistics
+
+### Policy Import Commands
+
+Policy import is the final step in the migration process, where processed policy definitions are applied to the target environment. This command handles the bulk import of policy configurations with comprehensive validation and conflict resolution.
 
 ```bash
-ADOC> segments-import data/samples_import_ready/segments_output.csv --dry-run --verbose
+# Import policy definitions from ZIP files
+policy-import <file_or_pattern> [--quiet] [--verbose]
 ```
 
-**What this does:**
-- Imports segment configurations to target environment
-- Required for SPARK assets with segmentation
-- Optional for JDBC_SQL assets (already handled by standard import)
+**Purpose:**
+- **Bulk Import**: Import multiple policy definitions efficiently
+- **Conflict Resolution**: Handle existing policies and assemblies gracefully
+- **Validation**: Ensure imported policies are compatible with target environment
+- **Audit Trail**: Track imported policies and their UUIDs for verification
 
-## Command Reference
+**Import Process:**
+- Uploads ZIP files to `/catalog-server/api/rules/import/policy-definitions/upload-config`
+- Uses target environment authentication
+- Validates file integrity and content
+- Reports conflicts and resolution status
+- Provides comprehensive import statistics
 
-### Formatter Command
+**Examples:**
+```bash
+# Import all ZIP files
+policy-import *.zip
+
+# Import specific pattern
+policy-import data-quality-*.zip --verbose
+
+# Import specific file
+policy-import /path/to/policy.zip
+```
+
+**Important Considerations:**
+- Always uses target environment authentication
+- Supports glob patterns for batch processing
+- Validates file existence and readability
+- Reports detailed conflicts (assemblies, policies, SQL views, visual views)
+- Tracks UUIDs of successfully imported policies
+- Provides rollback information for troubleshooting
+
+### Policy Transformer
+
+The policy transformer  is a critical component that processes policy export ZIP files to prepare them for import into target environments. It handles environment string translation, asset extraction, and file organization.
 
 ```bash
-python -m adoc_export_import formatter \
-  --input <input_directory> \
-  --source-env-string <source_string> \
-  --target-env-string <target_string> \
-  [--output-dir <output_directory>] \
-  [--verbose] \
-  [--log-level <level>]
+# Format policy export files with string replacement
+policy-xfr [--input input_dir] --source-env-string <source> --target-env-string <target> [options]
 ```
 
-**Arguments:**
-- `--input`: Directory containing policy export ZIP files
-- `--source-env-string`: Exact string to replace (e.g., "PROD_DB")
-- `--target-env-string`: String to replace with (e.g., "DEV_DB")
-- `--output-dir`: Custom output directory (optional)
-- `--verbose`: Enable detailed logging
-- `--log-level`: Set logging level (ERROR, WARNING, INFO, DEBUG)
+**Purpose:**
+- **Environment Translation**: Replace source environment strings with target environment strings
+- **Asset Extraction**: Identify and extract asset information for specialized handling
+- **File Organization**: Create structured output directories for import workflows
+- **Validation**: Ensure processed files are ready for target environment import
 
-### Interactive Mode
+**Processing Pipeline:**
+1. **File Discovery**: Scans input directory for ZIP and JSON files
+2. **Content Extraction**: Extracts and processes JSON content from ZIP archives
+3. **String Replacement**: Performs environment string translation throughout all files
+4. **Asset Analysis**: Identifies and categorizes assets for specialized handling
+5. **Output Generation**: Creates import-ready files and asset management CSVs
+
+**Examples:**
+```bash
+# Basic string replacement
+policy-xfr --source-env-string "PROD_DB" --target-env-string "DEV_DB"
+
+# With custom input directory
+policy-xfr --input data/samples --source-env-string "old" --target-env-string "new" --verbose
+```
+
+**Generated Outputs:**
+- `*_import_ready/` directories with translated ZIP files
+- `segmented_spark_uids.csv` - UIDs of segmented SPARK assets requiring special handling
+- `asset_uids.csv` - All asset UIDs for profile and configuration management
+- Processing statistics and validation reports
+
+**Critical Requirements:**
+- Environment strings must match exactly (case-sensitive)
+- Source environment strings must exist in the policy files
+- Target environment strings should be valid for the target environment
+- Input directory should contain valid policy export ZIP files
+
+## Segments Management
+
+### Segments Commands
+
+Segments are specialized configurations for data partitioning and processing optimization in Acceldata. These commands handle the export and import of segment configurations, which are critical for SPARK assets but handled differently for JDBC_SQL assets.
 
 ```bash
-python -m adoc_export_import interactive --env-file config.env [--verbose]
+# Export segments from source environment
+segments-export [csv_file] [--output-file file] [--quiet]
+
+# Import segments to target environment
+segments-import [csv_file] [--dry-run] [--quiet] [--verbose]
 ```
 
-**Available Commands:**
-- `segments-export [<csv_file>] [--output-file <file>] [--quiet]`
-- `segments-import <csv_file> [--dry-run] [--quiet] [--verbose]`
-- `asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose]`
-- `asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose]`
-- `asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]`
-- `set-output-dir <directory>`: Set global output directory
-- `help`: Show detailed help
-- `exit`: Exit interactive mode
+**Purpose:**
+- **SPARK Asset Support**: Export and import segment configurations for SPARK assets
+- **Performance Optimization**: Maintain data partitioning and processing configurations
+- **Migration Completeness**: Ensure all asset configurations are properly migrated
+- **Validation**: Verify segment configurations are compatible with target environment
+
+**Why Segments Matter:**
+- **SPARK Assets**: Segmented Spark configurations are NOT included in standard policy imports and require separate handling
+- **JDBC_SQL Assets**: Segment configurations are already available in standard import capabilities
+- **Performance Impact**: Segments affect data processing performance and resource utilization
+- **Data Partitioning**: Segments define how data is partitioned for parallel processing
+
+**Examples:**
+```bash
+# Export segments
+segments-export
+
+# Import segments with dry-run
+segments-import data/segments.csv --dry-run --verbose
+```
+
+**Behavior and Requirements:**
+- **Export**: Always exports from source environment using source authentication
+- **Import**: Always imports to target environment using target authentication
+- **SPARK Assets**: Required for segmented Spark configurations - must be imported separately
+- **JDBC_SQL Assets**: Already available in standard import - no additional configuration needed
+- **Validation**: Only processes assets that have valid segments configuration
+- **Error Handling**: Skips assets without segments (logged as info)
+
+**Technical Details:**
+- Reads UIDs from CSV files generated by the formatter
+- Makes API calls to extract segment configurations
+- Creates new segments in target environment (removes existing IDs)
+- Supports both SPARK and JDBC_SQL engine types
+- Validates CSV format and JSON content before processing
+
+## Utility Commands
+
+### Output Directory Management
+
+The output directory management system provides centralized control over where all export and import files are stored, eliminating the need to specify file paths repeatedly across multiple commands.
+
+```bash
+# Set global output directory for all export commands
+set-output-dir <directory>
+```
+
+**Purpose:**
+- **Centralized Configuration**: Set a single output directory for all operations
+- **Path Simplification**: Eliminate repeated `--output-file` specifications
+- **Organization**: Maintain consistent file organization across migration workflows
+- **Persistence**: Settings persist across multiple interactive sessions
+
+**Benefits:**
+- **Consistency**: All commands use the same output structure
+- **Efficiency**: No need to specify file paths for each command
+- **Organization**: Automatic creation of categorized subdirectories
+- **Persistence**: Settings saved to `~/.adoc_migration_config.json`
+
+**Examples:**
+```bash
+set-output-dir /path/to/my/output
+set-output-dir data/custom_output
+```
+
+**Directory Structure Created:**
+```
+<output-directory>/
+├── asset-export/          # Asset export files
+├── asset-import/          # Asset import files
+├── policy-export/         # Policy export files
+└── policy-import/         # Policy import files
+```
+
+**Features:**
+- **Automatic Creation**: Creates directory if it doesn't exist
+- **Permission Validation**: Checks write permissions before setting
+- **Path Validation**: Ensures directory path is valid and accessible
+- **Configuration Persistence**: Settings saved across sessions
+- **Override Capability**: Can be changed anytime with another command
+
+### Session Management
+
+Session management commands provide essential tools for navigating and controlling the interactive environment, including help, history, and session control.
+
+```bash
+# Show command help
+help
+
+# Show command history
+history
+
+# Exit interactive client
+exit, quit, q
+```
+
+**Help Command (`help`):**
+- **Purpose**: Display comprehensive help information for all available commands
+- **Content**: Detailed command descriptions, examples, and usage patterns
+- **Format**: Organized by command categories with clear explanations
+- **Accessibility**: Available anytime during interactive sessions
+
+**History Command (`history`):**
+- **Purpose**: Display the last 25 commands with numbered entries
+- **Features**: 
+  - Shows command numbers for easy reference
+  - Latest commands appear first (highest numbers)
+  - Long commands are truncated for display
+  - Enter a number to execute that command
+  - Works alongside ↑/↓ arrow key navigation
+- **Persistence**: Command history persists across sessions
+
+**Exit Commands (`exit`, `quit`, `q`):**
+- **Purpose**: Safely exit the interactive client
+- **Behavior**: 
+  - Saves current session state
+  - Cleans up resources
+  - Preserves command history
+  - Maintains output directory settings
+- **Multiple Options**: Three different commands for the same action
+
+**Session Features:**
+- **State Persistence**: Settings and history maintained across sessions
+- **Graceful Exit**: Clean shutdown with state preservation
+- **Resource Management**: Automatic cleanup of temporary resources
+- **Configuration Retention**: Output directory and other settings preserved
+
+### JSON Processing
+
+The JSON processing utility provides a simple way to format and view JSON files in a human-readable format, which is essential for analyzing policy configurations and API responses.
+
+```bash
+# Pretty print JSON files
+./bin/sjson <file.json>
+```
+
+**Purpose:**
+- **JSON Formatting**: Convert compact JSON to human-readable format
+- **Configuration Analysis**: Easily view and analyze policy configurations
+- **Debug Support**: Format API responses for troubleshooting
+- **Documentation**: Create readable versions of configuration files
+
+**Use Cases:**
+- **Policy Analysis**: Format policy export files for review
+- **API Debugging**: Format API responses for troubleshooting
+- **Configuration Review**: Read and analyze asset configurations
+- **Migration Planning**: Review configuration details before migration
+
+**Features:**
+- **Simple Interface**: Single command with file path argument
+- **Standard Formatting**: Uses Python's json.tool for consistent formatting
+- **Error Handling**: Graceful handling of invalid JSON files
+- **Cross-Platform**: Works on Unix, macOS, and Windows systems
+
+**Example Usage:**
+```bash
+# Format a policy configuration file
+./bin/sjson policy-config.json
+
+# Format an API response file
+./bin/sjson api-response.json
+
+# Pipe JSON content directly
+echo '{"key":"value"}' | ./bin/sjson
+```
+
+**Technical Details:**
+- Uses Python's built-in `json.tool` module
+- Maintains JSON validity and structure
+- Handles large JSON files efficiently
+- Provides consistent indentation and formatting
 
 ## File Structure
 
+### Default Output Directory Structure
+
 ```
-project/
-├── data/
-│   ├── policy_exports/           # Input: Policy export ZIP files
-│   │   ├── policy_export.zip
-│   │   └── metadata.json
-│   ├── samples_import_ready/     # Output: Processed files
-│   │   ├── [translated ZIP files]
-│   │   ├── segmented_spark_uids.csv
-│   │   ├── asset_uids.csv
-│   │   ├── asset-profiles-import-ready.csv
-│   │   ├── asset-config-export.csv
-│   │   └── segments_output.csv
-│   ├── asset-export/
-│   │   ├── asset_uids.csv
-│   │   ├── asset-all-export.csv
-│   │   └── asset-config-export.csv
-│   ├── asset-import/
-│   │   ├── asset-profiles-import-ready.csv
-│   │   └── segments_output.csv
-│   ├── policy-export/
-│   │   ├── policies-all-export.csv
-│   │   ├── segmented_spark_uids.csv
-│   │   └── *.zip files
-│   └── policy-import/
-│       └── processed files
-├── config.env                    # Environment configuration
-└── README.md
+adoc-migration-toolkit-YYYYMMDDHHMM/
+├── asset-export/
+│   ├── asset_uids.csv
+│   └── asset-all-export.csv
+├── asset-import/
+│   ├── asset-profiles-import-ready.csv
+│   └── asset-configs-import-ready.csv
+├── policy-export/
+│   ├── policies-all-export.csv
+│   ├── segmented_spark_uids.csv
+│   └── *.zip (policy definition files)
+└── policy-import/
+    └── segments_output.csv
 ```
 
-## Common Use Cases
+### Configuration Files
 
-### Development Environment Migration
+- `config/config.env`: Environment configuration
+- `~/.adoc_migration_config.json`: Persistent settings
+- `~/.adoc-migrations/`: Migration state files
+
+## Examples
+
+### Complete Migration Workflow
 
 ```bash
-# 1. Process policy exports
-python -m adoc_export_import formatter \
-  --input data/policy_exports \
-  --source-env-string "PROD_DB" \
-  --target-env-string "DEV_DB" \
-  --verbose
-
-# 2. Start interactive session
+# 1. Start interactive client
 python -m adoc_export_import interactive --env-file config.env
 
-# 3. Export and import profiles
-ADOC> asset-profile-export
-ADOC> asset-profile-export --verbose
-ADOC> asset-profile-import --dry-run --verbose
+# 2. Set output directory
+set-output-dir /path/to/migration
 
-# 4. Export and import configurations
-ADOC> asset-config-export data/samples_import_ready/asset_uids.csv --verbose
-# asset-config-import command will be available in future update
+# 3. Export all policies
+policy-list-export --quiet
 
-# 5. Handle segmented assets (if any)
-ADOC> segments-export
-ADOC> segments-export --verbose
-ADOC> segments-import segments_output.csv --dry-run --verbose
+# 4. Export policies by categories
+policy-export --type rule-types
+policy-export --type engine-types --filter JDBC_URL
+
+# 5. Process with formatter
+policy-xfr --source-env-string "PROD" --target-env-string "DEV"
+
+# 6. Export asset profiles
+asset-profile-export
+
+# 7. Import asset profiles
+asset-profile-import --dry-run --verbose
+
+# 8. Handle segments
+segments-export
+segments-import --dry-run --verbose
+
+# 9. Import policies
+policy-import *.zip --verbose
+asset-profile-import
+asset-config-import
+segments-import 
 ```
 
-### Testing Environment Migration
+### Guided Migration Example
 
 ```bash
-# Similar to development, but with different environment strings
-python -m adoc_export_import formatter \
-  --input data/policy_exports \
-  --source-env-string "PROD_DB" \
-  --target-env-string "TEST_DB" \
-  --verbose
+# Start guided migration
+guided-migration dev-to-uat
+guided-migration uat-to-prod
+
+# Follow the step-by-step prompts
+# Migration can be paused and resumed at any time
+
+# Resume later
+resume-migration dev-to-uat
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Environment String Not Found**
-   - Ensure exact string matching (case-sensitive)
-   - Check the actual strings in your policy files
-   - Use `--verbose` to see detailed processing
+1. **Configuration Errors**
+   ```bash
+   # Validate configuration
+   ./bin/adoc-migration-toolkit --check-env
+   ```
 
-2. **API Connection Errors**
-   - Verify `config.env` file has correct credentials
-   - Check network connectivity to Acceldata instance
-   - Ensure access keys have appropriate permissions
+2. **Permission Issues**
+   ```bash
+   # Make scripts executable
+   chmod +x bin/*
+   ```
 
-3. **CSV File Not Found**
-   - Verify file paths are correct
-   - Check that formatter has generated the required CSV files
-   - Use absolute paths if needed
+3. **Python Module Not Found**
+   ```bash
+   # Install in development mode
+   pip install -e .
+   ```
 
-4. **Permission Errors**
-   - Ensure write permissions for output directories
-   - Check file permissions for input files
+4. **File Not Found Errors**
+   - Ensure CSV files exist and are readable
+   - Check file paths are correct
+   - Verify output directory permissions
 
 ### Logging
 
-The tool provides comprehensive logging:
-- Console output with `--verbose` flag
-- Log files: `adoc-migration-toolkit-YYYYMMDD.log` (rotates daily)
-- Interactive mode history: `~/.adoc_migration_toolkit_history`
+- **Log Files**: `adoc-migration-toolkit-YYYYMMDD.log`
+- **Log Levels**: ERROR, WARNING, INFO, DEBUG
+- **Verbose Mode**: Use `--verbose` flag for detailed output
 
-### Getting Help
+### Environment Behavior
 
-- Use `help` command in interactive mode for detailed command information
+- **Export Commands**: Always use source environment authentication
+- **Import Commands**: Always use target environment authentication
+- **Segments**: Special handling for SPARK vs JDBC_SQL engine types
+
+### Tips
+
+- Use TAB key for command autocomplete
+- Use ↑/↓ arrow keys for command history
+- Set output directory once to avoid repeated `--output-file` flags
+- Use `--dry-run` to preview changes before making them
+- Use `--verbose` for detailed API request/response information
 - Check log files for detailed error information
-- Use `--dry-run` flag to preview changes before applying them
-
-## Best Practices
-
-1. **Always use dry-run first**: Test your commands with `--dry-run` before applying changes
-2. **Backup your data**: Keep backups of original policy exports
-3. **Verify environment strings**: Double-check source and target environment strings
-4. **Test in non-production**: Always test the migration process in a test environment first
-5. **Monitor logs**: Use verbose mode and check log files for detailed information
-6. **Validate outputs**: Verify generated CSV files before proceeding to import steps
 
 ## Support
 
 For issues and questions:
-- Check the troubleshooting section above
-- Review log files for detailed error information
-- Use the GitHub issue tracker for bug reports and feature requests
+- Check the log files for detailed error information
+- Use `--verbose` flag for detailed output
+- Validate configuration with `--check-env`
+- Review the interactive help with `help` command
 
-## Formatter Technical Details
+## Interactive Interface Example
 
-The formatter is the core component of the ADOC Export Import Tool, responsible for processing policy export ZIP files and preparing them for import into target environments. This section provides detailed technical information about how the formatter works.
+Here's what the interactive interface looks like when you start the toolkit:
 
-### Architecture Overview
-
-The formatter operates on a multi-stage pipeline:
-
-1. **File Discovery**: Scans input directory for ZIP and JSON files
-2. **Content Extraction**: Extracts and processes JSON content from ZIP archives
-3. **String Replacement**: Performs environment string translation
-4. **Asset Analysis**: Identifies and categorizes assets for specialized handling
-5. **Output Generation**: Creates import-ready files and asset management CSVs
-
-### Processing Pipeline
-
-#### Stage 1: File Discovery and Validation
-```
-Input Directory Scan
-├── ZIP Files (*.zip)
-│   ├── Validate ZIP structure
-│   ├── Check for JSON content
-│   └── Extract file metadata
-└── JSON Files (*.json)
-    ├── Validate JSON syntax
-    ├── Check for policy content
-    └── Prepare for processing
-```
-
-#### Stage 2: Content Extraction and Processing
-```
-ZIP Archive Processing
-├── Extract all files maintaining structure
-├── Identify JSON files within archives
-├── Parse JSON content recursively
-└── Build content tree for analysis
-
-JSON File Processing
-├── Parse JSON structure
-├── Traverse all nested objects and arrays
-├── Identify string fields for replacement
-└── Maintain data type integrity
-```
-
-#### Stage 3: Environment String Replacement
-```
-String Replacement Engine
-├── Exact String Matching
-│   ├── Case-sensitive comparison
-│   ├── Whole string replacement
-│   └── Preserve surrounding context
-├── Recursive Processing
-│   ├── Object properties
-│   ├── Array elements
-│   └── Nested structures
-└── Validation
-    ├── JSON syntax preservation
-    ├── Data type consistency
-    └── Replacement verification
-```
-
-#### Stage 4: Asset Analysis and Categorization
-```
-Asset Identification
-├── Scan processed JSON for asset definitions
-├── Extract asset metadata
-│   ├── UID (Unique Identifier)
-│   ├── Engine Type (SPARK, JDBC_SQL, etc.)
-│   ├── Segmentation Status
-│   └── Configuration Type
-└── Categorize assets
-    ├── Segmented SPARK assets
-    ├── Segmented JDBC_SQL assets
-    ├── Non-segmented assets
-    └── Special configuration assets
-```
-
-#### Stage 5: Output Generation
-```
-File Output Generation
-├── Import-Ready ZIP Files
-│   ├── Maintain original structure
-│   ├── Include translated JSON
-│   ├── Preserve file metadata
-│   └── Create _import_ready directories
-├── Asset Management CSVs
-│   ├── segmented_spark_uids.csv
-│   ├── asset_uids.csv
-│   └── Validation and formatting
-└── Processing Statistics
-    ├── File counts and types
-    ├── Replacement statistics
-    ├── Asset categorization
-    └── Error reporting
-```
-
-### String Replacement Algorithm
-
-The formatter uses a sophisticated string replacement algorithm that ensures data integrity:
-
-```python
-def replace_strings_recursive(obj, search_string, replace_string):
-    """
-    Recursively replace strings in JSON objects while preserving structure.
-    
-    Args:
-        obj: JSON object, array, or primitive value
-        search_string: String to search for (exact match)
-        replace_string: String to replace with
-        
-    Returns:
-        Modified object with strings replaced
-    """
-    if isinstance(obj, dict):
-        return {key: replace_strings_recursive(value, search_string, replace_string) 
-                for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [replace_strings_recursive(item, search_string, replace_string) 
-                for item in obj]
-    elif isinstance(obj, str):
-        return obj.replace(search_string, replace_string)
-    else:
-        return obj  # Preserve non-string types (numbers, booleans, null)
-```
-
-### Asset Detection and Classification
-
-The formatter identifies assets using multiple criteria:
-
-#### Asset Detection Criteria
-```json
-{
-  "asset": {
-    "uid": "string",           // Required: Unique asset identifier
-    "engineType": "SPARK|JDBC_SQL|...",  // Engine classification
-    "isSegmented": true|false, // Segmentation status
-    "configType": "string",    // Configuration type
-    "metadata": {...}          // Additional metadata
-  }
-}
-```
-
-#### Classification Logic
-```python
-def classify_asset(asset_data):
-    """
-    Classify asset based on engine type and segmentation status.
-    """
-    engine_type = asset_data.get('engineType', '')
-    is_segmented = asset_data.get('isSegmented', False)
-    
-    if is_segmented and engine_type == 'SPARK':
-        return 'segmented_spark'
-    elif is_segmented and engine_type == 'JDBC_SQL':
-        return 'segmented_jdbc'
-    else:
-        return 'standard'
-```
-
-### File Structure Preservation
-
-The formatter maintains the original file structure while processing:
-
-```
-Original ZIP Structure
-├── policy_export.zip
-│   ├── assets/
-│   │   ├── asset1.json
-│   │   ├── asset2.json
-│   │   └── metadata.json
-│   ├── policies/
-│   │   ├── policy1.json
-│   │   └── policy2.json
-│   └── config/
-│       └── settings.json
-
-Processed Output Structure
-├── policy_export_import_ready/
-│   ├── assets/
-│   │   ├── asset1.json (translated)
-│   │   ├── asset2.json (translated)
-│   │   └── metadata.json (translated)
-│   ├── policies/
-│   │   ├── policy1.json (translated)
-│   │   └── policy2.json (translated)
-│   ├── config/
-│   │   └── settings.json (translated)
-│   ├── segmented_spark_uids.csv
-│   └── asset_uids.csv
-```
-
-### Error Handling and Validation
-
-The formatter implements comprehensive error handling:
-
-#### Error Categories
-1. **File System Errors**
-   - Invalid file paths
-   - Permission issues
-   - Disk space problems
-
-2. **ZIP Processing Errors**
-   - Corrupted ZIP files
-   - Invalid ZIP structure
-   - Extraction failures
-
-3. **JSON Processing Errors**
-   - Invalid JSON syntax
-   - Encoding issues
-   - Memory constraints
-
-4. **String Replacement Errors**
-   - Invalid search/replace strings
-   - Data type corruption
-   - Replacement failures
-
-#### Validation Checks
-```python
-def validate_replacement(original, modified, search_string, replace_string):
-    """
-    Validate that string replacement was successful and safe.
-    """
-    # Check JSON syntax
-    if not is_valid_json(modified):
-        raise JSONSyntaxError("Replacement corrupted JSON structure")
-    
-    # Verify replacements occurred
-    if search_string in str(original) and search_string in str(modified):
-        raise ReplacementError("Not all instances were replaced")
-    
-    # Check data type preservation
-    if type(original) != type(modified):
-        raise DataTypeError("Replacement changed data types")
-    
-    return True
-```
-
-### Performance Optimizations
-
-The formatter includes several performance optimizations:
-
-#### Memory Management
-- **Streaming Processing**: Large ZIP files are processed in chunks
-- **Lazy Loading**: JSON content is parsed only when needed
-- **Memory Pooling**: Reuses objects to reduce garbage collection
-
-#### Parallel Processing
-- **File-Level Parallelism**: Multiple files processed concurrently
-- **Content-Level Parallelism**: Large JSON objects processed in parallel
-- **I/O Optimization**: Asynchronous file operations
-
-#### Caching
-- **String Cache**: Caches frequently used search/replace operations
-- **Pattern Cache**: Caches compiled regex patterns
-- **Metadata Cache**: Caches file metadata for repeated access
-
-### Statistics and Reporting
-
-The formatter provides detailed statistics for monitoring and debugging:
-
-#### Processing Statistics
-```json
-{
-  "total_files": 150,
-  "json_files": 120,
-  "zip_files": 30,
-  "files_investigated": 145,
-  "changes_made": 89,
-  "successful": 142,
-  "failed": 3,
-  "total_policies_processed": 89,
-  "segmented_spark_policies": 12,
-  "segmented_jdbc_policies": 8,
-  "non_segmented_policies": 69,
-  "extracted_assets": 156,
-  "all_assets": 156,
-  "errors": ["error1", "error2", "error3"]
-}
-```
-
-#### Asset Statistics
-```json
-{
-  "asset_categories": {
-    "segmented_spark": 12,
-    "segmented_jdbc": 8,
-    "standard": 136
-  },
-  "engine_types": {
-    "SPARK": 45,
-    "JDBC_SQL": 67,
-    "PYTHON": 23,
-    "OTHER": 21
-  },
-  "segmentation_status": {
-    "segmented": 20,
-    "non_segmented": 136
-  }
-}
-```
-
-### Configuration Options
-
-The formatter supports various configuration options:
-
-#### Command Line Options
 ```bash
-python -m adoc_export_import formatter \
-  --input <directory>           # Input directory path
-  --source-env-string <string>  # Source environment string
-  --target-env-string <string>  # Target environment string
-  --output-dir <directory>      # Custom output directory
-  --verbose                     # Enable verbose logging
-  --log-level <level>          # Set logging level
+(adoc-export-import) nitinmotgi@MBA-K609Q0JDGC adoc-export-import % bin/adoc-migration-toolkit 
+
+================================================================================
+ADOC INTERACTIVE MIGRATION TOOLKIT
+================================================================================
+📁 Output Directory: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo
+📁 Current Directory: /Users/nitinmotgi/Work/adoc-export-import
+📋 Config File: config/config.env
+🌍 Source Environment: https://se-demo.acceldata.app
+🌍 Source Tenant: se-demo
+================================================================================
+✅ Tab completion configured successfully
+
+ADOC > help
+
+================================================================================
+ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
+================================================================================
+
+📁 Current Output Directory: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo
+💡 Use 'set-output-dir <directory>' to change the output directory
+================================================================================
+
+📊 SEGMENTS COMMANDS:
+  segments-export [<csv_file>] [--output-file <file>] [--quiet]
+    Description: Export segments from source environment to CSV file
+    Arguments:
+      csv_file: Path to CSV file with source-env and target-env mappings (optional)
+      --output-file: Specify custom output file (optional)
+      --quiet: Suppress console output, show only summary
+    Examples:
+      segments-export
+      segments-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/segmented_spark_uids.csv
+      segments-export data/uids.csv --output-file my_segments.csv --quiet
+    Behavior:
+      • If no CSV file specified, uses default from output directory
+      • Default input: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/segmented_spark_uids.csv
+      • Default output: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/segments_output.csv
+      • Exports segments configuration for assets with isSegmented=true
+      • For engineType=SPARK: Required because segmented Spark configurations
+        are not directly imported with standard import capability
+      • For engineType=JDBC_SQL: Already available in standard import,
+        so no additional configuration needed
+      • Only processes assets that have segments defined
+      • Skips assets without segments (logged as info)
+
+  segments-import <csv_file> [--dry-run] [--quiet] [--verbose]
+    Description: Import segments to target environment from CSV file
+    Arguments:
+      csv_file: Path to CSV file with target-env and segments_json
+      --dry-run: Preview changes without making API calls
+      --quiet: Suppress console output (default)
+      --verbose: Show detailed output including headers
+    Examples:
+      segments-import /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/segments_output.csv
+      segments-import segments.csv --dry-run --verbose
+    Behavior:
+      • Reads the CSV file generated from segments-export command
+      • Targets UIDs for which segments are present and engine is SPARK
+      • Imports segments configuration to target environment
+      • Creates new segments (removes existing IDs)
+      • Supports both SPARK and JDBC_SQL engine types
+      • Validates CSV format and JSON content
+      • Processes only assets that have valid segments configuration
+
+🔧 ASSET PROFILE COMMANDS:
+  asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose]
+    Description: Export asset profiles from source environment to CSV file
+    Arguments:
+      csv_file: Path to CSV file with source-env and target-env mappings (optional)
+      --output-file: Specify custom output file (optional)
+      --quiet: Suppress console output, show only summary (default)
+      --verbose: Show detailed output including headers and responses
+    Examples:
+      asset-profile-export
+      asset-profile-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
+      asset-profile-export uids.csv --output-file profiles.csv --verbose
+    Behavior:
+      • If no CSV file specified, uses default from output directory
+      • Default input: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
+      • Default output: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-import/asset-profiles-import-ready.csv
+      • Reads source-env and target-env mappings from CSV file
+      • Makes API calls to get asset profiles from source environment
+      • Writes profile JSON data to output CSV file
+      • Shows minimal output by default, use --verbose for detailed information
+
+  asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose]
+    Description: Import asset profiles to target environment from CSV file
+    Arguments:
+      csv_file: Path to CSV file with target-env and profile_json (optional)
+      --dry-run: Preview changes without making API calls
+      --quiet: Suppress console output (default)
+      --verbose: Show detailed output including headers and responses
+    Examples:
+      asset-profile-import
+      asset-profile-import /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-import/asset-profiles-import-ready.csv
+      asset-profile-import profiles.csv --dry-run --verbose
+    Behavior:
+      • If no CSV file specified, uses default from output directory
+      • Default input: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-import/asset-profiles-import-ready.csv
+      • Reads target-env and profile_json from CSV file
+      • Makes API calls to update asset profiles in target environment
+      • Supports dry-run mode for previewing changes
+
+🔍 ASSET CONFIGURATION COMMANDS:
+  asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]
+    Description: Export asset configurations from source environment to CSV file
+    Arguments:
+      csv_file: Path to CSV file with UIDs in the first column
+      --output-file: Specify custom output file (optional)
+      --quiet: Suppress console output, show only summary (default)
+      --verbose: Show detailed output including headers and responses
+    Examples:
+      asset-config-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
+      asset-config-export uids.csv --output-file configs.csv --verbose
+    Behavior:
+      • Reads UIDs from the first column of the CSV file
+      • Makes REST call to '/catalog-server/api/assets?uid=<uid>' to get asset ID
+      • Uses asset ID to call '/catalog-server/api/assets/<id>/config'
+      • Writes compressed JSON response to CSV with target-env UID
+      • Shows status for each UID in quiet mode
+      • Shows HTTP headers and response objects in verbose mode
+      • Output format: target-env, config_json (compressed)
+
+  asset-list-export [--quiet] [--verbose]
+    Description: Export all assets from source environment to CSV file
+    Arguments:
+      --quiet: Suppress console output, show only summary
+      --verbose: Show detailed output including headers and responses
+    Examples:
+      asset-list-export
+      asset-list-export --quiet
+      asset-list-export --verbose
+    Behavior:
+      • Uses '/catalog-server/api/assets/discover' endpoint with pagination
+      • First call gets total count with size=0&page=0
+      • Retrieves all pages with size=500 (default)
+      • Output file: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset-all-export.csv
+      • CSV columns: uid, id
+      • Sorts output by uid first, then by id
+      • Shows page-by-page progress in quiet mode
+      • Shows detailed request/response in verbose mode
+      • Provides comprehensive statistics upon completion
+
+  policy-list-export [--quiet] [--verbose]
+    Description: Export all policies from source environment to CSV file
+    Arguments:
+      --quiet: Suppress console output, show only summary
+      --verbose: Show detailed output including headers and responses
+    Examples:
+      policy-list-export
+      policy-list-export --quiet
+      policy-list-export --verbose
+    Behavior:
+      • Uses '/catalog-server/api/rules' endpoint with pagination
+      • First call gets total count with page=0&size=0
+      • Retrieves all pages with size=1000 (default)
+      • Output file: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/policies-all-export.csv
+      • CSV columns: id, type, engineType
+      • Sorts output by id
+      • Shows page-by-page progress in quiet mode
+      • Shows detailed request/response in verbose mode
+      • Provides comprehensive statistics upon completion
+
+  policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>]
+    Description: Export policy definitions by different categories from source environment to ZIP files
+    Arguments:
+      --type: Export type (rule-types, engine-types, assemblies, source-types)
+      --filter: Optional filter value within the export type
+      --quiet: Suppress console output, show only summary
+      --verbose: Show detailed output including headers and responses
+      --batch-size: Number of policies to export in each batch (default: 50)
+    Examples:
+      policy-export
+      policy-export --type rule-types
+      policy-export --type engine-types --filter JDBC_URL
+      policy-export --type assemblies --filter production-db
+      policy-export --type source-types --filter PostgreSQL
+      policy-export --type rule-types --batch-size 100 --quiet
+    Behavior:
+      • Reads policies from /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/policies-all-export.csv (generated by policy-list-export)
+      • Groups policies by the specified export type
+      • Optionally filters to a specific value within that type
+      • Exports each group in batches using '/catalog-server/api/rules/export/policy-definitions'
+      • Output files: <export_type>[-<filter>]-<timestamp>-<range>.zip in /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export
+      • Default batch size: 50 policies per ZIP file
+      • Filename examples:
+        - rule_types-07-04-2025-17-21-0-99.zip
+        - engine_types_jdbc_url-07-04-2025-17-21-0-99.zip
+        - assemblies_production_db-07-04-2025-17-21-0-99.zip
+      • Shows batch-by-batch progress in quiet mode
+      • Shows detailed request/response in verbose mode
+      • Provides comprehensive statistics upon completion
+
+  policy-import <file_or_pattern> [--quiet] [--verbose]
+    Description: Import policy definitions from ZIP files to target environment
+    Arguments:
+      file_or_pattern: ZIP file path or glob pattern (e.g., *.zip)
+      --quiet: Suppress console output, show only summary
+      --verbose: Show detailed output including headers and responses
+    Examples:
+      policy-import *.zip
+      policy-import data-quality-*.zip
+      policy-import /path/to/specific-file.zip
+      policy-import *.zip --verbose
+    Behavior:
+      • Uploads ZIP files to '/catalog-server/api/rules/import/policy-definitions/upload-config'
+      • Uses target environment authentication (target access key, secret key, and tenant)
+      • By default, looks for files in output-dir/policy-import directory
+      • Supports absolute paths to override default directory
+      • Supports glob patterns for multiple files
+      • Validates that files exist and are readable
+      • Aggregates statistics across all imported files
+      • Shows detailed import results and conflicts
+      • Provides comprehensive summary with aggregated statistics
+      • Tracks UUIDs of imported policy definitions
+      • Reports conflicts (assemblies, policies, SQL views, visual views)
+
+  policy-xfr [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]
+    Description: Format policy export files by replacing substrings in JSON files and ZIP archives
+    Arguments:
+      --source-env-string: Substring to search for (source environment) [REQUIRED]
+      --target-env-string: Substring to replace with (target environment) [REQUIRED]
+    Options:
+      --input: Input directory (auto-detected from policy-export if not specified)
+      --output-dir: Output directory (defaults to organized subdirectories)
+      --quiet: Suppress console output, show only summary
+      --verbose: Show detailed output including processing details
+    Examples:
+      policy-xfr --source-env-string "PROD_DB" --target-env-string "DEV_DB"
+      policy-xfr --input data/samples --source-env-string "old" --target-env-string "new"
+      policy-xfr --source-env-string "PROD_DB" --target-env-string "DEV_DB" --verbose
+    Behavior:
+      • Processes JSON files and ZIP archives in the input directory
+      • Replaces all occurrences of source string with target string
+      • Maintains file structure and count
+      • Auto-detects input directory from /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export if not specified
+      • Creates organized output directory structure
+      • Extracts data quality policy assets to CSV files
+      • Generates /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv and /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/segmented_spark_uids.csv
+      • Shows detailed processing statistics upon completion
+
+🛠️ UTILITY COMMANDS:
+  set-output-dir <directory>
+    Description: Set global output directory for all export commands
+    Arguments:
+      directory: Path to the output directory
+    Examples:
+      set-output-dir /path/to/my/output
+      set-output-dir data/custom_output
+    Features:
+      • Sets the output directory for all export commands
+      • Creates the directory if it doesn't exist
+      • Validates write permissions
+      • Saves configuration to ~/.adoc_migration_config.json
+      • Persists across multiple interactive sessions
+      • Can be changed anytime with another set-output-dir command
+
+🚀 GUIDED MIGRATION COMMANDS:
+  guided-migration <name>
+    Description: Start a new guided migration session
+    Arguments:
+      name: Unique name for the migration session
+    Examples:
+      guided-migration prod-to-dev
+      guided-migration test-migration
+    Features:
+      • Step-by-step guidance through the complete migration process
+      • State management - can pause and resume at any time
+      • Validation of prerequisites at each step
+      • Detailed help and instructions for each step
+      • Automatic file path management
+
+  resume-migration <name>
+    Description: Resume an existing guided migration session
+    Arguments:
+      name: Name of the existing migration session
+    Examples:
+      resume-migration prod-to-dev
+    Features:
+      • Continues from where you left off
+      • Shows current progress and completed steps
+      • Validates prerequisites before continuing
+
+  delete-migration <name>
+    Description: Delete a migration state file
+    Arguments:
+      name: Name of the migration session to delete
+    Examples:
+      delete-migration prod-to-dev
+    Features:
+      • Confirms deletion to prevent accidental loss
+      • Shows migration details before deletion
+
+  list-migrations
+    Description: List all available migration sessions
+    Examples:
+      list-migrations
+    Features:
+      • Shows all migration names and their status
+      • Displays creation date and current step
+      • Shows completion progress
+
+  help
+    Description: Show this help information
+    Example: help
+
+  history
+    Description: Show the last 25 commands with numbers
+    Example: history
+    Features:
+      • Displays the last 25 commands with numbered entries
+      • Latest commands appear first (highest numbers)
+      • Long commands are truncated for display
+      • Enter a number to execute that command
+      • Works alongside ↑/↓ arrow key navigation
+
+  exit, quit, q
+    Description: Exit the interactive client
+    Examples: exit, quit, q
+
+🔧 ENVIRONMENT BEHAVIOR:
+  • segments-export: Always exports from source environment
+  • segments-import: Always imports to target environment
+  • asset-profile-export: Always exports from source environment
+  • asset-profile-import: Always imports to target environment
+  • asset-config-export: Always exports from source environment
+  • asset-list-export: Always exports from source environment
+  • policy-list-export: Always exports from source environment
+  • policy-export: Always exports from source environment
+  • policy-import: Always imports to target environment
+
+💡 TIPS:
+  • Use TAB key for command autocomplete
+  • Use ↑/↓ arrow keys to navigate command history
+  • Type part of an endpoint and press TAB to see suggestions
+  • Use --dry-run to preview changes before making them
+  • Use --verbose to see detailed API request/response information
+  • Check log files for detailed error information
+  • Set output directory once with set-output-dir to avoid specifying --output-file repeatedly
+
+📁 FILE LOCATIONS:
+  • Input CSV files: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/ and /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/
+  • Output CSV files: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/ (organized by category)
+  • Log files: adoc-migration-toolkit-YYYYMMDD.log
 ```
 
-#### Advanced Configuration
-```python
-# Programmatic configuration
-formatter = PolicyExportFormatter(
-    input_dir="data/policy_exports",
-    search_string="PROD_DB",
-    replace_string="DEV_DB",
-    output_dir="data/import_ready",
-    logger=custom_logger,
-    max_workers=4,              # Parallel processing workers
-    chunk_size=8192,            # File processing chunk size
-    validate_json=True,         # JSON validation
-    preserve_structure=True,    # Maintain file structure
-    create_backups=True         # Create backup files
-)
-```
-
-### Integration Points
-
-The formatter integrates with other components:
-
-#### CSV Generation
-- **segmented_spark_uids.csv**: Used by segments-export command
-- **asset_uids.csv**: Used by asset-profile-export and asset-config-export commands
-
-#### API Integration
-- Generated CSV files feed into interactive mode commands
-- Asset UIDs enable API-based configuration management
-- Segmentation data supports specialized import workflows
-
-#### Logging Integration
-- Comprehensive logging for debugging and monitoring
-- Error tracking for failed operations
-- Performance metrics for optimization
-
-This technical foundation ensures the formatter can handle complex policy migrations while maintaining data integrity and providing detailed feedback for troubleshooting and optimization. 
+This example shows:
+- **Startup Information**: Environment details, output directory, and configuration status
+- **Interactive Prompt**: The `ADOC >` prompt ready for commands
+- **Comprehensive Help**: Detailed command documentation with examples and behavior descriptions
+- **Command Categories**: Organized sections for different types of operations
+- **Real File Paths**: Actual paths from a working environment
+- **User-Friendly Interface**: Clear formatting with emojis and structured information 

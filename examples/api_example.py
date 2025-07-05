@@ -16,7 +16,7 @@ from pathlib import Path
 # Add the src directory to the path so we can import our package
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from adoc_export_import import create_api_client, setup_logging
+from adoc_migration_toolkit import create_api_client, setup_logging
 
 
 def main():

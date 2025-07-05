@@ -361,11 +361,12 @@ Process Formatter Help:
 This step runs the formatter to translate environment strings and extract asset information.
 
 The formatter will:
-- Read ZIP files from the input directory
-- Extract JSON files while maintaining structure
-- Replace source environment strings with target strings
-- Generate import-ready ZIP files
-- Create specialized CSV files for asset management
+- Process ZIP files from the policy export directory
+- Replace source environment strings with target environment strings
+- Extract asset UIDs for profile and configuration management
+- Generate segmented_spark_uids.csv for SPARK segment handling
+- Generate asset_uids.csv for profile/configuration management
+- Maintain organized directory structure (policy-export, asset-export, etc.)
 
 Output files:
 - *_import_ready/ directories with translated ZIP files
@@ -373,7 +374,7 @@ Output files:
 - asset_uids.csv - All asset UIDs for profile/configuration management (source-env,target-env format)
 
 Command that will be executed:
-python -m adoc_export_import formatter --input {input_dir} --source-env-string "{source_string}" --target-env-string "{target_string}" --verbose
+policy-xfr --source-env-string "{source_string}" --target-env-string "{target_string}" --verbose
             """,
             
             'export_profiles': """
