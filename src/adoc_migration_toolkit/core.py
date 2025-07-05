@@ -88,7 +88,7 @@ def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Lo
     return logger
 
 
-class PolicyExportFormatter:
+class PolicyTranformer:
     """Professional JSON string replacement tool with comprehensive error handling."""
     
     def __init__(self, input_dir: str, search_string: str, replace_string: str, 
@@ -791,106 +791,3 @@ def validate_arguments(args: argparse.Namespace) -> None:
     
     if not input_path.is_dir():
         raise ValueError(f"Input path is not a directory: {args.input_dir}")
-
-
-def main():
-    """Main function with comprehensive error handling."""
-    parser = argparse.ArgumentParser(
-        description="Professional JSON String Replacer - Replace substrings in JSON files and ZIP archives",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python policy_export_formatter.py /path/to/json/files "old_string" "new_string"
-  python policy_export_formatter.py /path/to/json/files "old_string" "new_string" --output-dir /path/to/output
-  python policy_export_formatter.py data/ "COMM_APAC_ETL_PROD_DB" "NEW_DB_NAME"
-  python policy_export_formatter.py data/ "old" "new" --verbose
-
-Features:
-  - Processes JSON files and ZIP archives
-  - Maintains file structure and count
-  - Comprehensive error handling and logging
-  - Professional output formatting
-        """
-    )
-    
-    parser.add_argument("input_dir", help="Directory containing JSON files and ZIP files to process")
-    parser.add_argument("search_string", help="Substring to search for")
-    parser.add_argument("replace_string", help="Substring to replace with")
-    parser.add_argument("--output-dir", help="Output directory (defaults to input_dir with '_import_ready' suffix)")
-    parser.add_argument("--log-level", "-l",
-        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
-        default="ERROR",
-        help="Set logging level (default: ERROR)"
-    )
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging (overrides --log-level)")
-    
-    try:
-        args = parser.parse_args()
-        
-        # Setup logging
-        logger = setup_logging(args.verbose, args.log_level)
-        
-        # Validate arguments
-        validate_arguments(args)
-        
-        # Create and run the replacer
-        replacer = PolicyExportFormatter(
-            input_dir=args.input_dir,
-            search_string=args.search_string,
-            replace_string=args.replace_string,
-            output_dir=args.output_dir,
-            logger=logger
-        )
-        
-        stats = replacer.process_directory()
-        
-        # Print professional summary
-        print("\n" + "="*60)
-        print("PROCESSING SUMMARY")
-        print("="*60)
-        print(f"Input directory:     {args.input_dir}")
-        print(f"Output directory:    {replacer.output_dir}")
-        print(f"Search string:       '{args.search_string}'")
-        print(f"Replace string:      '{args.replace_string}'")
-        print(f"Total files found:   {stats['total_files']}")
-        
-        if stats['json_files'] > 0:
-            print(f"JSON files:          {stats['json_files']}")
-        if stats['zip_files'] > 0:
-            print(f"ZIP files:           {stats['zip_files']}")
-        
-        print(f"Files investigated:  {stats.get('files_investigated', 0)}")
-        print(f"Changes made:        {stats.get('changes_made', 0)}")
-        print(f"Successful:          {stats['successful']}")
-        print(f"Failed:              {stats['failed']}")
-        
-        if stats.get('extracted_assets', 0) > 0:
-            print(f"Assets extracted:    {stats['extracted_assets']}")
-        
-        if stats['errors']:
-            print(f"\nErrors encountered:  {len(stats['errors'])}")
-            for error in stats['errors'][:5]:  # Show first 5 errors
-                print(f"  - {error}")
-            if len(stats['errors']) > 5:
-                print(f"  ... and {len(stats['errors']) - 5} more errors")
-        
-        print("="*60)
-        
-        if stats['failed'] > 0 or stats['errors']:
-            print("⚠️  Processing completed with errors. Check log file for details.")
-            sys.exit(1)
-        else:
-            print("✅ Processing completed successfully!")
-            
-    except (ValueError, FileNotFoundError, PermissionError) as e:
-        print(f"❌ Configuration error: {e}")
-        sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n⚠️  Processing interrupted by user.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Unexpected error: {e}")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main() 

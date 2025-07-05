@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 from tqdm import tqdm
-from .core import PolicyExportFormatter, setup_logging
+from .core import PolicyTranformer, setup_logging
 from .api_client import create_api_client
 from typing import Optional
 
@@ -41,7 +41,7 @@ def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items
         disable=disable,
         bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
         colour='green',
-        ncols=100
+        ncols=120
     )
 
 def create_asset_export_parser(subparsers):
@@ -297,120 +297,6 @@ def read_csv_uids_single_column(csv_file: str, logger: logging.Logger) -> list:
     except Exception as e:
         logger.error(f"Error reading CSV file {csv_file}: {e}")
         raise
-
-
-def run_formatter(args):
-    """Run the formatter command."""
-    try:
-        # Setup logging
-        logger = setup_logging(args.verbose, args.log_level)
-        
-        # Validate arguments
-        validate_formatter_arguments(args)
-        
-        # Determine input directory - if not specified, use policy-export directory
-        input_dir = args.input
-        if not input_dir:
-            # First, check if we have a global output directory set
-            if GLOBAL_OUTPUT_DIR:
-                global_policy_export_dir = GLOBAL_OUTPUT_DIR / "policy-export"
-                if global_policy_export_dir.exists() and global_policy_export_dir.is_dir():
-                    input_dir = str(global_policy_export_dir)
-                    print(f"📁 Using global output directory: {input_dir}")
-                else:
-                    print(f"📁 Global output directory policy-export not found: {global_policy_export_dir}")
-            
-            # If no global directory or it doesn't exist, look for the most recent adoc-migration-toolkit directory
-            if not input_dir:
-                current_dir = Path.cwd()
-                # Only look for directories, not files
-                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
-                
-                if not toolkit_dirs:
-                    print("❌ No adoc-migration-toolkit directory found.")
-                    print("💡 Please specify an input directory or run 'policy-export' first to generate ZIP files")
-                    return 1
-                
-                # Sort by creation time and use the most recent
-                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
-                latest_toolkit_dir = toolkit_dirs[0]
-                input_dir = str(latest_toolkit_dir / "policy-export")
-                
-                print(f"📁 Using input directory: {input_dir}")
-        
-        # Create and run the formatter
-        formatter = PolicyExportFormatter(
-            input_dir=input_dir,
-            search_string=args.source_env_string,
-            replace_string=args.target_env_string,
-            output_dir=args.output_dir,
-            logger=logger
-        )
-        
-        stats = formatter.process_directory()
-        
-        # Print professional summary
-        print("\n" + "="*60)
-        print("PROCESSING SUMMARY")
-        print("="*60)
-        print(f"Input directory:     {input_dir}")
-        print(f"Output directory:    {formatter.output_dir}")
-        print(f"Asset export dir:    {formatter.asset_export_dir}")
-        print(f"Policy export dir:   {formatter.policy_export_dir}")
-        print(f"Source env string:   '{args.source_env_string}'")
-        print(f"Target env string:   '{args.target_env_string}'")
-        print(f"Total files found:   {stats['total_files']}")
-        
-        if stats['json_files'] > 0:
-            print(f"JSON files:          {stats['json_files']}")
-        if stats['zip_files'] > 0:
-            print(f"ZIP files:           {stats['zip_files']}")
-        
-        print(f"Files investigated:  {stats.get('files_investigated', 0)}")
-        print(f"Changes made:        {stats.get('changes_made', 0)}")
-        print(f"Successful:          {stats['successful']}")
-        print(f"Failed:              {stats['failed']}")
-        
-        if stats.get('extracted_assets', 0) > 0:
-            print(f"Assets extracted:    {stats['extracted_assets']}")
-        
-        if stats.get('all_assets', 0) > 0:
-            print(f"All assets found:    {stats['all_assets']}")
-        
-        # Display policy statistics if any policies were processed
-        if stats.get('total_policies_processed', 0) > 0:
-            print(f"\nPolicy Statistics:")
-            print(f"  Total policies processed: {stats['total_policies_processed']}")
-            print(f"  Segmented SPARK policies: {stats['segmented_spark_policies']}")
-            print(f"  Segmented JDBC_SQL policies: {stats['segmented_jdbc_policies']}")
-            print(f"  Non-segmented policies: {stats['non_segmented_policies']}")
-        
-        if stats['errors']:
-            print(f"\nErrors encountered:  {len(stats['errors'])}")
-            for error in stats['errors'][:5]:  # Show first 5 errors
-                print(f"  - {error}")
-            if len(stats['errors']) > 5:
-                print(f"  ... and {len(stats['errors']) - 5} more errors")
-        
-        print("="*60)
-        
-        if stats['failed'] > 0 or stats['errors']:
-            print("⚠️  Processing completed with errors. Check log file for details.")
-            return 1
-        else:
-            print("✅ Processing completed successfully!")
-            return 0
-            
-    except (ValueError, FileNotFoundError, PermissionError) as e:
-        print(f"❌ Configuration error: {e}")
-        return 1
-    except KeyboardInterrupt:
-        print("\n⚠️  Processing interrupted by user.")
-        return 1
-    except Exception as e:
-        print(f"❌ Unexpected error: {e}")
-        return 1
-
 
 def run_asset_export(args):
     """Run the asset-export command."""
@@ -4727,7 +4613,7 @@ def execute_formatter(input_dir: str, source_string: str, target_string: str, ou
                     print(f"📁 Using input directory: {input_dir}")
         
         # Create and run the formatter
-        formatter = PolicyExportFormatter(
+        formatter = PolicyTranformer(
             input_dir=input_dir,
             search_string=source_string,
             replace_string=target_string,
@@ -5542,68 +5428,3 @@ def execute_rule_tag_export(client, logger: logging.Logger, quiet_mode: bool = F
         if not quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
-
-
-    """Handle the policy export step."""
-    print("\n📤 Export Policies from Source Environment")
-    print("You have two options for exporting policies:")
-    print("\nOption 1: Manual Export via UI (Recommended for first-time users)")
-    print("Option 2: CLI Export (Advanced users)")
-    
-    choice = input("\nChoose option (1 or 2): ").strip()
-    
-    if choice == "1":
-        print("\n📋 Manual Export Instructions:")
-        print("1. Navigate to your source Acceldata environment")
-        print("2. Go to the Policies section")
-        print("3. Select the policies you want to migrate")
-        print("4. Export them as ZIP files")
-        print("5. Download the ZIP files to your local machine")
-        print(f"6. Place them in the policy export directory: {state.data.get('policy_export_directory')}")
-        print("\nPolicy Export Types:")
-        print("- ALL: Export all policies")
-        print("- DATA_QUALITY: Export data quality policies only")
-        print("- DATA_OBSERVABILITY: Export observability policies only")
-        print("- CUSTOM: Export custom policies only")
-        
-        input("\nPress Enter when you have completed the manual export...")
-        
-        # Verify that ZIP files exist
-        policy_export_dir = Path(state.data.get('policy_export_directory'))
-        zip_files = list(policy_export_dir.glob('*.zip'))
-        
-        if not zip_files:
-            print(f"❌ No ZIP files found in {policy_export_dir}")
-            print("Please ensure you have exported policies and placed them in the directory.")
-            return False
-        
-        print(f"✅ Found {len(zip_files)} ZIP files in the policy export directory")
-        return True
-        
-    elif choice == "2":
-        print("\n🔧 CLI Export Commands:")
-        print("You can use the following commands in the interactive mode:")
-        print("- policy-list-export: List available policies")
-        print("- policy-export: Export policies by type or filter")
-        print("\nExample commands:")
-        print("policy-list-export")
-        print("policy-export --type ALL")
-        print("policy-export --type DATA_QUALITY")
-        print("policy-export --type DATA_OBSERVABILITY")
-        print("policy-export --type CUSTOM")
-        
-        print(f"\nExport files will be saved to: {state.data.get('policy_export_directory')}")
-        
-        input("\nPress Enter when you have completed the CLI export...")
-        
-        # Verify that ZIP files exist
-        policy_export_dir = Path(state.data.get('policy_export_directory'))
-        zip_files = list(policy_export_dir.glob('*.zip'))
-        
-        if not zip_files:
-            print(f"❌ No ZIP files found in {policy_export_dir}")
-            print("Please ensure you have exported policies and placed them in the directory.")
-            return False
-        
-        print(f"✅ Found {len(zip_files)} ZIP files in the policy export directory")
-        return True
