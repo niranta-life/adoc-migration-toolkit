@@ -16,7 +16,6 @@ from .validators import (
 
 from .main import (
     main,
-    run_asset_export,
     run_interactive
 )
 
@@ -31,6 +30,5 @@ __all__ = [
     
     # Main execution
     'main',
-    'run_asset_export',
     'run_interactive'
 ] 

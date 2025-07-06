@@ -5,9 +5,7 @@ This module contains shared logging functionality used across the toolkit.
 """
 
 import logging
-import sys
 from datetime import datetime
-
 
 def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Logger:
     """Setup professional logging configuration.

@@ -11,7 +11,7 @@ __email__ = "support@acceldata.io"
 # Import main components from new modular structure
 from .execution.formatter import PolicyExportFormatter, validate_arguments
 from .shared.logging import setup_logging
-from .cli import main, run_asset_export, run_interactive
+from .cli import main, run_interactive
 from .shared import (
     GLOBAL_OUTPUT_DIR,
     load_global_output_directory,

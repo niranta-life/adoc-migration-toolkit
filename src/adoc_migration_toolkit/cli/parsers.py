@@ -11,7 +11,7 @@ def create_interactive_parser(subparsers):
     interactive_parser = subparsers.add_parser(
         'interactive',
         help='Interactive ADOC Migration Toolkit',
-        description='ADOC Migration Toolkit for migration ADOC configurations from one environment to another.',
+        description='ADOC Migration Toolkit for migration ADOC configurations from one environment another.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
