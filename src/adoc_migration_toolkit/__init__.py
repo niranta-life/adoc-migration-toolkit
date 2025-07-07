@@ -1,15 +1,52 @@
 """
-ADOC Migration Toolkit - A professional tool for replacing substrings in JSON files and ZIP archives.
+ADOC Migration Toolkit
 
-This package provides functionality to process policy export files by replacing
-substrings in JSON files and ZIP archives with comprehensive error handling.
+A tool for migrating Acceldata configs between environments.
 """
 
 __version__ = "1.0.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__author__ = "ADOC Migration Toolkit Team"
+__email__ = "support@acceldata.io"
 
-from .core import PolicyTranformer
-from .api_client import AcceldataAPIClient, create_api_client
+# Import main components from new modular structure
+from .execution.formatter import PolicyExportFormatter, validate_arguments
+from .shared.logging import setup_logging
+from .cli import main, run_interactive
+from .shared import (
+    load_global_output_directory,
+    save_global_output_directory,
+    set_global_output_directory,
+    get_output_file_path,
+    AcceldataAPIClient,
+    create_api_client
+)
 
-__all__ = ["PolicyTranformer", "AcceldataAPIClient", "create_api_client"]
+# Import execution functions from new modular structure
+from .execution.utils import create_progress_bar, read_csv_uids, read_csv_uids_single_column
+from .execution.asset_operations import execute_asset_profile_export_guided
+
+__all__ = [
+    # Core functionality
+    'PolicyExportFormatter',
+    'setup_logging',
+    'validate_arguments',
+    
+    # CLI functionality
+    'main',
+    'run_asset_export',
+    'run_interactive',
+    
+    # Shared utilities
+    'load_global_output_directory',
+    'save_global_output_directory',
+    'set_global_output_directory',
+    'get_output_file_path',
+    'AcceldataAPIClient',
+    'create_api_client',
+    
+    # Execution utilities
+    'create_progress_bar',
+    'read_csv_uids',
+    'read_csv_uids_single_column',
+    'execute_asset_profile_export_guided'
+]

@@ -8,7 +8,8 @@ import csv
 import json
 from pathlib import Path
 from unittest.mock import Mock, patch
-from adoc_migration_toolkit.execution import execute_asset_profile_export_guided, create_progress_bar
+from adoc_migration_toolkit.execution.utils import create_progress_bar
+from adoc_migration_toolkit.execution.asset_operations import execute_asset_profile_export_guided
 
 
 class TestAssetProfileExport:

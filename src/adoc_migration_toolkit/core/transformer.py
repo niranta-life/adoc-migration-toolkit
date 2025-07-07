@@ -1,18 +1,8 @@
-#!/usr/bin/env python3
 """
-Policy Export Script
+Policy transformer for JSON and ZIP file processing.
 
-A professional tool for replacing substrings in JSON files and ZIP archives.
-Supports batch processing of multiple files with comprehensive error handling.
-
-Usage:
-    python policy_export_formatter.py <input_directory> <search_string> <replace_string> [--output-dir <output_directory>]
-
-Examples:
-    python policy_export_formatter.py /path/to/data/ "PROD_DB" "DEV_DB"
-    python policy_export_formatter.py data/ "old" "new" --verbose
-
-Version: 1.0.0
+This module contains the PolicyTransformer class for processing JSON files
+and ZIP archives with string replacement functionality.
 """
 
 import json
@@ -28,64 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
 
-# Configure logging with professional formatting
-def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Logger:
-    """Setup professional logging configuration.
-    
-    Args:
-        verbose (bool): Enable verbose logging (overrides log_level)
-        log_level (str): Logging level (ERROR, WARNING, INFO, DEBUG)
-    
-    Returns:
-        logging.Logger: Configured logger instance
-    """
-    # Map string log levels to logging constants
-    level_map = {
-        "ERROR": logging.ERROR,
-        "WARNING": logging.WARNING,
-        "INFO": logging.INFO,
-        "DEBUG": logging.DEBUG
-    }
-    
-    # Determine the actual log level
-    if verbose:
-        # Verbose overrides log_level
-        actual_level = logging.DEBUG
-    else:
-        # Use the specified log level, default to ERROR
-        actual_level = level_map.get(log_level.upper(), logging.ERROR)
-    
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # Setup handlers
-    handlers = []
-    
-    # File handler with date-based rotation
-    log_file = f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d')}.log"
-    file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')  # Append mode
-    file_handler.setFormatter(formatter)
-    handlers.append(file_handler)
-    
-    # Console handler - REMOVED to prevent breaking progress bars
-    # console_handler = logging.StreamHandler(sys.stdout)
-    # console_handler.setFormatter(formatter)
-    # handlers.append(console_handler)
-    
-    # Configure root logger
-    logging.basicConfig(
-        level=actual_level,
-        handlers=handlers,
-        force=True
-    )
-    
-    logger = logging.getLogger(__name__)
-    logger.info(f"Logging initialized. Log file: {log_file}")
-    logger.info(f"Log level set to: {log_level.upper()}")
-    return logger
+from ..shared import globals
 
 
 class PolicyTranformer:
@@ -135,9 +68,8 @@ class PolicyTranformer:
             self.base_output_dir = Path(output_dir).resolve()
         else:
             # Use the same logic as other commands to find/create the output directory
-            from .cli import GLOBAL_OUTPUT_DIR
-            if GLOBAL_OUTPUT_DIR:
-                self.base_output_dir = GLOBAL_OUTPUT_DIR
+            if globals.GLOBAL_OUTPUT_DIR:
+                self.base_output_dir = globals.GLOBAL_OUTPUT_DIR
             else:
                 from datetime import datetime
                 self.base_output_dir = Path.cwd() / f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d%H%M')}"
@@ -763,31 +695,4 @@ class PolicyTranformer:
                 "segmented_spark_policies": self.stats["segmented_spark_policies"],
                 "segmented_jdbc_policies": self.stats["segmented_jdbc_policies"],
                 "non_segmented_policies": self.stats["non_segmented_policies"]
-            }
-
-
-def validate_arguments(args: argparse.Namespace) -> None:
-    """Validate command line arguments.
-    
-    Args:
-        args: Parsed command line arguments
-        
-    Raises:
-        ValueError: If arguments are invalid
-    """
-    if not args.input_dir or not args.input_dir.strip():
-        raise ValueError("Input directory cannot be empty")
-    
-    if not args.search_string or not args.search_string.strip():
-        raise ValueError("Search string cannot be empty")
-    
-    if args.replace_string is None:
-        raise ValueError("Replace string cannot be None")
-    
-    # Check if input directory exists
-    input_path = Path(args.input_dir)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input directory does not exist: {args.input_dir}")
-    
-    if not input_path.is_dir():
-        raise ValueError(f"Input path is not a directory: {args.input_dir}")
+            } 
