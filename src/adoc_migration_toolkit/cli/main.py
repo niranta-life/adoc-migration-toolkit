@@ -5,66 +5,142 @@ This module contains the main CLI execution logic including the main function
 and command execution functions.
 """
 
-import argparse
 import sys
+import click
 
 
-def run_interactive(args):
+def run_interactive(env_file, log_level, verbose):
     """Run the interactive command."""
-    from ..execution.interactive import run_interactive as run_interactive_impl
-    return run_interactive_impl(args)
+    # Defer import to avoid dependency issues during CLI setup
+    try:
+        from ..execution.interactive import run_interactive as run_interactive_impl
+        
+        # Create a simple args object for backward compatibility
+        class Args:
+            def __init__(self, env_file, log_level, verbose):
+                self.env_file = env_file
+                self.log_level = log_level
+                self.verbose = verbose
+        
+        args = Args(env_file, log_level, verbose)
+        return run_interactive_impl(args)
+    except ImportError as e:
+        click.echo(f"❌ Error: Could not import execution module: {e}", err=True)
+        click.echo("Please ensure all dependencies are installed: pip install -e .", err=True)
+        return 1
+
+
+@click.group()
+@click.version_option(version='1.0.0', prog_name='adoc-migration-toolkit')
+def cli():
+    """
+    ADOC Migration Toolkit - Professional tool for migrating Acceldata policies and assets.
+    
+    This toolkit provides comprehensive tools for migrating ADOC configurations
+    from one environment to another, including interactive mode for guided workflows.
+    
+    Examples:
+    
+    \b
+    # Export assets from CSV file
+    python -m adoc_migration_toolkit asset-export --csv-file=data/asset_uids.csv --env-file=config.env
+    
+    \b
+    # Interactive mode
+    python -m adoc_migration_toolkit interactive --env-file=config.env
+
+    For more information, visit: https://github.com/your-repo/adoc-migration-toolkit
+    """
+    pass
+
+
+@cli.command()
+@click.option(
+    '--env-file',
+    required=True,
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=str),
+    help='Path to environment file containing AD_HOST, AD_SOURCE_ACCESS_KEY, AD_SOURCE_SECRET_KEY, AD_SOURCE_TENANT'
+)
+@click.option(
+    '--log-level', '-l',
+    type=click.Choice(['ERROR', 'WARNING', 'INFO', 'DEBUG'], case_sensitive=False),
+    default='ERROR',
+    help='Set logging level (default: ERROR)'
+)
+@click.option(
+    '--verbose', '-v',
+    is_flag=True,
+    help='Enable verbose logging (overrides --log-level)'
+)
+def interactive(env_file, log_level, verbose):
+    """
+    Interactive ADOC Migration Toolkit.
+    
+    ADOC Migration Toolkit for migration ADOC configurations from one environment another.
+    
+    Examples:
+    
+    \b
+    python -m adoc_migration_toolkit interactive --env-file=config.env
+    python -m adoc_migration_toolkit interactive --env-file=config.env --verbose
+
+    Interactive Commands:  
+    
+    \b
+    # Segments Commands
+    segments-export [csv_file] [--output-file file] [--quiet]
+    segments-import [csv_file] [--dry-run] [--quiet] [--verbose]
+    
+    \b
+    # Asset Profile Commands
+    asset-profile-export [csv_file] [--output-file file] [--quiet] [--verbose]
+    asset-profile-import [csv_file] [--dry-run] [--quiet] [--verbose]
+    
+    \b
+    # Asset Configuration Commands
+    asset-config-export <csv_file> [--output-file file] [--quiet] [--verbose]
+    asset-list-export [--quiet] [--verbose]
+    
+    \b
+    # Policy Commands
+    policy-list-export [--quiet] [--verbose]
+    policy-export [--type export_type] [--filter filter_value] [--quiet] [--verbose] [--batch-size size]
+    policy-import <file_or_pattern> [--quiet] [--verbose]
+    policy-xfr [--input input_dir] --source-env-string source --target-env-string target [--quiet] [--verbose]
+    
+    \b
+    # REST API Commands
+    GET /catalog-server/api/assets?uid=123
+    PUT /catalog-server/api/assets {"key": "value"}
+    GET /catalog-server/api/assets?uid=123 --target-auth --target-tenant
+
+    \b
+    # Utility Commands
+    set-output-dir <directory>
+    
+    \b
+    # Session Commands
+    help
+    history
+    exit, quit, q
+
+    Features:
+    - Interactive API client with autocomplete
+    - Support for GET and PUT requests
+    - Configurable source/target authentication and tenants
+    - JSON payload support for PUT requests
+    - Well-formatted JSON responses
+    - Comprehensive migration toolkit with guided workflows
+    - Asset and policy management capabilities
+    - File formatting and transformation tools
+    - Command history and session management
+    """
+    return run_interactive(env_file, log_level, verbose)
 
 
 def main():
     """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
-        prog='adoc-migration-toolkit',
-        description='ADOC Migration Toolkit - Professional tool for migrating Acceldata policies and assets',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Export assets from CSV file
-  python -m adoc_migration_toolkit asset-export --csv-file=data/asset_uids.csv --env-file=config.env
-  
-  # Interactive mode
-  python -m adoc_migration_toolkit interactive --env-file=config.env
-
-For more information, visit: https://github.com/your-repo/adoc-migration-toolkit
-        """
-    )
-    
-    # Add global arguments
-    parser.add_argument(
-        '--version', '-V',
-        action='version',
-        version='adoc-migration-toolkit 1.0.0'
-    )
-    
-    # Create subparsers for commands
-    subparsers = parser.add_subparsers(
-        dest='command',
-        help='Available commands'
-    )
-
-    # Add command parsers
-    from .parsers import create_interactive_parser
-
-    create_interactive_parser(subparsers)
-    
-    # Parse arguments
-    args = parser.parse_args()
-    
-    # Handle no command specified
-    if not args.command:
-        parser.print_help()
-        return 1
-    
-    # Execute command
-    if args.command == 'interactive':
-        return run_interactive(args)
-    else:
-        print(f"Unknown command: {args.command}")
-        return 1
+    return cli()
 
 
 if __name__ == '__main__':
