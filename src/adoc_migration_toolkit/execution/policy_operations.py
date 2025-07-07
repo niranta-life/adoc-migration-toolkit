@@ -9,11 +9,14 @@ import csv
 import json
 import logging
 import os
+import threading
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 from tqdm import tqdm
 from glob import glob
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .utils import create_progress_bar
 from ..shared.file_utils import get_output_file_path
@@ -407,7 +410,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                                 source_type_counts[source_type] = source_type_counts.get(source_type, 0) + 1
             
             print(f"\n📊 DETAILED STATISTICS SUMMARY")
-            print("="*80)
+            print("-" * 50)
             print(f"Total rules processed: {len(processed_policies)}")
             print(f"Total asset API calls: {total_asset_calls}")
             print(f"Successful asset calls: {successful_asset_calls}")
@@ -479,6 +482,356 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         if not quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
+
+
+def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the policy-list-export command with parallel processing.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Determine output file path using the policy-export category
+        output_file = get_output_file_path("", "policies-all-export.csv", category="policy-export")
+        
+        if not quiet_mode:
+            print(f"\nExporting all rules from ADOC environment (Parallel Mode)")
+            print(f"Output will be written to: {output_file}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Step 1: Get total count of policies
+        if not quiet_mode:
+            print("Getting total rules count...")
+        
+        count_response = client.make_api_call(
+            endpoint="/catalog-server/api/rules?page=0&size=0",
+            method='GET'
+        )
+        
+        if not count_response or 'meta' not in count_response or 'count' not in count_response['meta']:
+            error_msg = "Failed to get total rules count from response"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        total_count = count_response['meta']['count']
+        
+        if not quiet_mode:
+            print(f"Total rules found: {total_count}")
+        
+        # Step 2: Get all policies first (sequential - this is fast)
+        if not quiet_mode:
+            print("Retrieving all policies...")
+        
+        all_policies = []
+        page_size = 1000
+        total_pages = (total_count + page_size - 1) // page_size
+        
+        for page in range(total_pages):
+            if not quiet_mode:
+                print(f"  Retrieving page {page + 1}/{total_pages}...")
+            
+            page_response = client.make_api_call(
+                endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}",
+                method='GET'
+            )
+            
+            if page_response and 'rules' in page_response:
+                page_policies = page_response['rules']
+                actual_policies = []
+                for policy_wrapper in page_policies:
+                    if 'rule' in policy_wrapper:
+                        actual_policies.append(policy_wrapper['rule'])
+                    else:
+                        actual_policies.append(policy_wrapper)
+                
+                all_policies.extend(actual_policies)
+        
+        if not quiet_mode:
+            print(f"Retrieved {len(all_policies)} policies")
+        
+        # Step 3: Calculate thread configuration for asset processing
+        max_threads = 5
+        min_policies_per_thread = 10
+        
+        if len(all_policies) < min_policies_per_thread:
+            num_threads = 1
+            policies_per_thread = len(all_policies)
+        else:
+            num_threads = min(max_threads, (len(all_policies) + min_policies_per_thread - 1) // min_policies_per_thread)
+            policies_per_thread = (len(all_policies) + num_threads - 1) // num_threads
+        
+        if not quiet_mode:
+            print(f"Using {num_threads} threads to process {len(all_policies)} policies")
+            print(f"Policies per thread: {policies_per_thread}")
+            print("="*80)
+        
+        # Step 4: Process asset details in parallel
+        temp_files = []
+        thread_results = []
+        
+        def process_policy_chunk(thread_id, start_index, end_index):
+            """Process a chunk of policies for a specific thread."""
+            # Create a thread-local client instance
+            thread_client = type(client)(
+                host=client.host,
+                access_key=client.access_key,
+                secret_key=client.secret_key,
+                tenant=getattr(client, 'tenant', None)
+            )
+            
+            # Create temporary file for this thread
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+            temp_files.append(temp_file.name)
+            
+            # Get policies for this thread
+            thread_policies = all_policies[start_index:end_index]
+            
+            # Create progress bar for this thread using utility function
+            progress_bar = create_progress_bar(
+                total=len(thread_policies),
+                desc=f"Thread {thread_id}",
+                unit="policies",
+                disable=quiet_mode,
+                position=thread_id,
+                leave=False
+            )
+            
+            processed_policies = []
+            total_asset_calls = 0
+            successful_asset_calls = 0
+            failed_asset_calls = 0
+            
+            # Process each policy in this thread's range
+            for policy in thread_policies:
+                # Extract tableAssetIds from backingAssets
+                table_asset_ids = []
+                backing_assets = policy.get('backingAssets', [])
+                for asset in backing_assets:
+                    table_asset_id = asset.get('tableAssetId')
+                    if table_asset_id:
+                        table_asset_ids.append(table_asset_id)
+                
+                # Get asset details for this policy's tableAssetIds
+                asset_details = {}
+                assembly_details = {}
+                
+                if table_asset_ids:
+                    table_asset_ids_str = ','.join(map(str, table_asset_ids))
+                    total_asset_calls += 1
+                    
+                    try:
+                        assets_response = thread_client.make_api_call(
+                            endpoint=f"/catalog-server/api/assets/search?ids={table_asset_ids_str}",
+                            method='GET'
+                        )
+                        
+                        if assets_response and 'assets' in assets_response:
+                            for asset in assets_response['assets']:
+                                asset_id = asset.get('id')
+                                if asset_id:
+                                    asset_details[asset_id] = asset
+                        
+                        if assets_response and 'assemblies' in assets_response:
+                            for assembly in assets_response['assemblies']:
+                                assembly_id = assembly.get('id')
+                                if assembly_id:
+                                    assembly_details[assembly_id] = assembly
+                        
+                        successful_asset_calls += 1
+                        
+                    except Exception as e:
+                        failed_asset_calls += 1
+                        logger.error(f"Thread {thread_id}: Failed to retrieve asset details for policy {policy.get('id')}: {e}")
+                
+                # Add asset and assembly details to the policy
+                policy['_asset_details'] = asset_details
+                policy['_assembly_details'] = assembly_details
+                processed_policies.append(policy)
+                
+                # Update progress bar
+                progress_bar.update(1)
+            
+            progress_bar.close()
+            
+            # Write processed policies to temporary CSV file
+            with open(temp_file.name, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
+                
+                for policy in processed_policies:
+                    policy_id = policy.get('id', '')
+                    policy_type = policy.get('type', '') or ''
+                    engine_type = policy.get('engineType', '') or ''
+                    
+                    # Extract tableAssetIds from backingAssets
+                    table_asset_ids = []
+                    assembly_ids = set()
+                    assembly_names = set()
+                    source_types = set()
+                    
+                    backing_assets = policy.get('backingAssets', [])
+                    asset_details = policy.get('_asset_details', {})
+                    assembly_details = policy.get('_assembly_details', {})
+                    
+                    for asset in backing_assets:
+                        table_asset_id = asset.get('tableAssetId')
+                        if table_asset_id:
+                            table_asset_ids.append(str(table_asset_id))
+                            
+                            # Get assembly information from asset details
+                            if table_asset_id in asset_details:
+                                asset_detail = asset_details[table_asset_id]
+                                assembly_id = asset_detail.get('assemblyId')
+                                if assembly_id and assembly_id in assembly_details:
+                                    assembly = assembly_details[assembly_id]
+                                    assembly_ids.add(str(assembly_id))
+                                    assembly_name = assembly.get('name', '')
+                                    if assembly_name:
+                                        assembly_names.add(assembly_name)
+                                    source_type = assembly.get('sourceType', {}).get('name', '')
+                                    if source_type:
+                                        source_types.add(source_type)
+                    
+                    # Convert sets to comma-separated strings
+                    table_asset_ids_str = ','.join(table_asset_ids)
+                    assembly_ids_str = ','.join(sorted(assembly_ids))
+                    assembly_names_str = ','.join(sorted(assembly_names))
+                    source_types_str = ','.join(sorted(source_types))
+                    
+                    writer.writerow([
+                        policy_id, 
+                        policy_type, 
+                        engine_type, 
+                        table_asset_ids_str,
+                        assembly_ids_str,
+                        assembly_names_str,
+                        source_types_str
+                    ])
+            
+            return {
+                'thread_id': thread_id,
+                'processed': len(processed_policies),
+                'total_asset_calls': total_asset_calls,
+                'successful_asset_calls': successful_asset_calls,
+                'failed_asset_calls': failed_asset_calls,
+                'temp_file': temp_file.name
+            }
+        
+        # Step 5: Start threads
+        threads = []
+        for i in range(num_threads):
+            start_index = i * policies_per_thread
+            end_index = min(start_index + policies_per_thread, len(all_policies))
+            
+            thread = threading.Thread(
+                target=lambda tid=i, start=start_index, end=end_index: thread_results.append(
+                    process_policy_chunk(tid, start, end)
+                )
+            )
+            threads.append(thread)
+            thread.start()
+        
+        # Step 6: Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Step 7: Merge temporary files
+        if not quiet_mode:
+            print("\nMerging temporary files...")
+        
+        # Create output directory if needed
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_file, 'w', newline='', encoding='utf-8') as output_csv:
+            writer = csv.writer(output_csv, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
+            
+            # Merge all temporary files
+            for temp_file in temp_files:
+                try:
+                    with open(temp_file, 'r', newline='', encoding='utf-8') as temp_csv:
+                        reader = csv.reader(temp_csv)
+                        next(reader)  # Skip header
+                        for row in reader:
+                            writer.writerow(row)
+                except Exception as e:
+                    logger.error(f"Error reading temporary file {temp_file}: {e}")
+                finally:
+                    # Clean up temporary file
+                    try:
+                        os.unlink(temp_file)
+                    except Exception as e:
+                        logger.warning(f"Could not delete temporary file {temp_file}: {e}")
+        
+        # Step 8: Sort the CSV file by id
+        if not quiet_mode:
+            print("Sorting CSV file by id...")
+        
+        # Read all rows
+        rows = []
+        with open(output_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            rows = list(reader)
+        
+        # Sort rows by id
+        def sort_key(row):
+            policy_id = row[0] if len(row) > 0 else ''
+            # Convert policy_id to int for proper numeric sorting, fallback to string
+            try:
+                policy_id_int = int(policy_id) if policy_id else 0
+            except (ValueError, TypeError):
+                policy_id_int = 0
+            return policy_id_int
+        
+        rows.sort(key=sort_key)
+        
+        # Write sorted data back to file
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(header)
+            writer.writerows(rows)
+        
+        # Step 9: Print statistics
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("RULES LIST EXPORT SUMMARY (PARALLEL MODE)")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            
+            total_processed = 0
+            total_asset_calls = 0
+            total_successful_asset_calls = 0
+            total_failed_asset_calls = 0
+            
+            for result in thread_results:
+                total_processed += result['processed']
+                total_asset_calls += result['total_asset_calls']
+                total_successful_asset_calls += result['successful_asset_calls']
+                total_failed_asset_calls += result['failed_asset_calls']
+                
+                print(f"Thread {result['thread_id']}: {result['processed']} policies, "
+                      f"{result['successful_asset_calls']}/{result['total_asset_calls']} asset calls successful")
+            
+            print(f"\nTotal rules exported: {total_processed}")
+            print(f"Total asset API calls made: {total_asset_calls}")
+            print(f"Successful asset calls: {total_successful_asset_calls}")
+            print(f"Failed asset calls: {total_failed_asset_calls}")
+            print("="*80)
+        
+    except Exception as e:
+        error_msg = f"Failed to execute parallel policy list export: {e}"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise
 
 
 def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None):
@@ -1416,4 +1769,806 @@ def execute_rule_tag_export(client, logger: logging.Logger, quiet_mode: bool = F
         error_msg = f"Error in rule-tag-export: {e}"
         if not quiet_mode:
             print(f"❌ {error_msg}")
-        logger.error(error_msg) 
+        logger.error(error_msg)
+
+
+def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None):
+    """Execute the policy-export command with parallel processing.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        batch_size: Number of policies to export in each batch
+        export_type: Type of export (rule-types, engine-types, assemblies, source-types)
+        filter_value: Optional filter value within the export type
+    """
+    try:
+        # Determine input and output file paths
+        if globals.GLOBAL_OUTPUT_DIR:
+            input_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+            output_dir = globals.GLOBAL_OUTPUT_DIR / "policy-export"
+        else:
+            # Use the same logic as policy-list-export to find the input file
+            # Look for the most recent adoc-migration-toolkit-YYYYMMDDHHMM directory
+            current_dir = Path.cwd()
+            toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+            
+            if not toolkit_dirs:
+                error_msg = "No adoc-migration-toolkit directory found. Please run 'policy-list-export' first."
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            # Sort by creation time and use the most recent
+            toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+            latest_toolkit_dir = toolkit_dirs[0]
+            
+            input_file = latest_toolkit_dir / "policy-export" / "policies-all-export.csv"
+            output_dir = latest_toolkit_dir / "policy-export"
+        
+        if not quiet_mode:
+            print(f"\nExporting policy definitions by type (Parallel Mode)")
+            print(f"Input file: {input_file}")
+            print(f"Output directory: {output_dir}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Check if input file exists
+        if not input_file.exists():
+            error_msg = f"Input file does not exist: {input_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'policy-list-export' first to generate the input file")
+            logger.error(error_msg)
+            return
+        
+        # Read policies from CSV file
+        if not quiet_mode:
+            print("Reading policies from CSV file...")
+        
+        policies_by_category = {}
+        total_policies = 0
+        
+        with open(input_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            
+            # Check if this is the new format with additional columns
+            if len(header) >= 7 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
+                # New format with additional columns
+                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes']
+                if len(header) != len(expected_columns):
+                    error_msg = f"Invalid CSV format. Expected {len(expected_columns)} columns, got {len(header)}"
+                    print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    return
+            elif len(header) == 3 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
+                # Old format - only basic columns
+                error_msg = "CSV file is in old format. Please run 'policy-list-export' first to generate the new format with additional columns."
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            else:
+                error_msg = f"Invalid CSV format. Expected header: ['id', 'type', 'engineType', ...], got: {header}"
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            for row_num, row in enumerate(reader, start=2):
+                if len(row) != len(header):
+                    logger.warning(f"Row {row_num}: Expected {len(header)} columns, got {len(row)}")
+                    continue
+                
+                policy_id = row[0].strip()
+                policy_type = row[1].strip()
+                engine_type = row[2].strip()
+                table_asset_ids = row[3].strip()
+                assembly_ids = row[4].strip()
+                assembly_names = row[5].strip()
+                source_types = row[6].strip()
+                
+                if not policy_id:
+                    logger.warning(f"Row {row_num}: Empty policy ID")
+                    continue
+                
+                # Determine the category based on export_type
+                category = None
+                category_value = None
+                
+                if export_type == 'rule-types':
+                    category = policy_type
+                    category_value = policy_type
+                elif export_type == 'engine-types':
+                    category = engine_type
+                    category_value = engine_type
+                elif export_type == 'assemblies':
+                    if assembly_names:
+                        # Split by comma and use the first assembly name
+                        assembly_name_list = [name.strip() for name in assembly_names.split(',') if name.strip()]
+                        if assembly_name_list:
+                            category = assembly_name_list[0]
+                            category_value = assembly_names
+                elif export_type == 'source-types':
+                    if source_types:
+                        # Split by comma and use the first source type
+                        source_type_list = [stype.strip() for stype in source_types.split(',') if stype.strip()]
+                        if source_type_list:
+                            category = source_type_list[0]
+                            category_value = source_types
+                else:
+                    # Default: group by policy type (original behavior)
+                    category = policy_type
+                    category_value = policy_type
+                
+                # Apply filter if specified
+                if filter_value and category != filter_value:
+                    continue
+                
+                if category:
+                    if category not in policies_by_category:
+                        policies_by_category[category] = []
+                    policies_by_category[category].append(policy_id)
+                    total_policies += 1
+                else:
+                    logger.warning(f"Row {row_num}: No valid category found for export type '{export_type}'")
+        
+        if not policies_by_category:
+            error_msg = "No valid policies found matching the specified criteria"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        # Determine output filename based on export type and filter
+        if export_type:
+            base_filename = export_type.replace('-', '_')
+            if filter_value:
+                # Sanitize filter value for filename
+                safe_filter = "".join(c for c in filter_value if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_filter = safe_filter.replace(' ', '_').lower()
+                filename = f"{base_filename}_{safe_filter}"
+            else:
+                filename = base_filename
+        else:
+            filename = "policy_types"
+        
+        if not quiet_mode:
+            export_type_display = export_type if export_type else "policy types"
+            filter_display = f" (filtered by: {filter_value})" if filter_value else ""
+            print(f"Found {total_policies} policies across {len(policies_by_category)} {export_type_display}{filter_display}")
+            print(f"Output filename base: {filename}")
+            print("="*80)
+        
+        # Generate timestamp for all files
+        timestamp = datetime.now().strftime("%m-%d-%Y-%H-%M")
+        
+        # Step 3: Calculate thread configuration
+        max_threads = 5
+        min_categories_per_thread = 1
+        
+        if len(policies_by_category) < min_categories_per_thread:
+            num_threads = 1
+            categories_per_thread = len(policies_by_category)
+        else:
+            num_threads = min(max_threads, (len(policies_by_category) + min_categories_per_thread - 1) // min_categories_per_thread)
+            categories_per_thread = (len(policies_by_category) + num_threads - 1) // num_threads
+        
+        if not quiet_mode:
+            print(f"Using {num_threads} threads to process {len(policies_by_category)} categories")
+            print(f"Categories per thread: {categories_per_thread}")
+            print("="*80)
+        
+        # Step 4: Process categories in parallel
+        thread_results = []
+        
+        # Funny thread names for progress indicators (all same length)
+        thread_names = [
+            "Rocket Thread     ",
+            "Lightning Thread  ", 
+            "Unicorn Thread    ",
+            "Dragon Thread     ",
+            "Shark Thread      "
+        ]
+        
+        def process_category_chunk(thread_id, start_index, end_index):
+            """Process a chunk of categories for a specific thread."""
+            # Create a thread-local client instance
+            thread_client = type(client)(
+                host=client.host,
+                access_key=client.access_key,
+                secret_key=client.secret_key,
+                tenant=getattr(client, 'tenant', None)
+            )
+            
+            # Get categories for this thread
+            category_items = list(policies_by_category.items())[start_index:end_index]
+            
+            # Create progress bar for this thread
+            total_batches = 0
+            for _, policy_ids in category_items:
+                total_batches += (len(policy_ids) + batch_size - 1) // batch_size
+            
+            progress_bar = create_progress_bar(
+                total=total_batches,
+                desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+                unit="batches",
+                disable=quiet_mode,
+                position=thread_id,
+                leave=False
+            )
+            
+            successful_exports = 0
+            failed_exports = 0
+            export_results = {}
+            
+            # Process each category in this thread's range
+            for policy_type, policy_ids in category_items:
+                type_total_batches = (len(policy_ids) + batch_size - 1) // batch_size
+                
+                for batch_num in range(type_total_batches):
+                    start_idx = batch_num * batch_size
+                    end_idx = min((batch_num + 1) * batch_size, len(policy_ids))
+                    batch_ids = policy_ids[start_idx:end_idx]
+                    
+                    # Generate filename with range information
+                    safe_category = "".join(c for c in policy_type if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    safe_category = safe_category.replace(' ', '_').lower()
+                    batch_filename = f"{safe_category}-{timestamp}-{start_idx}-{end_idx-1}.zip"
+                    output_file = output_dir / batch_filename
+                    
+                    # Prepare query parameters
+                    ids_param = ','.join(batch_ids)
+                    query_params = {
+                        'ruleStatus': 'ALL',
+                        'includeTags': 'true',
+                        'ids': ids_param,
+                        'filename': batch_filename
+                    }
+                    
+                    # Build endpoint with query parameters
+                    endpoint = "/catalog-server/api/rules/export/policy-definitions"
+                    query_string = '&'.join([f"{k}={v}" for k, v in query_params.items()])
+                    full_endpoint = f"{endpoint}?{query_string}"
+                    
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - GET Request Headers:")
+                        print(f"  Endpoint: {full_endpoint}")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/zip")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                            print(f"  X-Tenant: {thread_client.tenant}")
+                        print(f"  Query Parameters:")
+                        for k, v in query_params.items():
+                            if k == 'ids':
+                                print(f"    {k}: {len(batch_ids)} IDs (first few: {', '.join(batch_ids[:3])}{'...' if len(batch_ids) > 3 else ''})")
+                            else:
+                                print(f"    {k}: {v}")
+                    
+                    try:
+                        # Make API call to get ZIP file
+                        response = thread_client.make_api_call(
+                            endpoint=full_endpoint,
+                            method='GET',
+                            return_binary=True
+                        )
+                        
+                        if verbose_mode:
+                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                            print(f"\n{thread_name} - Response:")
+                            print(f"  Status: Success")
+                            print(f"  Content-Type: application/zip")
+                            print(f"  File size: {len(response) if response else 0} bytes")
+                        
+                        # Write ZIP file to output directory
+                        if response:
+                            with open(output_file, 'wb') as f:
+                                f.write(response)
+                            
+                            # Store result for this batch
+                            batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                            export_results[batch_key] = {
+                                'success': True,
+                                'filename': batch_filename,
+                                'count': len(batch_ids),
+                                'file_size': len(response),
+                                'range': f"{start_idx}-{end_idx-1}"
+                            }
+                            successful_exports += 1
+                        else:
+                            error_msg = f"Empty response for {policy_type} batch {batch_num + 1}"
+                            if verbose_mode:
+                                thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                                print(f"\n{thread_name} - ❌ {error_msg}")
+                            logger.error(f"Thread {thread_id}: {error_msg}")
+                            
+                            batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                            export_results[batch_key] = {
+                                'success': False,
+                                'filename': batch_filename,
+                                'count': len(batch_ids),
+                                'error': error_msg,
+                                'range': f"{start_idx}-{end_idx-1}"
+                            }
+                            failed_exports += 1
+                            
+                    except Exception as e:
+                        error_msg = f"Failed to export {policy_type} batch {batch_num + 1}: {e}"
+                        if verbose_mode:
+                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                            print(f"\n{thread_name} - ❌ {error_msg}")
+                        logger.error(f"Thread {thread_id}: {error_msg}")
+                        
+                        batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                        export_results[batch_key] = {
+                            'success': False,
+                            'filename': batch_filename,
+                            'count': len(batch_ids),
+                            'error': str(e),
+                            'range': f"{start_idx}-{end_idx-1}"
+                        }
+                        failed_exports += 1
+                    
+                    # Update progress bar
+                    progress_bar.update(1)
+            
+            progress_bar.close()
+            
+            return {
+                'thread_id': thread_id,
+                'successful_exports': successful_exports,
+                'failed_exports': failed_exports,
+                'export_results': export_results
+            }
+        
+        # Step 5: Start threads
+        threads = []
+        for i in range(num_threads):
+            start_index = i * categories_per_thread
+            end_index = min(start_index + categories_per_thread, len(policies_by_category))
+            
+            thread = threading.Thread(
+                target=lambda tid=i, start=start_index, end=end_index: thread_results.append(
+                    process_category_chunk(tid, start, end)
+                )
+            )
+            threads.append(thread)
+            thread.start()
+        
+        # Step 6: Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Step 7: Consolidate results
+        total_successful_exports = 0
+        total_failed_exports = 0
+        all_export_results = {}
+        
+        for result in thread_results:
+            total_successful_exports += result['successful_exports']
+            total_failed_exports += result['failed_exports']
+            all_export_results.update(result['export_results'])
+        
+        # Print summary
+        print("\n" + "="*80)
+        print("POLICY EXPORT SUMMARY (PARALLEL MODE)")
+        print("="*80)
+        print(f"Output directory: {output_dir}")
+        print(f"Timestamp: {timestamp}")
+        print(f"Batch size: {batch_size}")
+        print(f"Total policy types processed: {len(policies_by_category)}")
+        print(f"Threads used: {num_threads}")
+        
+        for result in thread_results:
+            thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
+            print(f"{thread_name}: {result['successful_exports']} successful, {result['failed_exports']} failed")
+        
+        print(f"\nTotal successful exports: {total_successful_exports}")
+        print(f"Total failed exports: {total_failed_exports}")
+        
+        print(f"\nExport Results:")
+        # Group results by policy type for better display
+        results_by_type = {}
+        for batch_key, result in all_export_results.items():
+            policy_type = batch_key.split('_batch_')[0]
+            if policy_type not in results_by_type:
+                results_by_type[policy_type] = []
+            results_by_type[policy_type].append(result)
+        
+        for policy_type, batch_results in results_by_type.items():
+            print(f"  {policy_type}:")
+            for result in batch_results:
+                if result['success']:
+                    print(f"    ✅ Batch {result['range']}: {result['count']} policies -> {result['filename']} ({result['file_size']} bytes)")
+                else:
+                    print(f"    ❌ Batch {result['range']}: {result['count']} policies -> {result['error']}")
+        
+        print("="*80)
+        
+        if total_failed_exports > 0:
+            print("⚠️  Export completed with errors. Check log file for details.")
+        else:
+            print("✅ Export completed successfully!")
+            
+    except Exception as e:
+        error_msg = f"Error executing parallel policy export: {e}"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise 
+
+
+def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the rule-tag-export command with parallel processing.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Determine output file path using the policy-export category
+        output_file = get_output_file_path("", "rule-tags-export.csv", category="policy-export")
+        
+        if not quiet_mode:
+            print(f"\nExporting rule tags from ADOC environment (Parallel Mode)")
+            print(f"Output will be written to: {output_file}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Check if policies-all-export.csv exists
+        if globals.GLOBAL_OUTPUT_DIR:
+            policies_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+        else:
+            # Look for the most recent adoc-migration-toolkit-YYYYMMDDHHMM directory
+            current_dir = Path.cwd()
+            toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+            
+            if not toolkit_dirs:
+                error_msg = "No adoc-migration-toolkit directory found. Please run 'policy-list-export' first."
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            # Sort by creation time and use the most recent
+            toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+            latest_toolkit_dir = toolkit_dirs[0]
+            policies_file = latest_toolkit_dir / "policy-export" / "policies-all-export.csv"
+        
+        # Check if policies file exists
+        if not policies_file.exists():
+            if not quiet_mode:
+                print(f"❌ Policy list file not found: {policies_file}")
+                print("💡 Running policy-list-export first to generate the required file...")
+                print("="*80)
+            
+            # Run policy-list-export internally
+            execute_policy_list_export(client, logger, quiet_mode, verbose_mode)
+            
+            # Check again if the file was created
+            if not policies_file.exists():
+                error_msg = "Failed to generate policies-all-export.csv file"
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+        
+        # Read policies from CSV file
+        if not quiet_mode:
+            print(f"Reading policies from: {policies_file}")
+        
+        rule_ids = []
+        try:
+            with open(policies_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader)  # Skip header
+                
+                for row in reader:
+                    if len(row) > 0 and row[0].strip():  # First column should be the rule ID
+                        try:
+                            rule_id = int(row[0].strip())
+                            rule_ids.append(rule_id)
+                        except ValueError:
+                            # Skip non-numeric IDs
+                            continue
+        except Exception as e:
+            error_msg = f"Failed to read policies file: {e}"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not rule_ids:
+            error_msg = "No valid rule IDs found in policies file"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"Found {len(rule_ids)} rules to process")
+        
+        # Step 3: Calculate thread configuration
+        max_threads = 5
+        min_rules_per_thread = 10
+        
+        if len(rule_ids) < min_rules_per_thread:
+            num_threads = 1
+            rules_per_thread = len(rule_ids)
+        else:
+            num_threads = min(max_threads, (len(rule_ids) + min_rules_per_thread - 1) // min_rules_per_thread)
+            rules_per_thread = (len(rule_ids) + num_threads - 1) // num_threads
+        
+        if not quiet_mode:
+            print(f"Using {num_threads} threads to process {len(rule_ids)} rules")
+            print(f"Rules per thread: {rules_per_thread}")
+            print("="*80)
+        
+        # Step 4: Process rules in parallel
+        thread_results = []
+        temp_files = []
+        
+        # Funny thread names for progress indicators (all same length)
+        thread_names = [
+            "Rocket Thread     ",
+            "Lightning Thread  ", 
+            "Unicorn Thread    ",
+            "Dragon Thread     ",
+            "Shark Thread      "
+        ]
+        
+        def process_rule_chunk(thread_id, start_index, end_index):
+            """Process a chunk of rules for a specific thread."""
+            # Create a thread-local client instance
+            thread_client = type(client)(
+                host=client.host,
+                access_key=client.access_key,
+                secret_key=client.secret_key,
+                tenant=getattr(client, 'tenant', None)
+            )
+            
+            # Get rules for this thread
+            thread_rule_ids = rule_ids[start_index:end_index]
+            
+            # Create temporary file for this thread
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+            temp_files.append(temp_file.name)
+            
+            # Create progress bar for this thread
+            progress_bar = create_progress_bar(
+                total=len(thread_rule_ids),
+                desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+                unit="rules",
+                disable=quiet_mode,
+                position=thread_id,
+                leave=False
+            )
+            
+            successful_calls = 0
+            failed_calls = 0
+            rule_tags_data = []
+            
+            # Process each rule in this thread's range
+            for i, rule_id in enumerate(thread_rule_ids):
+                try:
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Processing rule ID: {rule_id}")
+                        print(f"GET Request Headers:")
+                        print(f"  Endpoint: /catalog-server/api/rules/{rule_id}/tags")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                            print(f"  X-Tenant: {thread_client.tenant}")
+                    
+                    # Make API call to get tags for this rule
+                    response = thread_client.make_api_call(
+                        endpoint=f"/catalog-server/api/rules/{rule_id}/tags",
+                        method='GET'
+                    )
+                    
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Response:")
+                        print(json.dumps(response, indent=2, ensure_ascii=False))
+                    
+                    # Extract tag names from response
+                    tag_names = []
+                    if response and 'ruleTags' in response:
+                        for tag in response['ruleTags']:
+                            tag_name = tag.get('name')
+                            if tag_name:
+                                tag_names.append(tag_name)
+                    
+                    # Only store the data if there are tags
+                    if tag_names:
+                        rule_tags_data.append({
+                            'rule_id': rule_id,
+                            'tag_names': tag_names
+                        })
+                    
+                    successful_calls += 1
+                    
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"{thread_name} - ✅ Rule {rule_id}: Found {len(tag_names)} tags")
+                        if tag_names:
+                            print(f"   Tags: {', '.join(tag_names)}")
+                        else:
+                            print(f"   No tags found - skipping output")
+                    
+                except Exception as e:
+                    error_msg = f"Failed to get tags for rule {rule_id}: {e}"
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - ❌ {error_msg}")
+                    logger.error(f"Thread {thread_id}: {error_msg}")
+                    failed_calls += 1
+                
+                # Update progress bar
+                progress_bar.update(1)
+            
+            progress_bar.close()
+            
+            # Write results to temporary CSV file
+            with open(temp_file.name, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                
+                # Write header
+                writer.writerow(['rule_id', 'tags'])
+                
+                # Write data
+                for data in rule_tags_data:
+                    rule_id = data['rule_id']
+                    tag_names = data['tag_names']
+                    tags_str = ','.join(tag_names) if tag_names else ''
+                    writer.writerow([rule_id, tags_str])
+            
+            return {
+                'thread_id': thread_id,
+                'successful_calls': successful_calls,
+                'failed_calls': failed_calls,
+                'rules_with_tags': len(rule_tags_data),
+                'temp_file': temp_file.name
+            }
+        
+        # Step 5: Start threads
+        threads = []
+        for i in range(num_threads):
+            start_index = i * rules_per_thread
+            end_index = min(start_index + rules_per_thread, len(rule_ids))
+            
+            thread = threading.Thread(
+                target=lambda tid=i, start=start_index, end=end_index: thread_results.append(
+                    process_rule_chunk(tid, start, end)
+                )
+            )
+            threads.append(thread)
+            thread.start()
+        
+        # Step 6: Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Step 7: Merge temporary files
+        if not quiet_mode:
+            print("\nMerging temporary files...")
+        
+        # Create output directory if needed
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Read all rows from temporary files
+        all_rows = []
+        for temp_file in temp_files:
+            try:
+                with open(temp_file, 'r', newline='', encoding='utf-8') as temp_csv:
+                    reader = csv.reader(temp_csv)
+                    next(reader)  # Skip header
+                    for row in reader:
+                        if len(row) >= 2:  # Ensure we have rule_id and tags
+                            all_rows.append(row)
+            except Exception as e:
+                logger.error(f"Error reading temporary file {temp_file}: {e}")
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file)
+                except Exception as e:
+                    logger.warning(f"Could not delete temporary file {temp_file}: {e}")
+        
+        # Step 8: Sort rows by rule_id
+        if not quiet_mode:
+            print("Sorting results by rule ID...")
+        
+        def sort_key(row):
+            rule_id = row[0] if len(row) > 0 else ''
+            # Convert rule_id to int for proper numeric sorting, fallback to string
+            try:
+                rule_id_int = int(rule_id) if rule_id else 0
+            except (ValueError, TypeError):
+                rule_id_int = 0
+            return rule_id_int
+        
+        all_rows.sort(key=sort_key)
+        
+        # Step 9: Write final output
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['rule_id', 'tags'])
+            
+            # Write sorted data
+            writer.writerows(all_rows)
+        
+        # Step 10: Print statistics
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("RULE TAG EXPORT COMPLETED (PARALLEL MODE)")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total rules processed: {len(rule_ids)}")
+            print(f"Threads used: {num_threads}")
+            
+            total_successful_calls = 0
+            total_failed_calls = 0
+            total_rules_with_tags = 0
+            
+            for result in thread_results:
+                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
+                print(f"{thread_name}: {result['successful_calls']} successful, {result['failed_calls']} failed, {result['rules_with_tags']} with tags")
+                total_successful_calls += result['successful_calls']
+                total_failed_calls += result['failed_calls']
+                total_rules_with_tags += result['rules_with_tags']
+            
+            print(f"\nTotal successful API calls: {total_successful_calls}")
+            print(f"Total failed API calls: {total_failed_calls}")
+            print(f"Rules with tags (written to output): {total_rules_with_tags}")
+            print(f"Rules without tags (skipped): {len(rule_ids) - total_rules_with_tags}")
+            
+            # Calculate success rate
+            if len(rule_ids) > 0:
+                success_rate = (total_successful_calls / len(rule_ids)) * 100
+                print(f"API success rate: {success_rate:.1f}%")
+            
+            # Show tag statistics
+            all_tags = []
+            for row in all_rows:
+                if len(row) >= 2 and row[1].strip():
+                    tags = [tag.strip() for tag in row[1].split(',') if tag.strip()]
+                    all_tags.extend(tags)
+            
+            if all_tags:
+                tag_counts = {}
+                for tag in all_tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                
+                print(f"\n📊 TAG STATISTICS")
+                print("-" * 50)
+                print(f"Total unique tags: {len(tag_counts)}")
+                print(f"Total tag occurrences: {len(all_tags)}")
+                
+                # Show top 10 most common tags
+                if tag_counts:
+                    print(f"\n🏷️  TOP 10 MOST COMMON TAGS:")
+                    print("-" * 40)
+                    sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+                    for tag_name, count in sorted_tags[:10]:
+                        percentage = (count / len(rule_ids)) * 100
+                        print(f"  {tag_name:<30} {count:>5} rules ({percentage:>5.1f}%)")
+            else:
+                print(f"\n📊 TAG STATISTICS")
+                print("-" * 50)
+                print("No tags found in any rules")
+            
+            print("="*80)
+        else:
+            print(f"✅ Rule tag export completed: {len(rule_ids)} rules processed, {len(all_rows)} rules with tags written to output")
+        
+    except Exception as e:
+        error_msg = f"Error in parallel rule-tag-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise

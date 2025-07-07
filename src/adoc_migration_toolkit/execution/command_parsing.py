@@ -137,19 +137,20 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     """Parse an asset-profile-export command string into components.
     
     Args:
-        command: Command string like "asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose]"
+        command: Command string like "asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]"
         
     Returns:
-        Tuple of (csv_file, output_file, quiet_mode, verbose_mode)
+        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-profile-export':
-        return None, None, False, False
+        return None, None, False, False, False
     
     csv_file = None
     output_file = None
     quiet_mode = False  # Default to showing progress bar and status
     verbose_mode = False
+    parallel_mode = False
     
     # Check for flags and options
     i = 1
@@ -166,6 +167,9 @@ def parse_asset_profile_export_command(command: str) -> tuple:
             verbose_mode = True
             quiet_mode = False  # Verbose overrides quiet
             parts.remove('--verbose')
+        elif parts[i] == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
         elif i == 1 and not parts[i].startswith('--'):
             # This is the CSV file argument (first non-flag argument)
             csv_file = parts[i]
@@ -194,7 +198,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     if not output_file:
         output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
     
-    return csv_file, output_file, quiet_mode, verbose_mode
+    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode
 
 def parse_asset_profile_import_command(command: str) -> tuple:
     """Parse an asset-profile-import command string into components.
@@ -332,17 +336,18 @@ def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.
     
     Args:
-        command: Command string like "policy-list-export [--quiet] [--verbose]"
+        command: Command string like "policy-list-export [--quiet] [--verbose] [--parallel]"
         
     Returns:
-        Tuple of (quiet_mode, verbose_mode)
+        Tuple of (quiet_mode, verbose_mode, parallel_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'policy-list-export':
-        return False, False
+        return False, False, False
     
     quiet_mode = False
     verbose_mode = False
+    parallel_mode = False
     
     # Check for flags
     if '--quiet' in parts:
@@ -355,26 +360,31 @@ def parse_policy_list_export_command(command: str) -> tuple:
         quiet_mode = False  # Verbose overrides quiet
         parts.remove('--verbose')
     
-    return quiet_mode, verbose_mode
+    if '--parallel' in parts:
+        parallel_mode = True
+        parts.remove('--parallel')
+    
+    return quiet_mode, verbose_mode, parallel_mode
 
 def parse_policy_export_command(command: str) -> tuple:
     """Parse a policy-export command string into components.
     
     Args:
-        command: Command string like "policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>]"
+        command: Command string like "policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]"
         
     Returns:
-        Tuple of (quiet_mode, verbose_mode, batch_size, export_type, filter_value)
+        Tuple of (quiet_mode, verbose_mode, batch_size, export_type, filter_value, parallel_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'policy-export':
-        return False, False, 50, None, None
+        return False, False, 50, None, None, False
     
     quiet_mode = False
     verbose_mode = False
     batch_size = 50  # Default batch size
     export_type = None
     filter_value = None
+    parallel_mode = False
     
     # Check for flags and options
     i = 1
@@ -406,10 +416,13 @@ def parse_policy_export_command(command: str) -> tuple:
             verbose_mode = True
             quiet_mode = False  # Verbose overrides quiet
             parts.remove('--verbose')
+        elif parts[i] == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
         else:
             i += 1
     
-    return quiet_mode, verbose_mode, batch_size, export_type, filter_value
+    return quiet_mode, verbose_mode, batch_size, export_type, filter_value, parallel_mode
 
 def parse_policy_import_command(command: str) -> tuple:
     """Parse a policy-import command string into components.
@@ -470,14 +483,15 @@ def parse_rule_tag_export_command(command: str) -> tuple:
         command: The full command string
         
     Returns:
-        tuple: (quiet_mode, verbose_mode)
+        tuple: (quiet_mode, verbose_mode, parallel_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'rule-tag-export':
-        return False, False
+        return False, False, False
     
     quiet_mode = False
     verbose_mode = False
+    parallel_mode = False
     
     # Check for flags
     for i in range(1, len(parts)):
@@ -485,6 +499,8 @@ def parse_rule_tag_export_command(command: str) -> tuple:
             quiet_mode = True
         elif parts[i] == '--verbose' or parts[i] == '-v':
             verbose_mode = True
+        elif parts[i] == '--parallel':
+            parallel_mode = True
         elif parts[i] == '--help' or parts[i] == '-h':
             print("\n" + "="*60)
             print("RULE-TAG-EXPORT COMMAND HELP")
@@ -493,11 +509,13 @@ def parse_rule_tag_export_command(command: str) -> tuple:
             print("\nOptions:")
             print("  --quiet, -q        Quiet mode (minimal output with progress bar)")
             print("  --verbose, -v      Verbose mode (detailed output)")
+            print("  --parallel         Use parallel processing for faster export (max 5 threads)")
             print("  --help, -h         Show this help message")
             print("\nExamples:")
             print("  rule-tag-export")
             print("  rule-tag-export --quiet")
             print("  rule-tag-export --verbose")
+            print("  rule-tag-export --parallel")
             print("\nFeatures:")
             print("  - Exports rule tags for all policies from policies-all-export.csv")
             print("  - Automatically runs policy-list-export if policies-all-export.csv doesn't exist")
@@ -505,7 +523,147 @@ def parse_rule_tag_export_command(command: str) -> tuple:
             print("  - Outputs to rule-tags-export.csv with rule ID and comma-separated tags")
             print("  - Shows progress bar in quiet mode")
             print("  - Shows detailed API calls in verbose mode")
+            print("  - Provides comprehensive statistics upon completion")
+            print("  - Parallel mode: Uses up to 5 threads to process rules simultaneously")
+            print("  - Parallel mode: Each thread has its own progress bar")
+            print("  - Parallel mode: Significantly faster for large rule sets")
             print("="*60)
-            return False, False
+            return False, False, False
     
-    return quiet_mode, verbose_mode 
+    return quiet_mode, verbose_mode, parallel_mode
+
+def parse_vcs_config_command(command: str) -> tuple:
+    """Parse a vcs-config command string into components.
+    
+    Args:
+        command: Command string like "vcs-config [--vcs-type git] [--remote-url url] [--username user] [--token token]"
+        
+    Returns:
+        Tuple of (vcs_type, remote_url, username, token, ssh_key_path, ssh_passphrase, proxy_url, proxy_username, proxy_password)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'vcs-config':
+        return None, None, None, None, None, None, None, None, None
+    
+    vcs_type = None
+    remote_url = None
+    username = None
+    token = None
+    ssh_key_path = None
+    ssh_passphrase = None
+    proxy_url = None
+    proxy_username = None
+    proxy_password = None
+    
+    # Parse arguments
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--vcs-type' and i + 1 < len(parts):
+            vcs_type = parts[i + 1]
+            parts.pop(i)  # Remove --vcs-type
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--remote-url' and i + 1 < len(parts):
+            remote_url = parts[i + 1]
+            parts.pop(i)  # Remove --remote-url
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--username' and i + 1 < len(parts):
+            username = parts[i + 1]
+            parts.pop(i)  # Remove --username
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--token' and i + 1 < len(parts):
+            token = parts[i + 1]
+            parts.pop(i)  # Remove --token
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--ssh-key-path' and i + 1 < len(parts):
+            ssh_key_path = parts[i + 1]
+            parts.pop(i)  # Remove --ssh-key-path
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--ssh-passphrase' and i + 1 < len(parts):
+            ssh_passphrase = parts[i + 1]
+            parts.pop(i)  # Remove --ssh-passphrase
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--proxy-url' and i + 1 < len(parts):
+            proxy_url = parts[i + 1]
+            parts.pop(i)  # Remove --proxy-url
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--proxy-username' and i + 1 < len(parts):
+            proxy_username = parts[i + 1]
+            parts.pop(i)  # Remove --proxy-username
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--proxy-password' and i + 1 < len(parts):
+            proxy_password = parts[i + 1]
+            parts.pop(i)  # Remove --proxy-password
+            parts.pop(i)  # Remove the value
+        elif parts[i] == '--help' or parts[i] == '-h':
+            print("\n" + "="*60)
+            print("VCS-CONFIG COMMAND HELP")
+            print("="*60)
+            print("Usage: vcs-config [options]")
+            print("\nOptions:")
+            print("  --vcs-type <type>        VCS type (git, hg, svn)")
+            print("  --remote-url <url>       Remote repository URL")
+            print("  --username <user>        Username for HTTPS authentication")
+            print("  --token <token>          Token/password for HTTPS authentication")
+            print("  --ssh-key-path <path>    Path to SSH private key")
+            print("  --ssh-passphrase <pass>  SSH key passphrase")
+            print("  --proxy-url <url>        HTTP/HTTPS proxy URL")
+            print("  --proxy-username <user>  Proxy username")
+            print("  --proxy-password <pass>  Proxy password")
+            print("  --help, -h               Show this help message")
+            print("\nExamples:")
+            print("  vcs-config  # Interactive mode")
+            print("  vcs-config --vcs-type git --remote-url https://github.com/user/repo.git")
+            print("  vcs-config --vcs-type git --remote-url git@github.com:user/repo.git --ssh-key-path ~/.ssh/id_rsa")
+            print("  vcs-config --vcs-type git --remote-url https://enterprise.gitlab.com/repo.git --username user --token <token>")
+            print("\nFeatures:")
+            print("  - Interactive configuration mode")
+            print("  - Supports Git, Mercurial, and Subversion")
+            print("  - HTTPS authentication with username/token")
+            print("  - SSH authentication with key and passphrase")
+            print("  - HTTP/HTTPS proxy support")
+            print("  - Secure credential storage in system keyring")
+            print("  - Configuration stored in ~/.adoc_vcs_config.json")
+            print("="*60)
+            return None, None, None, None, None, None, None, None, None
+        else:
+            i += 1
+    
+    return vcs_type, remote_url, username, token, ssh_key_path, ssh_passphrase, proxy_url, proxy_username, proxy_password
+
+def parse_vcs_init_command(command: str) -> str:
+    """Parse a vcs-init command string to extract the base directory (if any).
+    Args:
+        command: Command string like 'vcs-init [<base directory>]'
+    Returns:
+        base_dir: The base directory argument, or None if not provided
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'vcs-init':
+        return None
+    if len(parts) > 1:
+        return parts[1]
+    return None
+
+def parse_vcs_pull_command(command: str) -> bool:
+    """Parse a vcs-pull command string.
+    Args:
+        command: Command string like 'vcs-pull'
+    Returns:
+        True if it's a vcs-pull command, False otherwise
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'vcs-pull':
+        return False
+    return True
+
+def parse_vcs_push_command(command: str) -> bool:
+    """Parse a vcs-push command string.
+    Args:
+        command: Command string like 'vcs-push'
+    Returns:
+        True if it's a vcs-push command, False otherwise
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'vcs-push':
+        return False
+    return True 

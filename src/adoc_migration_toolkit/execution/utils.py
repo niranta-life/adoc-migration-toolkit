@@ -14,7 +14,7 @@ from tqdm import tqdm
 from ..shared.file_utils import get_output_file_path
 
 
-def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False):
+def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False, position: int = None, leave: bool = True):
     """Create a tqdm progress bar with consistent styling.
     
     Args:
@@ -22,6 +22,8 @@ def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items
         desc: Description for the progress bar
         unit: Unit of measurement (items, rules, files, etc.)
         disable: Whether to disable the progress bar (for verbose mode)
+        position: Position for the progress bar (for multiple bars)
+        leave: Whether to leave the progress bar after completion
         
     Returns:
         tqdm progress bar instance
@@ -31,6 +33,8 @@ def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items
         desc=desc,
         unit=unit,
         disable=disable,
+        position=position,
+        leave=leave,
         bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
         colour='green',
         ncols=120

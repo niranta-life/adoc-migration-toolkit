@@ -8,6 +8,9 @@ including profile export/import, config export/import, and list export.
 import csv
 import json
 import logging
+import threading
+import tempfile
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from tqdm import tqdm
@@ -1323,4 +1326,365 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         error_msg = f"Error in asset-list-export: {e}"
         if not quiet_mode:
             print(f"❌ {error_msg}")
-        logger.error(error_msg) 
+        logger.error(error_msg)
+
+
+def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the asset-profile-export command with parallel processing.
+    
+    Args:
+        csv_file: Path to the CSV file containing source-env and target-env mappings
+        client: API client instance
+        logger: Logger instance
+        output_file: Path to output file for writing results
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {csv_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'policy-xfr' first to generate the asset_uids.csv file")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-export/asset_uids.csv")
+            else:
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-export/asset_uids.csv")
+            logger.error(error_msg)
+            return
+        
+        # Read source-env and target-env mappings from CSV file
+        env_mappings = read_csv_uids(csv_file, logger)
+        
+        if not env_mappings:
+            logger.warning("No environment mappings found in CSV file")
+            return
+        
+        # Generate default output file if not provided - use asset-import category
+        if not output_file:
+            output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
+        
+        if not quiet_mode:
+            print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file (Parallel Mode)")
+            print(f"Input file: {csv_file}")
+            print(f"Output will be written to: {output_file}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Calculate thread configuration
+        max_threads = 5
+        min_assets_per_thread = 10
+        
+        if len(env_mappings) < min_assets_per_thread:
+            num_threads = 1
+            assets_per_thread = len(env_mappings)
+        else:
+            num_threads = min(max_threads, (len(env_mappings) + min_assets_per_thread - 1) // min_assets_per_thread)
+            assets_per_thread = (len(env_mappings) + num_threads - 1) // num_threads
+        
+        if not quiet_mode:
+            print(f"Using {num_threads} threads to process {len(env_mappings)} assets")
+            print(f"Assets per thread: {assets_per_thread}")
+            print("="*80)
+        
+        # Process assets in parallel
+        thread_results = []
+        temp_files = []
+        
+        # Funny thread names for progress indicators (all same length)
+        thread_names = [
+            "Rocket Thread     ",
+            "Lightning Thread  ", 
+            "Unicorn Thread    ",
+            "Dragon Thread     ",
+            "Shark Thread      "
+        ]
+        
+        def process_asset_chunk(thread_id, start_index, end_index):
+            """Process a chunk of assets for a specific thread."""
+            # Create a thread-local client instance
+            thread_client = type(client)(
+                host=client.host,
+                access_key=client.access_key,
+                secret_key=client.secret_key,
+                tenant=getattr(client, 'tenant', None)
+            )
+            
+            # Get assets for this thread
+            thread_env_mappings = env_mappings[start_index:end_index]
+            
+            # Create temporary file for this thread
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+            temp_files.append(temp_file.name)
+            
+            # Create progress bar for this thread
+            progress_bar = create_progress_bar(
+                total=len(thread_env_mappings),
+                desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+                unit="assets",
+                disable=quiet_mode,
+                position=thread_id,
+                leave=False
+            )
+            
+            successful = 0
+            failed = 0
+            total_assets_processed = 0
+            
+            # Process each asset in this thread's range
+            for i, (source_env, target_env) in enumerate(thread_env_mappings):
+                try:
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Processing source-env: {source_env}")
+                        print(f"Target-env: {target_env}")
+                        print("-" * 60)
+                    
+                    # Step 1: Get asset details by source-env (UID)
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Getting asset details for UID: {source_env}")
+                        print(f"GET Request Headers:")
+                        print(f"  Endpoint: /catalog-server/api/assets?uid={source_env}")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                            print(f"  X-Tenant: {thread_client.tenant}")
+                    
+                    asset_response = thread_client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets?uid={source_env}",
+                        method='GET'
+                    )
+                    
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Asset Response:")
+                        print(json.dumps(asset_response, indent=2, ensure_ascii=False))
+                    
+                    # Step 2: Extract the asset ID
+                    if not asset_response or 'data' not in asset_response:
+                        error_msg = f"No 'data' field found in asset response for UID: {source_env}"
+                        if verbose_mode:
+                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                            print(f"\n{thread_name} - ❌ {error_msg}")
+                        logger.error(f"Thread {thread_id}: {error_msg}")
+                        failed += 1
+                        progress_bar.update(1)
+                        continue
+                    
+                    data_array = asset_response['data']
+                    if not data_array or len(data_array) == 0:
+                        error_msg = f"Empty 'data' array in asset response for UID: {source_env}"
+                        if verbose_mode:
+                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                            print(f"\n{thread_name} - ❌ {error_msg}")
+                        logger.error(f"Thread {thread_id}: {error_msg}")
+                        failed += 1
+                        progress_bar.update(1)
+                        continue
+                    
+                    first_asset = data_array[0]
+                    if 'id' not in first_asset:
+                        error_msg = f"No 'id' field found in first asset for UID: {source_env}"
+                        if verbose_mode:
+                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                            print(f"\n{thread_name} - ❌ {error_msg}")
+                        logger.error(f"Thread {thread_id}: {error_msg}")
+                        failed += 1
+                        progress_bar.update(1)
+                        continue
+                    
+                    asset_id = first_asset['id']
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"{thread_name} - Extracted asset ID: {asset_id}")
+                    
+                    # Step 3: Get profile configuration for the asset
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Getting profile configuration for asset ID: {asset_id}")
+                        print(f"GET Request Headers:")
+                        print(f"  Endpoint: /catalog-server/api/profile/{asset_id}/config")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                            print(f"  X-Tenant: {thread_client.tenant}")
+                    
+                    profile_response = thread_client.make_api_call(
+                        endpoint=f"/catalog-server/api/profile/{asset_id}/config",
+                        method='GET'
+                    )
+                    
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Profile Response:")
+                        print(json.dumps(profile_response, indent=2, ensure_ascii=False))
+                    
+                    # Step 4: Write to temporary CSV file
+                    profile_json = json.dumps(profile_response, ensure_ascii=False)
+                    with open(temp_file.name, 'a', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                        writer.writerow([target_env, profile_json])
+                    
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"{thread_name} - ✅ Written to file: {target_env}")
+                    
+                    successful += 1
+                    total_assets_processed += 1
+                    
+                except Exception as e:
+                    error_msg = f"Failed to process source-env {source_env}: {e}"
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - ❌ {error_msg}")
+                    logger.error(f"Thread {thread_id}: {error_msg}")
+                    failed += 1
+                
+                # Update progress bar
+                progress_bar.update(1)
+            
+            progress_bar.close()
+            
+            return {
+                'thread_id': thread_id,
+                'successful': successful,
+                'failed': failed,
+                'total_assets_processed': total_assets_processed,
+                'temp_file': temp_file.name
+            }
+        
+        # Start threads
+        threads = []
+        for i in range(num_threads):
+            start_index = i * assets_per_thread
+            end_index = min(start_index + assets_per_thread, len(env_mappings))
+            
+            thread = threading.Thread(
+                target=lambda tid=i, start=start_index, end=end_index: thread_results.append(
+                    process_asset_chunk(tid, start, end)
+                )
+            )
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Merge temporary files
+        if not quiet_mode:
+            print("\nMerging temporary files...")
+        
+        # Create output directory if needed
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Read all rows from temporary files
+        all_rows = []
+        for temp_file in temp_files:
+            try:
+                with open(temp_file, 'r', newline='', encoding='utf-8') as temp_csv:
+                    reader = csv.reader(temp_csv)
+                    for row in reader:
+                        if len(row) >= 2:  # Ensure we have target-env and profile_json
+                            all_rows.append(row)
+            except Exception as e:
+                logger.error(f"Error reading temporary file {temp_file}: {e}")
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file)
+                except Exception as e:
+                    logger.warning(f"Could not delete temporary file {temp_file}: {e}")
+        
+        # Sort rows by target-env (first column)
+        if not quiet_mode:
+            print("Sorting results by target-env...")
+        
+        def sort_key(row):
+            target_env = row[0] if len(row) > 0 else ''
+            return target_env.lower()  # Case-insensitive sorting
+        
+        all_rows.sort(key=sort_key)
+        
+        # Write final output
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['target-env', 'profile_json'])
+            
+            # Write sorted data
+            writer.writerows(all_rows)
+        
+        # Print statistics
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("ASSET PROFILE EXPORT COMPLETED (PARALLEL MODE)")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total assets processed: {len(env_mappings)}")
+            print(f"Threads used: {num_threads}")
+            
+            total_successful = 0
+            total_failed = 0
+            total_assets_processed = 0
+            
+            for result in thread_results:
+                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
+                print(f"{thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets_processed']} processed")
+                total_successful += result['successful']
+                total_failed += result['failed']
+                total_assets_processed += result['total_assets_processed']
+            
+            print(f"\nTotal successful: {total_successful}")
+            print(f"Total failed: {total_failed}")
+            print(f"Total assets processed: {total_assets_processed}")
+            
+            # Calculate success rate
+            if len(env_mappings) > 0:
+                success_rate = (total_successful / len(env_mappings)) * 100
+                print(f"Success rate: {success_rate:.1f}%")
+            
+            # File information
+            print(f"\n📁 FILE INFORMATION:")
+            print(f"  Input CSV: {csv_file}")
+            print(f"  Output CSV: {output_file}")
+            print(f"  File size: {output_path.stat().st_size:,} bytes")
+            
+            # Performance metrics
+            if total_successful > 0:
+                print(f"\n⚡ PERFORMANCE METRICS:")
+                print(f"  Average profiles per asset: {total_assets_processed / total_successful:.1f}")
+                print(f"  Total profiles exported: {total_assets_processed}")
+            
+            # Output format information
+            print(f"\n📋 OUTPUT FORMAT:")
+            print(f"  CSV columns: target-env, profile_json")
+            print(f"  JSON encoding: UTF-8")
+            print(f"  CSV quoting: QUOTE_ALL")
+            print(f"  Line endings: Platform default")
+            
+            print("="*80)
+            
+            if total_failed > 0:
+                print("⚠️  Export completed with errors. Check log file for details.")
+            else:
+                print("✅ Export completed successfully!")
+        else:
+            print(f"✅ Asset profile export completed: {len(all_rows)} assets processed")
+            print(f"Output written to: {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error in parallel asset-profile-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise 

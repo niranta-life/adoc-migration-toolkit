@@ -14,9 +14,9 @@ from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
-from .asset_operations import execute_asset_profile_export, execute_asset_profile_import, execute_asset_config_export, execute_asset_list_export
-from .policy_operations import execute_policy_list_export, execute_policy_export, execute_policy_import
-from .policy_operations import execute_rule_tag_export
+from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_list_export
+from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
+from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
 from adoc_migration_toolkit.shared import globals
 
@@ -84,17 +84,19 @@ def show_interactive_help():
     print("      • Processes only assets that have valid segments configuration")
     
     print(f"\n{BOLD}🔧 ASSET PROFILE COMMANDS:{RESET}")
-    print(f"  {BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose]")
+    print(f"  {BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
     print("    Description: Export asset profiles from source environment to CSV file")
     print("    Arguments:")
     print("      csv_file: Path to CSV file with source-env and target-env mappings (optional)")
     print("      --output-file: Specify custom output file (optional)")
     print("      --quiet: Suppress console output, show only summary (default)")
     print("      --verbose: Show detailed output including headers and responses")
+    print("      --parallel: Use parallel processing for faster export (max 5 threads)")
     print("    Examples:")
     print("      asset-profile-export")
     print("      asset-profile-export <output-dir>/asset-export/asset_uids.csv")
     print("      asset-profile-export uids.csv --output-file profiles.csv --verbose")
+    print("      asset-profile-export --parallel")
     print("    Behavior:")
     print("      • If no CSV file specified, uses default from output directory")
     print("      • Default input: <output-dir>/asset-export/asset_uids.csv")
@@ -103,6 +105,9 @@ def show_interactive_help():
     print("      • Makes API calls to get asset profiles from source environment")
     print("      • Writes profile JSON data to output CSV file")
     print("      • Shows minimal output by default, use --verbose for detailed information")
+    print("      • Parallel mode: Uses up to 5 threads to process assets simultaneously")
+    print("      • Parallel mode: Each thread has its own progress bar")
+    print("      • Parallel mode: Significantly faster for large asset sets")
     
     print(f"\n  {BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose]")
     print("    Description: Import asset profiles to target environment from CSV file")
@@ -163,27 +168,34 @@ def show_interactive_help():
     print("      • Provides comprehensive statistics upon completion")
     
     print(f"\n{BOLD}📋 POLICY COMMANDS:{RESET}")
-    print(f"  {BOLD}policy-list-export{RESET} [--quiet] [--verbose]")
+    print(f"  {BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel]")
     print("    Description: Export all policies from source environment to CSV file")
     print("    Arguments:")
     print("      --quiet: Suppress console output, show only summary")
     print("      --verbose: Show detailed output including headers and responses")
+    print("      --parallel: Use parallel processing for faster export (max 5 threads)")
     print("    Examples:")
     print("      policy-list-export")
     print("      policy-list-export --quiet")
     print("      policy-list-export --verbose")
+    print("      policy-list-export --parallel")
+    print("      policy-list-export --parallel --quiet")
     print("    Behavior:")
     print("      • Uses '/catalog-server/api/rules' endpoint with pagination")
     print("      • First call gets total count with page=0&size=0")
     print("      • Retrieves all pages with size=1000 (default)")
     print("      • Output file: <output-dir>/policy-export/policies-all-export.csv")
-    print("      • CSV columns: id, type, engineType")
+    print("      • CSV columns: id, type, engineType, tableAssetIds, assemblyIds, assemblyNames, sourceTypes")
     print("      • Sorts output by id")
     print("      • Shows page-by-page progress in quiet mode")
     print("      • Shows detailed request/response in verbose mode")
     print("      • Provides comprehensive statistics upon completion")
+    print("      • Parallel mode: Uses up to 5 threads with minimum 10 policies per thread")
+    print("      • Parallel mode: Each thread has its own progress bar")
+    print("      • Parallel mode: Automatic retry (3 attempts) on failures")
+    print("      • Parallel mode: Temporary files merged into final output")
     
-    print(f"\n  {BOLD}policy-export{RESET} [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>]")
+    print(f"\n  {BOLD}policy-export{RESET} [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]")
     print("    Description: Export policy definitions by different categories from source environment to ZIP files")
     print("    Arguments:")
     print("      --type: Export type (rule-types, engine-types, assemblies, source-types)")
@@ -191,6 +203,7 @@ def show_interactive_help():
     print("      --quiet: Suppress console output, show only summary")
     print("      --verbose: Show detailed output including headers and responses")
     print("      --batch-size: Number of policies to export in each batch (default: 50)")
+    print("      --parallel: Use parallel processing for faster export (max 5 threads)")
     print("    Examples:")
     print("      policy-export")
     print("      policy-export --type rule-types")
@@ -198,6 +211,7 @@ def show_interactive_help():
     print("      policy-export --type assemblies --filter production-db")
     print("      policy-export --type source-types --filter PostgreSQL")
     print("      policy-export --type rule-types --batch-size 100 --quiet")
+    print("      policy-export --type rule-types --parallel")
     print("    Behavior:")
     print("      • Reads policies from <output-dir>/policy-export/policies-all-export.csv (generated by policy-list-export)")
     print("      • Groups policies by the specified export type")
@@ -212,6 +226,9 @@ def show_interactive_help():
     print("      • Shows batch-by-batch progress in quiet mode")
     print("      • Shows detailed request/response in verbose mode")
     print("      • Provides comprehensive statistics upon completion")
+    print("      • Parallel mode: Uses up to 5 threads to process different policy types simultaneously")
+    print("      • Parallel mode: Each thread has its own progress bar showing batch completion")
+    print("      • Parallel mode: Significantly faster for large exports with multiple policy types")
     
     print(f"\n  {BOLD}policy-import{RESET} <file_or_pattern> [--quiet] [--verbose]")
     print("    Description: Import policy definitions from ZIP files to target environment")
@@ -236,15 +253,17 @@ def show_interactive_help():
     print("      • Tracks UUIDs of imported policy definitions")
     print("      • Reports conflicts (assemblies, policies, SQL views, visual views)")
     
-    print(f"\n  {BOLD}rule-tag-export{RESET} [--quiet] [--verbose]")
+    print(f"\n  {BOLD}rule-tag-export{RESET} [--quiet] [--verbose] [--parallel]")
     print("    Description: Export rule tags for all policies from policies-all-export.csv")
     print("    Arguments:")
     print("      --quiet: Suppress console output, show only summary with progress bar")
     print("      --verbose: Show detailed output including headers and responses")
+    print("      --parallel: Use parallel processing for faster export (max 5 threads)")
     print("    Examples:")
     print("      rule-tag-export")
     print("      rule-tag-export --quiet")
     print("      rule-tag-export --verbose")
+    print("      rule-tag-export --parallel")
     print("    Behavior:")
     print("      • Automatically runs policy-list-export if policies-all-export.csv doesn't exist")
     print("      • Reads rule IDs from <output-dir>/policy-export/policies-all-export.csv (first column)")
@@ -254,6 +273,9 @@ def show_interactive_help():
     print("      • Shows progress bar in quiet mode")
     print("      • Shows detailed API calls in verbose mode")
     print("      • Provides comprehensive statistics upon completion")
+    print("      • Parallel mode: Uses up to 5 threads to process rules simultaneously")
+    print("      • Parallel mode: Each thread has its own progress bar")
+    print("      • Parallel mode: Significantly faster for large rule sets")
     
     print(f"\n  {BOLD}policy-xfr{RESET} [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
     print("    Description: Format policy export files by replacing substrings in JSON files and ZIP archives")
@@ -278,6 +300,71 @@ def show_interactive_help():
     print("      • Extracts data quality policy assets to CSV files")
     print("      • Generates <output-dir>/asset-export/asset_uids.csv and <output-dir>/policy-import/segmented_spark_uids.csv")
     print("      • Shows detailed processing statistics upon completion")
+    
+    print(f"\n{BOLD}🔧 VCS COMMANDS:{RESET}")
+    print(f"  {BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
+    print("    Description: Configure enterprise VCS settings (Git/Mercurial/Subversion, HTTPS/SSH, proxy)")
+    print("    Arguments:")
+    print("      --vcs-type: VCS type (git, hg, svn)")
+    print("      --remote-url: Remote repository URL")
+    print("      --username: Username for HTTPS authentication")
+    print("      --token: Token/password for HTTPS authentication")
+    print("    Options:")
+    print("      --ssh-key-path: Path to SSH private key")
+    print("      --ssh-passphrase: SSH key passphrase")
+    print("      --proxy-url: HTTP/HTTPS proxy URL")
+    print("      --proxy-username: Proxy username")
+    print("      --proxy-password: Proxy password")
+    print("    Examples:")
+    print("      vcs-config  # Interactive mode")
+    print("      vcs-config --vcs-type git --remote-url https://github.com/user/repo.git")
+    print("      vcs-config --vcs-type git --remote-url git@github.com:user/repo.git --ssh-key-path ~/.ssh/id_rsa")
+    print("      vcs-config --vcs-type git --remote-url https://enterprise.gitlab.com/repo.git --username user --token <token>")
+    print("    Behavior:")
+    print("      • Interactive configuration mode when no arguments provided")
+    print("      • Supports Git, Mercurial, and Subversion")
+    print("      • HTTPS authentication with username/token")
+    print("      • SSH authentication with key and passphrase")
+    print("      • HTTP/HTTPS proxy support for enterprise networks")
+    print("      • Secure credential storage in system keyring")
+    print("      • Configuration stored in ~/.adoc_vcs_config.json")
+    print("      • Validates URL format and authentication method")
+    print("      • Shows configuration summary and next steps")
+    print(f"  {BOLD}vcs-init{RESET} [<base directory>]")
+    print("    Description: Initialize a VCS repository (Git or Mercurial) in the output directory or specified directory.")
+    print("    Arguments:")
+    print("      base directory: Directory to initialize the repository in (optional, defaults to output directory)")
+    print("    Behavior:")
+    print("      • Initializes a Git or Mercurial repository in the target directory")
+    print("      • Creates a .gitignore or .hgignore with patterns: *.zip, config.env, *.log, ~/.adoc_vcs_config.json")
+    print("      • Uses the output directory if no directory is specified")
+    print("      • Shows next steps for adding, committing, and pushing files")
+    
+    print(f"\n  {BOLD}vcs-pull{RESET}")
+    print("    Description: Pull updates from the configured repository with authentication.")
+    print("    Behavior:")
+    print("      • Uses the output directory as the target for pulling files")
+    print("      • Requires VCS configuration from 'vcs-config' command")
+    print("      • Supports both Git and Mercurial repositories")
+    print("      • Handles HTTPS authentication with username/token")
+    print("      • Handles SSH authentication with key and passphrase")
+    print("      • Supports HTTP/HTTPS proxy configuration")
+    print("      • Automatically configures local repository settings")
+    print("      • Shows detailed progress and change information")
+    
+    print(f"\n  {BOLD}vcs-push{RESET}")
+    print("    Description: Push changes to the remote repository with authentication.")
+    print("    Behavior:")
+    print("      • Uses the output directory as the source for pushing files")
+    print("      • Requires VCS configuration from 'vcs-config' command")
+    print("      • Requires a repository initialized with 'vcs-init' command")
+    print("      • Supports both Git and Mercurial repositories")
+    print("      • Handles HTTPS authentication with username/token")
+    print("      • Handles SSH authentication with key and passphrase")
+    print("      • Supports HTTP/HTTPS proxy configuration")
+    print("      • Automatically commits uncommitted changes before pushing")
+    print("      • Sets up remote tracking and upstream branches")
+    print("      • Shows detailed progress and push results")
     
     print(f"\n{BOLD}🛠️ UTILITY COMMANDS:{RESET}")
     print(f"  {BOLD}set-output-dir{RESET} <directory>")
@@ -599,6 +686,10 @@ def run_interactive(args):
                     'asset-profile-export', 'asset-profile-import',
                     'asset-config-export', 'asset-list-export',
                     'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
+                    'vcs-config',
+                    'vcs-init',
+                    'vcs-pull',
+                    'vcs-push',
                     'set-output-dir',
                     # Utility commands (will be filtered anyway)
                     'help', 'history', 'exit', 'quit', 'q'
@@ -645,9 +736,12 @@ def run_interactive(args):
                 # Check if it's an asset-profile-export command
                 if command.lower().startswith('asset-profile-export'):
                     from .command_parsing import parse_asset_profile_export_command
-                    csv_file, output_file, quiet_mode, verbose_mode = parse_asset_profile_export_command(command)
+                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_profile_export_command(command)
                     if csv_file:
-                        execute_asset_profile_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                        if parallel_mode:
+                            execute_asset_profile_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                        else:
+                            execute_asset_profile_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
                     continue
                 
                 # Check if it's an asset-profile-import command
@@ -676,15 +770,21 @@ def run_interactive(args):
                 # Check if it's a policy-list-export command
                 if command.lower().startswith('policy-list-export'):
                     from .command_parsing import parse_policy_list_export_command
-                    quiet_mode, verbose_mode = parse_policy_list_export_command(command)
-                    execute_policy_list_export(client, logger, quiet_mode, verbose_mode)
+                    quiet_mode, verbose_mode, parallel_mode = parse_policy_list_export_command(command)
+                    if parallel_mode:
+                        execute_policy_list_export_parallel(client, logger, quiet_mode, verbose_mode)
+                    else:
+                        execute_policy_list_export(client, logger, quiet_mode, verbose_mode)
                     continue
                 
                 # Check if it's a policy-export command
                 if command.lower().startswith('policy-export'):
                     from .command_parsing import parse_policy_export_command
-                    quiet_mode, verbose_mode, batch_size, export_type, filter_value = parse_policy_export_command(command)
-                    execute_policy_export(client, logger, quiet_mode, verbose_mode, batch_size, export_type, filter_value)
+                    quiet_mode, verbose_mode, batch_size, export_type, filter_value, parallel_mode = parse_policy_export_command(command)
+                    if parallel_mode:
+                        execute_policy_export_parallel(client, logger, quiet_mode, verbose_mode, batch_size, export_type, filter_value)
+                    else:
+                        execute_policy_export(client, logger, quiet_mode, verbose_mode, batch_size, export_type, filter_value)
                     continue
                 
                 # Check if it's a policy-import command
@@ -698,8 +798,11 @@ def run_interactive(args):
                 # Check if it's a rule-tag-export command
                 if command.lower().startswith('rule-tag-export'):
                     from .command_parsing import parse_rule_tag_export_command
-                    quiet_mode, verbose_mode = parse_rule_tag_export_command(command)
-                    execute_rule_tag_export(client, logger, quiet_mode, verbose_mode)
+                    quiet_mode, verbose_mode, parallel_mode = parse_rule_tag_export_command(command)
+                    if parallel_mode:
+                        execute_rule_tag_export_parallel(client, logger, quiet_mode, verbose_mode)
+                    else:
+                        execute_rule_tag_export(client, logger, quiet_mode, verbose_mode)
                     continue
                 
                 # Check if it's a policy-xfr command
@@ -715,6 +818,42 @@ def run_interactive(args):
                     directory = parse_set_output_dir_command(command)
                     if directory:
                         set_global_output_directory(directory, logger)
+                    continue
+                
+                # Check if it's a vcs-config command
+                if command.lower().startswith('vcs-config'):
+                    from ..vcs.operations import execute_vcs_config
+                    execute_vcs_config(command)
+                    continue
+                
+                # Check if it's a vcs-init command
+                if command.lower().startswith('vcs-init'):
+                    from ..vcs.operations import execute_vcs_init
+                    from .command_parsing import parse_vcs_init_command
+                    base_dir = parse_vcs_init_command(command)
+                    # Use global output dir if not specified
+                    output_dir = str(globals.GLOBAL_OUTPUT_DIR) if getattr(globals, 'GLOBAL_OUTPUT_DIR', None) else None
+                    execute_vcs_init(command, output_dir=output_dir)
+                    continue
+                
+                # Check if it's a vcs-pull command
+                if command.lower().startswith('vcs-pull'):
+                    from ..vcs.operations import execute_vcs_pull
+                    from .command_parsing import parse_vcs_pull_command
+                    if parse_vcs_pull_command(command):
+                        # Use global output dir
+                        output_dir = str(globals.GLOBAL_OUTPUT_DIR) if getattr(globals, 'GLOBAL_OUTPUT_DIR', None) else None
+                        execute_vcs_pull(command, output_dir=output_dir)
+                    continue
+                
+                # Check if it's a vcs-push command
+                if command.lower().startswith('vcs-push'):
+                    from ..vcs.operations import execute_vcs_push
+                    from .command_parsing import parse_vcs_push_command
+                    if parse_vcs_push_command(command):
+                        # Use global output dir
+                        output_dir = str(globals.GLOBAL_OUTPUT_DIR) if getattr(globals, 'GLOBAL_OUTPUT_DIR', None) else None
+                        execute_vcs_push(command, output_dir=output_dir)
                     continue
                 
                 # Parse the command for GET/PUT requests
