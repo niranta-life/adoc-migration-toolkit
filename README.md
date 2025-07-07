@@ -20,6 +20,7 @@ start multiple migrations, pause, and resume them independently.
 - [Policy Management](#policy-management)
 - [Segments Management](#segments-management)
 - [Utility Commands](#utility-commands)
+- [Parallel Processing](#parallel-processing)
 - [Testing](#testing)
 - [File Structure](#file-structure)
 - [Examples](#examples)
@@ -372,7 +373,7 @@ Asset profiles contain metadata and configuration settings that define how asset
 
 ```bash
 # Export asset profiles from source environment
-asset-profile-export [csv_file] [--output-file file] [--quiet] [--verbose]
+asset-profile-export [csv_file] [--output-file file] [--quiet] [--verbose] [--parallel]
 
 # Import asset profiles to target environment
 asset-profile-import [csv_file] [--dry-run] [--quiet] [--verbose]
@@ -399,6 +400,12 @@ asset-profile-export
 # Export with custom files
 asset-profile-export data/uids.csv --output-file profiles.csv --verbose
 
+# Export with parallel processing
+asset-profile-export --parallel
+
+# Export with parallel processing and quiet mode
+asset-profile-export --parallel --quiet
+
 # Import with dry-run
 asset-profile-import data/profiles.csv --dry-run --verbose
 ```
@@ -408,6 +415,7 @@ asset-profile-import data/profiles.csv --dry-run --verbose
 - Import always uses target environment authentication
 - Use `--dry-run` to preview changes before applying
 - Profile configurations may contain environment-specific settings that need validation
+- **Parallel Processing**: Use `--parallel` for significantly faster export of large asset sets (up to 5 threads)
 
 ### Asset Configuration Commands
 
@@ -459,10 +467,10 @@ Policy management is a core component of Acceldata environments. These commands 
 
 ```bash
 # Export all policies from source environment
-policy-list-export [--quiet] [--verbose]
+policy-list-export [--quiet] [--verbose] [--parallel]
 
 # Export policy definitions by categories
-policy-export [--type export_type] [--filter filter_value] [--quiet] [--verbose] [--batch-size size]
+policy-export [--type export_type] [--filter filter_value] [--quiet] [--verbose] [--batch-size size] [--parallel]
 ```
 
 **Purpose:**
@@ -482,8 +490,14 @@ policy-export [--type export_type] [--filter filter_value] [--quiet] [--verbose]
 # Export all policies
 policy-list-export --quiet
 
+# Export all policies with parallel processing
+policy-list-export --parallel
+
 # Export by rule types
 policy-export --type rule-types --batch-size 100
+
+# Export by rule types with parallel processing
+policy-export --type rule-types --parallel
 
 # Export specific engine type
 policy-export --type engine-types --filter JDBC_URL
@@ -498,6 +512,45 @@ policy-export --type assemblies --filter production-db
 - Generates ZIP files with policy definitions
 - Creates timestamped files for version control
 - Provides detailed progress reporting and statistics
+- **Parallel Processing**: Uses up to 5 threads for significantly faster processing of large policy sets
+
+### Rule Tag Export Commands
+
+Rule tags provide metadata and categorization for policies in Acceldata environments. This command handles the export of rule tags for comprehensive policy analysis and migration planning.
+
+```bash
+# Export rule tags for all policies from policies-all-export.csv
+rule-tag-export [--quiet] [--verbose] [--parallel]
+```
+
+**Purpose:**
+- **Tag Inventory**: Create comprehensive lists of all rule tags
+- **Policy Categorization**: Understand how policies are tagged and categorized
+- **Migration Planning**: Identify tag patterns for target environment setup
+- **Analysis**: Analyze tag distribution and usage patterns
+
+**Examples:**
+```bash
+# Export rule tags
+rule-tag-export
+
+# Export with quiet mode
+rule-tag-export --quiet
+
+# Export with verbose output
+rule-tag-export --verbose
+
+# Export with parallel processing
+rule-tag-export --parallel
+```
+
+**Technical Details:**
+- Automatically runs `policy-list-export` if `policies-all-export.csv` doesn't exist
+- Reads rule IDs from the first column of `policies-all-export.csv`
+- Makes API calls to `/catalog-server/api/rules/<id>/tags` for each rule
+- Outputs to `rule-tags-export.csv` with rule ID and comma-separated tags
+- Provides comprehensive statistics including tag distribution
+- **Parallel Processing**: Uses up to 5 threads for significantly faster processing of large rule sets
 
 ### Policy Import Commands
 
@@ -769,6 +822,119 @@ echo '{"key":"value"}' | ./bin/sjson
 - Maintains JSON validity and structure
 - Handles large JSON files efficiently
 - Provides consistent indentation and formatting
+
+## Parallel Processing
+
+The ADOC Migration Toolkit includes parallel processing capabilities for significantly faster export operations on large datasets. Parallel processing is available for export commands that process multiple items sequentially, providing substantial performance improvements.
+
+### Supported Commands
+
+The following commands support parallel processing with the `--parallel` flag:
+
+- **`asset-profile-export --parallel`**: Export asset profiles using up to 5 threads
+- **`policy-list-export --parallel`**: Export policy lists using up to 5 threads  
+- **`policy-export --parallel`**: Export policy definitions by type using up to 5 threads
+- **`rule-tag-export --parallel`**: Export rule tags using up to 5 threads
+
+### Performance Benefits
+
+**Speed Improvements:**
+- **2-5x faster** processing for large datasets
+- **Concurrent API calls** reduce total processing time
+- **Efficient resource utilization** with thread pooling
+- **Scalable performance** based on dataset size
+
+**Thread Configuration:**
+- **Maximum 5 threads** per operation
+- **Minimum 10 items per thread** for optimal efficiency
+- **Automatic thread distribution** based on dataset size
+- **Thread-safe operations** with individual client instances
+
+### Implementation Details
+
+**Thread Management:**
+- Each thread gets its own API client instance for thread safety
+- Work is distributed evenly across available threads
+- Individual progress bars for each thread with themed names
+- Automatic retry logic (3 attempts) on API failures
+
+**File Handling:**
+- Each thread writes to its own temporary CSV file
+- Temporary files are merged and sorted after completion
+- Automatic cleanup of temporary files
+- Consistent output format regardless of processing method
+
+**Progress Tracking:**
+- Individual progress bars for each thread
+- Themed thread names for easy identification:
+  - "Rocket Thread     "
+  - "Lightning Thread  "
+  - "Unicorn Thread    "
+  - "Dragon Thread     "
+  - "Shark Thread      "
+
+### Usage Examples
+
+```bash
+# Asset profile export with parallel processing
+asset-profile-export --parallel
+
+# Policy list export with parallel processing
+policy-list-export --parallel
+
+# Policy export by type with parallel processing
+policy-export --type rule-types --parallel
+
+# Rule tag export with parallel processing
+rule-tag-export --parallel
+
+# Combine with other flags
+asset-profile-export --parallel --quiet
+policy-list-export --parallel --verbose
+```
+
+### When to Use Parallel Processing
+
+**Recommended for:**
+- **Large datasets** (100+ items)
+- **Network-limited environments** where API calls are the bottleneck
+- **Time-sensitive operations** requiring faster completion
+- **Batch processing** of multiple export operations
+
+**Considerations:**
+- **API rate limits** may affect optimal thread count
+- **Memory usage** increases with parallel processing
+- **Network bandwidth** requirements increase with concurrent requests
+- **Error handling** is more complex with multiple threads
+
+### Performance Monitoring
+
+**Statistics Provided:**
+- Per-thread success/failure counts
+- Total processing time and throughput
+- API call success rates
+- Thread utilization metrics
+
+**Example Output:**
+```
+Rocket Thread     : 45 successful, 2 failed, 47 processed
+Lightning Thread  : 43 successful, 1 failed, 44 processed
+Unicorn Thread    : 42 successful, 0 failed, 42 processed
+Dragon Thread     : 44 successful, 1 failed, 45 processed
+Shark Thread      : 41 successful, 2 failed, 43 processed
+
+Total successful: 215
+Total failed: 6
+Success rate: 97.3%
+```
+
+### Best Practices
+
+1. **Start with sequential processing** for small datasets (< 50 items)
+2. **Use parallel processing** for larger datasets (> 100 items)
+3. **Monitor API rate limits** and adjust thread count if needed
+4. **Combine with `--quiet` flag** for cleaner output in automated scripts
+5. **Use `--verbose` flag** for detailed debugging of parallel operations
 
 ## Testing
 
@@ -1062,17 +1228,19 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Processes only assets that have valid segments configuration
 
 🔧 ASSET PROFILE COMMANDS:
-  asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose]
+  asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]
     Description: Export asset profiles from source environment to CSV file
     Arguments:
       csv_file: Path to CSV file with source-env and target-env mappings (optional)
       --output-file: Specify custom output file (optional)
       --quiet: Suppress console output, show only summary (default)
       --verbose: Show detailed output including headers and responses
+      --parallel: Use parallel processing for faster export (max 5 threads)
     Examples:
       asset-profile-export
       asset-profile-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
       asset-profile-export uids.csv --output-file profiles.csv --verbose
+      asset-profile-export --parallel
     Behavior:
       • If no CSV file specified, uses default from output directory
       • Default input: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
@@ -1081,6 +1249,9 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Makes API calls to get asset profiles from source environment
       • Writes profile JSON data to output CSV file
       • Shows minimal output by default, use --verbose for detailed information
+      • Parallel mode: Uses up to 5 threads to process assets simultaneously
+      • Parallel mode: Each thread has its own progress bar
+      • Parallel mode: Significantly faster for large asset sets
 
   asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose]
     Description: Import asset profiles to target environment from CSV file
@@ -1140,15 +1311,17 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Shows detailed request/response in verbose mode
       • Provides comprehensive statistics upon completion
 
-  policy-list-export [--quiet] [--verbose]
+  policy-list-export [--quiet] [--verbose] [--parallel]
     Description: Export all policies from source environment to CSV file
     Arguments:
       --quiet: Suppress console output, show only summary
       --verbose: Show detailed output including headers and responses
+      --parallel: Use parallel processing for faster export (max 5 threads)
     Examples:
       policy-list-export
       policy-list-export --quiet
       policy-list-export --verbose
+      policy-list-export --parallel
     Behavior:
       • Uses '/catalog-server/api/rules' endpoint with pagination
       • First call gets total count with page=0&size=0
@@ -1159,8 +1332,12 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Shows page-by-page progress in quiet mode
       • Shows detailed request/response in verbose mode
       • Provides comprehensive statistics upon completion
+      • Parallel mode: Uses up to 5 threads with minimum 10 policies per thread
+      • Parallel mode: Each thread has its own progress bar
+      • Parallel mode: Automatic retry (3 attempts) on failures
+      • Parallel mode: Temporary files merged into final output
 
-  policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>]
+  policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]
     Description: Export policy definitions by different categories from source environment to ZIP files
     Arguments:
       --type: Export type (rule-types, engine-types, assemblies, source-types)
@@ -1168,6 +1345,7 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       --quiet: Suppress console output, show only summary
       --verbose: Show detailed output including headers and responses
       --batch-size: Number of policies to export in each batch (default: 50)
+      --parallel: Use parallel processing for faster export (max 5 threads)
     Examples:
       policy-export
       policy-export --type rule-types
@@ -1175,6 +1353,7 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       policy-export --type assemblies --filter production-db
       policy-export --type source-types --filter PostgreSQL
       policy-export --type rule-types --batch-size 100 --quiet
+      policy-export --type rule-types --parallel
     Behavior:
       • Reads policies from /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/policies-all-export.csv (generated by policy-list-export)
       • Groups policies by the specified export type
@@ -1189,6 +1368,33 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Shows batch-by-batch progress in quiet mode
       • Shows detailed request/response in verbose mode
       • Provides comprehensive statistics upon completion
+      • Parallel mode: Uses up to 5 threads to process different policy types simultaneously
+      • Parallel mode: Each thread has its own progress bar showing batch completion
+      • Parallel mode: Significantly faster for large exports with multiple policy types
+
+  rule-tag-export [--quiet] [--verbose] [--parallel]
+    Description: Export rule tags for all policies from policies-all-export.csv
+    Arguments:
+      --quiet: Suppress console output, show only summary with progress bar
+      --verbose: Show detailed output including headers and responses
+      --parallel: Use parallel processing for faster export (max 5 threads)
+    Examples:
+      rule-tag-export
+      rule-tag-export --quiet
+      rule-tag-export --verbose
+      rule-tag-export --parallel
+    Behavior:
+      • Automatically runs policy-list-export if policies-all-export.csv doesn't exist
+      • Reads rule IDs from /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/policies-all-export.csv (first column)
+      • Makes API calls to '/catalog-server/api/rules/<id>/tags' for each rule
+      • Extracts tag names from the response
+      • Outputs to /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/rule-tags-export.csv with rule ID and comma-separated tags
+      • Shows progress bar in quiet mode
+      • Shows detailed API calls in verbose mode
+      • Provides comprehensive statistics upon completion
+      • Parallel mode: Uses up to 5 threads to process rules simultaneously
+      • Parallel mode: Each thread has its own progress bar
+      • Parallel mode: Significantly faster for large rule sets
 
   policy-import <file_or_pattern> [--quiet] [--verbose]
     Description: Import policy definitions from ZIP files to target environment
