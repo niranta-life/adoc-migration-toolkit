@@ -571,6 +571,32 @@ class TestAcceldataAPIClient:
         with pytest.raises(RequestException):
             client.make_api_call("/api/test")
 
+    def test_tenant_substitution_in_host(self):
+        """Test that ${tenant} in AD_HOST is substituted correctly for source and target."""
+        env_content = """
+        AD_HOST=https://${tenant}.acceldata.app
+        AD_SOURCE_ACCESS_KEY=source_key
+        AD_SOURCE_SECRET_KEY=source_secret
+        AD_SOURCE_TENANT=source-tenant
+        AD_TARGET_ACCESS_KEY=target_key
+        AD_TARGET_SECRET_KEY=target_secret
+        AD_TARGET_TENANT=target-tenant
+        """
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
+            f.write(env_content)
+            env_file = f.name
+        try:
+            # Source client
+            client_source = create_api_client(env_file=env_file, tenant_type="source")
+            assert client_source.host == "https://source-tenant.acceldata.app"
+            assert client_source.tenant == "source-tenant"
+            # Target client
+            client_target = create_api_client(env_file=env_file, tenant_type="target")
+            assert client_target.host == "https://target-tenant.acceldata.app"
+            assert client_target.tenant == "source-tenant"  # tenant always set to source for now
+        finally:
+            os.unlink(env_file)
+
 
 class TestCreateAPIClient:
     """Test cases for create_api_client factory function."""

@@ -63,7 +63,8 @@ class AcceldataAPIClient:
     
     def __init__(self, host: Optional[str] = None, access_key: Optional[str] = None, 
                  secret_key: Optional[str] = None, tenant: Optional[str] = None, 
-                 env_file: Optional[str] = None, logger: Optional[logging.Logger] = None):
+                 env_file: Optional[str] = None, logger: Optional[logging.Logger] = None, 
+                 tenant_type: str = "source"):
         """
         Initialize the Acceldata API client.
         
@@ -72,38 +73,38 @@ class AcceldataAPIClient:
         parameters.
         
         Args:
-            host: The host URL (e.g., 'https://se-demo.acceldata.app')
+            host: The host URL (e.g., 'https://se-demo.acceldata.app' or 'https://${tenant}.acceldata.app')
             access_key: The access key for authentication
             secret_key: The secret key for authentication
             tenant: The tenant name
             env_file: Path to environment file containing host, keys, and tenant
             logger: Logger instance for logging operations
-            
+            tenant_type: 'source' or 'target' - which tenant to use for ${tenant} substitution
         Raises:
             ValueError: If required configuration parameters are missing
             FileNotFoundError: If the specified environment file doesn't exist
         """
         self.logger = logger or logging.getLogger(__name__)
-        
+        self.tenant_type = tenant_type
         # Load configuration from environment file if provided
         if env_file:
-            self._load_env_config(env_file)
+            self._load_env_config(env_file, tenant_type=tenant_type)
         else:
             self.host = host or os.getenv('AD_HOST')
             self.access_key = access_key or os.getenv('AD_SOURCE_ACCESS_KEY')
             self.secret_key = secret_key or os.getenv('AD_SOURCE_SECRET_KEY')
             self.tenant = tenant or os.getenv('AD_SOURCE_TENANT')
-        
+            # If host contains ${tenant}, substitute with correct tenant
+            if self.host and "${tenant}" in self.host:
+                sub_tenant = self.tenant
+                self.host = self.host.replace("${tenant}", sub_tenant)
         # Validate required configuration
         self._validate_configuration()
-        
         # Remove trailing slash from host for consistency
         self.host = self.host.rstrip('/')
-        
         # Setup session with default headers
         self.session = requests.Session()
         self._setup_default_headers()
-        
         self.logger.info(f"API Client initialized for host: {self.host}, tenant: {self.tenant}")
     
     def _validate_configuration(self) -> None:
@@ -125,7 +126,7 @@ class AcceldataAPIClient:
         if not self.tenant:
             raise ValueError("Tenant is required. Set AD_SOURCE_TENANT environment variable or provide tenant parameter.")
     
-    def _load_env_config(self, env_file: str) -> None:
+    def _load_env_config(self, env_file: str, tenant_type: str = "source") -> None:
         """
         Load configuration from environment file.
         
@@ -134,7 +135,7 @@ class AcceldataAPIClient:
         
         Args:
             env_file: Path to the environment file
-            
+            tenant_type: 'source' or 'target' - which tenant to use for ${tenant} substitution
         Raises:
             FileNotFoundError: If the environment file doesn't exist
             ValueError: If required configuration is missing from the file
@@ -142,23 +143,25 @@ class AcceldataAPIClient:
         env_path = Path(env_file)
         if not env_path.exists():
             raise FileNotFoundError(f"Environment file not found: {env_file}")
-        
         self.logger.info(f"Loading configuration from: {env_file}")
-        
         # Parse environment file
         config = self._parse_env_file(env_path)
-        
         # Extract source configuration
         self.host = config.get('AD_HOST')
         self.access_key = config.get('AD_SOURCE_ACCESS_KEY')
         self.secret_key = config.get('AD_SOURCE_SECRET_KEY')
         self.tenant = config.get('AD_SOURCE_TENANT')
-        
         # Extract target configuration if available
         self.target_access_key = config.get('AD_TARGET_ACCESS_KEY')
         self.target_secret_key = config.get('AD_TARGET_SECRET_KEY')
         self.target_tenant = config.get('AD_TARGET_TENANT')
-        
+        # Substitute ${tenant} in host
+        if self.host and "${tenant}" in self.host:
+            if tenant_type == "target" and self.target_tenant:
+                sub_tenant = self.target_tenant
+            else:
+                sub_tenant = self.tenant
+            self.host = self.host.replace("${tenant}", sub_tenant)
         # Validate required configuration
         if not self.host or not self.access_key or not self.secret_key or not self.tenant:
             raise ValueError(f"Missing required configuration in {env_file}. Need AD_HOST, AD_SOURCE_ACCESS_KEY, AD_SOURCE_SECRET_KEY, and AD_SOURCE_TENANT")
@@ -521,7 +524,8 @@ def create_api_client(env_file: Optional[str] = None,
                      access_key: Optional[str] = None,
                      secret_key: Optional[str] = None,
                      tenant: Optional[str] = None,
-                     logger: Optional[logging.Logger] = None) -> AcceldataAPIClient:
+                     logger: Optional[logging.Logger] = None,
+                     tenant_type: str = "source") -> AcceldataAPIClient:
     """
     Factory function to create a configured Acceldata API client.
     
@@ -536,10 +540,9 @@ def create_api_client(env_file: Optional[str] = None,
         secret_key: Secret key (overrides env_file and environment variables)
         tenant: Tenant name (overrides env_file and environment variables)
         logger: Logger instance for operation tracking
-        
+        tenant_type: 'source' or 'target' - which tenant to use for ${tenant} substitution
     Returns:
         Configured AcceldataAPIClient instance
-        
     Raises:
         ValueError: If required configuration parameters are missing
         FileNotFoundError: If the specified environment file doesn't exist
@@ -550,5 +553,6 @@ def create_api_client(env_file: Optional[str] = None,
         secret_key=secret_key,
         tenant=tenant,
         env_file=env_file,
-        logger=logger
+        logger=logger,
+        tenant_type=tenant_type
     ) 
