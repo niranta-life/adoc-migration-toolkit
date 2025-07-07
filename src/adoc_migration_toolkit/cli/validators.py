@@ -1,10 +1,12 @@
 """
 CLI argument validators.
 
-This module contains functions for validating command line arguments.
+This module contains functions for validating command line arguments,
+both for Click-based CLI and legacy argparse-based validation.
 """
 
 from pathlib import Path
+import click
 
 
 def validate_formatter_arguments(args):
@@ -54,4 +56,58 @@ def validate_rest_api_arguments(args):
         raise FileNotFoundError(f"Environment file does not exist: {args.env_file}")
     
     if not env_path.is_file():
-        raise ValueError(f"Environment path is not a file: {args.env_file}") 
+        raise ValueError(f"Environment path is not a file: {args.env_file}")
+
+
+# Click-specific validation functions
+def validate_env_file(ctx, param, value):
+    """Click validator for environment file."""
+    if value is None:
+        return value
+    
+    env_path = Path(value)
+    if not env_path.exists():
+        raise click.BadParameter(f"Environment file does not exist: {value}")
+    
+    if not env_path.is_file():
+        raise click.BadParameter(f"Environment path is not a file: {value}")
+    
+    return value
+
+
+def validate_csv_file(ctx, param, value):
+    """Click validator for CSV file."""
+    if value is None:
+        return value
+    
+    csv_path = Path(value)
+    if not csv_path.exists():
+        raise click.BadParameter(f"CSV file does not exist: {value}")
+    
+    if not csv_path.is_file():
+        raise click.BadParameter(f"CSV path is not a file: {value}")
+    
+    return value
+
+
+def validate_non_empty_string(ctx, param, value):
+    """Click validator for non-empty string."""
+    if value is None:
+        return value
+    
+    if not value.strip():
+        raise click.BadParameter(f"{param.name} cannot be empty")
+    
+    return value
+
+
+def validate_log_level(ctx, param, value):
+    """Click validator for log level."""
+    if value is None:
+        return value
+    
+    valid_levels = ['ERROR', 'WARNING', 'INFO', 'DEBUG']
+    if value.upper() not in valid_levels:
+        raise click.BadParameter(f"Log level must be one of: {', '.join(valid_levels)}")
+    
+    return value.upper() 
