@@ -20,6 +20,7 @@ start multiple migrations, pause, and resume them independently.
 - [Policy Management](#policy-management)
 - [Segments Management](#segments-management)
 - [Utility Commands](#utility-commands)
+- [Testing](#testing)
 - [File Structure](#file-structure)
 - [Examples](#examples)
 - [Troubleshooting](#troubleshooting)
@@ -768,6 +769,93 @@ echo '{"key":"value"}' | ./bin/sjson
 - Maintains JSON validity and structure
 - Handles large JSON files efficiently
 - Provides consistent indentation and formatting
+
+## Testing
+
+The test suite uses a dedicated virtual environment `.tvenv` for all test runs. This ensures your development environment and dependencies remain untouched and tests always run in a clean, isolated context.
+
+### Test Coverage
+
+The test suite includes comprehensive coverage for:
+
+- **Shared Module** (`tests/test_shared/`): API client, logging, file utilities, globals, and integration tests
+- **Formatter Module** (`tests/test_formatter.py`): Policy export formatter, command parsing, and execution functions
+- **Core Module** (`tests/test_core.py`): Basic functionality tests
+- **Asset Profile Export** (`tests/test_asset_profile_export.py`): Asset export functionality
+- **Asset Operations** (`tests/test_asset_operations.py`): Comprehensive tests for asset operations including profile export/import, config export/import, and list export
+
+### Running Tests
+
+```sh
+python run_tests.py
+```
+- This will:
+  1. Create `.tvenv` if it doesn't exist (using `uv venv`)
+  2. Install all dependencies into `.tvenv` (using `uv sync --active`)
+  3. Run the test suite using `.tvenv`
+  4. Clean up `.tvenv` after tests (unless you use `--keep-env`)
+
+#### Common Options
+
+- `--shared-only` — Only run tests in `tests/test_shared/`
+- `--coverage` — Generate coverage reports
+- `--html-report` — Generate HTML coverage report
+- `--keep-env` — Keep `.tvenv` after tests for debugging
+- `--no-setup` — Skip environment setup (use existing `.tvenv`)
+- `--verbose` — Show detailed test output
+- `--file <path>` — Run tests from a specific file
+- `--clean` — Clean up test artifacts before running
+
+#### Test Categories
+
+```sh
+# Run only shared module tests
+python run_tests.py --shared-only
+
+# Run only formatter tests
+python run_tests.py --file tests/test_formatter.py
+
+# Run only asset operations tests
+python run_tests.py --file tests/test_asset_operations.py
+
+# Run with coverage and HTML report
+python run_tests.py --coverage --html-report
+
+# Keep environment for debugging
+python run_tests.py --keep-env
+```
+
+### Coverage Reports
+
+When running tests with coverage, the following reports are generated in the `tests/output/` directory:
+
+- **Terminal Report**: Shows coverage percentage and missing lines
+- **XML Report**: `tests/output/coverage.xml` for CI/CD integration
+- **HTML Report**: `tests/output/htmlcov/index.html` for detailed browser viewing
+
+### Test Environment Isolation
+
+The `.tvenv` environment is completely isolated from your development environment:
+
+- **Automatic Creation**: Created fresh for each test run
+- **Dependency Installation**: All test dependencies installed automatically
+- **Cleanup**: Environment removed after tests (unless `--keep-env` is used)
+- **No Interference**: Your main development environment remains untouched
+
+### CI/CD Integration
+
+Example GitHub Actions workflow:
+
+```yaml
+- name: Run tests
+  run: |
+    python run_tests.py --coverage
+
+- name: Upload coverage
+  uses: codecov/codecov-action@v3
+  with:
+    file: ./tests/output/coverage.xml
+```
 
 ## File Structure
 

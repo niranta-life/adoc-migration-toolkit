@@ -10,10 +10,10 @@ import os
 from pathlib import Path
 from typing import Optional
 from ..shared.file_utils import get_output_file_path
-from adoc_migration_toolkit.shared.globals import GLOBAL_OUTPUT_DIR
+from adoc_migration_toolkit.shared import globals
 
 # Global output directory - shared across modules
-GLOBAL_OUTPUT_DIR: Optional[Path] = None
+globals.GLOBAL_OUTPUT_DIR: Optional[Path] = None
 
 def parse_set_output_dir_command(command: str) -> str:
     """Parse the set-output-dir command and extract the directory path.
@@ -54,22 +54,21 @@ def load_global_output_directory() -> Path:
     Returns:
         Path: The global output directory, or None if not set
     """
-    global GLOBAL_OUTPUT_DIR
+    if globals.GLOBAL_OUTPUT_DIR is None:
+        config_file = Path.home() / ".adoc_migration_toolkit" / "config.json"
+        
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    output_dir = config.get('global_output_directory')
+                    if output_dir:
+                        globals.GLOBAL_OUTPUT_DIR = Path(output_dir)
+                        return globals.GLOBAL_OUTPUT_DIR
+            except Exception as e:
+                print(f"Warning: Could not load config file: {e}")
     
-    config_file = Path.home() / ".adoc_migration_toolkit" / "config.json"
-    
-    if config_file.exists():
-        try:
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-                output_dir = config.get('global_output_directory')
-                if output_dir:
-                    GLOBAL_OUTPUT_DIR = Path(output_dir)
-                    return GLOBAL_OUTPUT_DIR
-        except Exception as e:
-            print(f"Warning: Could not load config file: {e}")
-    
-    return None
+    return globals.GLOBAL_OUTPUT_DIR
 
 def save_global_output_directory(output_dir: Path):
     """Save the global output directory to the config file.
@@ -113,8 +112,6 @@ def set_global_output_directory(directory: str, logger) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    global GLOBAL_OUTPUT_DIR
-    
     try:
         # Validate and resolve the directory path
         output_dir = Path(directory).expanduser().resolve()
@@ -137,12 +134,12 @@ def set_global_output_directory(directory: str, logger) -> bool:
             return False
         
         # Set the global output directory
-        GLOBAL_OUTPUT_DIR = output_dir
+        globals.GLOBAL_OUTPUT_DIR = output_dir
         
         # Save to config file
-        save_global_output_directory(GLOBAL_OUTPUT_DIR)
+        save_global_output_directory(globals.GLOBAL_OUTPUT_DIR)
         
-        success_msg = f"Global output directory set to: {GLOBAL_OUTPUT_DIR}"
+        success_msg = f"Global output directory set to: {globals.GLOBAL_OUTPUT_DIR}"
         print(f"✅ {success_msg}")
         logger.info(success_msg)
         

@@ -13,7 +13,6 @@ from .execution.formatter import PolicyExportFormatter, validate_arguments
 from .shared.logging import setup_logging
 from .cli import main, run_interactive
 from .shared import (
-    GLOBAL_OUTPUT_DIR,
     load_global_output_directory,
     save_global_output_directory,
     set_global_output_directory,
@@ -38,7 +37,6 @@ __all__ = [
     'run_interactive',
     
     # Shared utilities
-    'GLOBAL_OUTPUT_DIR',
     'load_global_output_directory',
     'save_global_output_directory',
     'set_global_output_directory',

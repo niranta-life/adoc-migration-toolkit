@@ -10,7 +10,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from .globals import GLOBAL_OUTPUT_DIR
+# Import the globals module to access the global variable dynamically
+from . import globals
 
 
 def get_output_file_path(csv_file: str, default_filename: str, custom_output_file: str = None, category: str = None) -> Path:
@@ -35,8 +36,9 @@ def get_output_file_path(csv_file: str, default_filename: str, custom_output_fil
         return output_path
     
     # Use global output directory or create timestamped directory
-    if GLOBAL_OUTPUT_DIR:
-        base_output_dir = GLOBAL_OUTPUT_DIR
+    # Get the global variable dynamically to ensure we get the current value
+    if globals.GLOBAL_OUTPUT_DIR:
+        base_output_dir = globals.GLOBAL_OUTPUT_DIR
     else:
         # Create timestamped directory in current working directory
         timestamp = datetime.now().strftime('%Y%m%d%H%M')

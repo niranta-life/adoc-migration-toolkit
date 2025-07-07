@@ -101,8 +101,8 @@ addopts = [
     "--strict-config",
     "--cov=src/adoc_migration_toolkit",
     "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
+    "--cov-report=html:tests/output/htmlcov",
+    "--cov-report=xml:tests/output/coverage.xml",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
@@ -131,4 +131,10 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
-] 
+]
+
+[tool.coverage.html]
+directory = "tests/output/htmlcov"
+
+[tool.coverage.xml]
+output = "tests/output/coverage.xml" 

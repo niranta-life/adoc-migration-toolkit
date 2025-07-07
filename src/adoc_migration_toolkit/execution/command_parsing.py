@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from adoc_migration_toolkit.shared.globals import GLOBAL_OUTPUT_DIR
+from adoc_migration_toolkit.shared import globals
 from ..shared.file_utils import get_output_file_path
 
 def parse_api_command(command: str) -> tuple:
@@ -74,8 +74,8 @@ def parse_segments_export_command(command: str) -> tuple:
     
     # If no CSV file specified, use default from output directory
     if not csv_file:
-        if GLOBAL_OUTPUT_DIR:
-            csv_file = str(GLOBAL_OUTPUT_DIR / "policy-export" / "segmented_spark_uids.csv")
+        if globals.GLOBAL_OUTPUT_DIR:
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "policy-export" / "segmented_spark_uids.csv")
         else:
             # Look for the most recent adoc-migration-toolkit directory
             current_dir = Path.cwd()
@@ -175,8 +175,8 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     
     # If no CSV file specified, use default from output directory
     if not csv_file:
-        if GLOBAL_OUTPUT_DIR:
-            csv_file = str(GLOBAL_OUTPUT_DIR / "asset-export" / "asset_uids.csv")
+        if globals.GLOBAL_OUTPUT_DIR:
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset_uids.csv")
         else:
             # Look for the most recent adoc-migration-toolkit directory
             current_dir = Path.cwd()
@@ -237,8 +237,8 @@ def parse_asset_profile_import_command(command: str) -> tuple:
     
     # If no CSV file specified, use default from output directory
     if not csv_file:
-        if GLOBAL_OUTPUT_DIR:
-            csv_file = str(GLOBAL_OUTPUT_DIR / "asset-import" / "asset-profiles-import-ready.csv")
+        if globals.GLOBAL_OUTPUT_DIR:
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-profiles-import-ready.csv")
         else:
             # Look for the most recent adoc-migration-toolkit directory
             current_dir = Path.cwd()

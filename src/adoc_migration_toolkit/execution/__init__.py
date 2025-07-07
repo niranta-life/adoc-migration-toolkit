@@ -49,8 +49,7 @@ from .output_management import (
     load_global_output_directory,
     save_global_output_directory,
     get_output_file_path,
-    set_global_output_directory,
-    GLOBAL_OUTPUT_DIR
+    set_global_output_directory
 )
 
 __all__ = [
@@ -95,6 +94,5 @@ __all__ = [
     'load_global_output_directory',
     'save_global_output_directory',
     'get_output_file_path',
-    'set_global_output_directory',
-    'GLOBAL_OUTPUT_DIR'
+    'set_global_output_directory'
 ] 

@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from adoc_migration_toolkit.execution.utils import create_progress_bar, read_csv_uids, read_csv_uids_single_column
 from ..shared.file_utils import get_output_file_path
-from ..shared.globals import GLOBAL_OUTPUT_DIR
+from ..shared import globals
 
 
 def execute_asset_profile_export_guided(
@@ -191,8 +191,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
             error_msg = f"CSV file does not exist: {csv_file}"
             print(f"❌ {error_msg}")
             print(f"💡 Please run 'policy-xfr' first to generate the asset_uids.csv file")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"   Expected location: {GLOBAL_OUTPUT_DIR}/asset-export/asset_uids.csv")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-export/asset_uids.csv")
             else:
                 print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-export/asset_uids.csv")
             logger.error(error_msg)
@@ -212,8 +212,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file: {csv_file}")
             print(f"Output will be written to: {output_file}")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
@@ -443,8 +443,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
             error_msg = f"CSV file does not exist: {csv_file}"
             print(f"❌ {error_msg}")
             print(f"💡 Please run 'asset-profile-export' first to generate the asset-profiles-import-ready.csv file")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"   Expected location: {GLOBAL_OUTPUT_DIR}/asset-import/asset-profiles-import-ready.csv")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-profiles-import-ready.csv")
             else:
                 print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-profiles-import-ready.csv")
             logger.error(error_msg)
@@ -719,8 +719,8 @@ def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, o
         if not quiet_mode:
             print(f"\nProcessing {len(uids)} asset config exports from CSV file: {csv_file}")
             print(f"Output will be written to: {output_file}")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
@@ -1099,16 +1099,16 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
     """
     try:
         # Determine output file path
-        if GLOBAL_OUTPUT_DIR:
-            output_file = GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-export.csv"
+        if globals.GLOBAL_OUTPUT_DIR:
+            output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-export.csv"
         else:
             output_file = Path("asset-all-export.csv")
         
         if not quiet_mode:
             print(f"\nExporting all assets from ADOC environment")
             print(f"Output will be written to: {output_file}")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)

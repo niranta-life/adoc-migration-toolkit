@@ -16,7 +16,7 @@ import csv
 from pathlib import Path
 from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
-from ..shared.globals import GLOBAL_OUTPUT_DIR
+from ..shared import globals
 
 
 class PolicyExportFormatter:
@@ -66,8 +66,8 @@ class PolicyExportFormatter:
             self.base_output_dir = Path(output_dir).resolve()
         else:
             # Use the same logic as other commands to find/create the output directory
-            if GLOBAL_OUTPUT_DIR:
-                self.base_output_dir = GLOBAL_OUTPUT_DIR
+            if globals.GLOBAL_OUTPUT_DIR:
+                self.base_output_dir = globals.GLOBAL_OUTPUT_DIR
             else:
                 from datetime import datetime
                 self.base_output_dir = Path.cwd() / f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d%H%M')}"
@@ -811,8 +811,8 @@ def execute_formatter(input_dir: str, source_string: str, target_string: str, ou
     """
     try:
         if not input_dir:
-            if GLOBAL_OUTPUT_DIR:
-                global_policy_export_dir = GLOBAL_OUTPUT_DIR / "policy-export"
+            if globals.GLOBAL_OUTPUT_DIR:
+                global_policy_export_dir = globals.GLOBAL_OUTPUT_DIR / "policy-export"
                 if global_policy_export_dir.exists() and global_policy_export_dir.is_dir():
                     input_dir = str(global_policy_export_dir)
                     if not quiet_mode:

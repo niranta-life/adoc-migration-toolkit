@@ -9,6 +9,8 @@ __pycache__/
 
 # Idea
 .idea/
+tests/.DS_Store
+.DS_Store
 
 # Distribution / packaging
 .Python
@@ -57,6 +59,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+tests/output/
 
 # Translations
 *.mo
@@ -161,3 +164,12 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Virtual environments
+.venv/
+.venv
+venv/
+ENV/
+env/
+.tvenv/
+.tvenv

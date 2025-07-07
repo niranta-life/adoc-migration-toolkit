@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
 
-from ..shared.globals import GLOBAL_OUTPUT_DIR
+from ..shared import globals
 
 
 class PolicyTranformer:
@@ -68,8 +68,8 @@ class PolicyTranformer:
             self.base_output_dir = Path(output_dir).resolve()
         else:
             # Use the same logic as other commands to find/create the output directory
-            if GLOBAL_OUTPUT_DIR:
-                self.base_output_dir = GLOBAL_OUTPUT_DIR
+            if globals.GLOBAL_OUTPUT_DIR:
+                self.base_output_dir = globals.GLOBAL_OUTPUT_DIR
             else:
                 from datetime import datetime
                 self.base_output_dir = Path.cwd() / f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d%H%M')}"

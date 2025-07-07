@@ -17,7 +17,7 @@ from glob import glob
 
 from .utils import create_progress_bar
 from ..shared.file_utils import get_output_file_path
-from ..shared.globals import GLOBAL_OUTPUT_DIR
+from ..shared import globals
 
 def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
     """Execute the policy-list-export command.
@@ -495,9 +495,9 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
     """
     try:
         # Determine input and output file paths
-        if GLOBAL_OUTPUT_DIR:
-            input_file = GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
-            output_dir = GLOBAL_OUTPUT_DIR / "policy-export"
+        if globals.GLOBAL_OUTPUT_DIR:
+            input_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+            output_dir = globals.GLOBAL_OUTPUT_DIR / "policy-export"
         else:
             # Use the same logic as policy-list-export to find the input file
             # Look for the most recent adoc-migration-toolkit-YYYYMMDDHHMM directory
@@ -931,8 +931,8 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
             search_dir = os.path.dirname(file_pattern) if os.path.dirname(file_pattern) else "."
         else:
             # Use the global output directory or default to current directory
-            if GLOBAL_OUTPUT_DIR:
-                search_dir = GLOBAL_OUTPUT_DIR / "policy-import"
+            if globals.GLOBAL_OUTPUT_DIR:
+                search_dir = globals.GLOBAL_OUTPUT_DIR / "policy-import"
             else:
                 # Fallback to current directory with timestamped subdirectory
                 from datetime import datetime
@@ -1193,8 +1193,8 @@ def execute_rule_tag_export(client, logger: logging.Logger, quiet_mode: bool = F
             print("="*80)
         
         # Check if policies-all-export.csv exists
-        if GLOBAL_OUTPUT_DIR:
-            policies_file = GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+        if globals.GLOBAL_OUTPUT_DIR:
+            policies_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
         else:
             # Look for the most recent adoc-migration-toolkit-YYYYMMDDHHMM directory
             current_dir = Path.cwd()

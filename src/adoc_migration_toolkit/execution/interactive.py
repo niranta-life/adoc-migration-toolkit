@@ -18,7 +18,7 @@ from .asset_operations import execute_asset_profile_export, execute_asset_profil
 from .policy_operations import execute_policy_list_export, execute_policy_export, execute_policy_import
 from .policy_operations import execute_rule_tag_export
 from .formatter import execute_formatter, parse_formatter_command
-from adoc_migration_toolkit.shared.globals import GLOBAL_OUTPUT_DIR
+from adoc_migration_toolkit.shared import globals
 
 def show_interactive_help():
     """Display help information for all available interactive commands."""
@@ -27,7 +27,7 @@ def show_interactive_help():
     RESET = '\033[0m'
     
     # Get current output directory for dynamic paths
-    current_output_dir = GLOBAL_OUTPUT_DIR
+    current_output_dir = globals.GLOBAL_OUTPUT_DIR
     
     print("\n" + "="*80)
     print("ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP")
@@ -516,15 +516,14 @@ def run_interactive(args):
             return 1
         
         # Load global output directory from configuration
-        global GLOBAL_OUTPUT_DIR
-        GLOBAL_OUTPUT_DIR = load_global_output_directory()
+        globals.GLOBAL_OUTPUT_DIR = load_global_output_directory()
         
         # Display current output directory status
         print("\n" + "="*80)
         print("\033[1m\033[36mADOC INTERACTIVE MIGRATION TOOLKIT\033[0m")
         print("="*80)
-        if GLOBAL_OUTPUT_DIR:
-            print(f"📁 Output Directory: {GLOBAL_OUTPUT_DIR}")
+        if globals.GLOBAL_OUTPUT_DIR:
+            print(f"📁 Output Directory: {globals.GLOBAL_OUTPUT_DIR}")
             print(f"📁 Current Directory: {os.getcwd()}")
             print(f"📋 Config File: {args.env_file}")
             print(f"🌍 Source Environment: {client.host}")

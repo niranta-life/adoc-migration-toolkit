@@ -13,7 +13,7 @@ from typing import Optional
 
 from ..shared.file_utils import get_output_file_path
 from adoc_migration_toolkit.execution.utils import read_csv_uids
-from adoc_migration_toolkit.shared.globals import GLOBAL_OUTPUT_DIR
+from adoc_migration_toolkit.shared import globals
 
 # If verbose_mode or failed_indices are needed, define or import as appropriate
 verbose_mode = False
@@ -36,8 +36,8 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
             error_msg = f"CSV file does not exist: {csv_file}"
             print(f"❌ {error_msg}")
             print(f"💡 Please run 'policy-xfr' first to generate the segmented_spark_uids.csv file")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"   Expected location: {GLOBAL_OUTPUT_DIR}/policy-export/segmented_spark_uids.csv")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/policy-export/segmented_spark_uids.csv")
             else:
                 print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/policy-export/segmented_spark_uids.csv")
             logger.error(error_msg)
@@ -57,8 +57,8 @@ def execute_segments_export(csv_file: str, client, logger: logging.Logger, outpu
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} environment mappings from CSV file: {csv_file}")
             print(f"Output will be written to: {output_file}")
-            if GLOBAL_OUTPUT_DIR:
-                print(f"Using global output directory: {GLOBAL_OUTPUT_DIR}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
             print("="*80)
         
         # Open output file for writing
