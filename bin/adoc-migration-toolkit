@@ -71,6 +71,7 @@ show_help() {
     echo "    -h, --help           Show this help message"
     echo "    -v, --version        Show version information"
     echo "    --check-env          Check environment configuration without starting the tool"
+    echo "    --setup              Set up the development environment (install dependencies, create venv)"
     echo
     echo -e "${BOLD}Description:${NC}"
     echo "    This tool provides an interactive interface for managing ADOC policy migrations,"
@@ -87,6 +88,7 @@ show_help() {
     echo "    $SCRIPT_NAME                    # Use default config file"
     echo "    $SCRIPT_NAME -c my-config.env   # Use custom config file"
     echo "    $SCRIPT_NAME --check-env        # Validate environment configuration"
+    echo "    $SCRIPT_NAME --setup            # Set up development environment"
     echo
     echo -e "${BOLD}Configuration:${NC}"
     echo "    The tool expects a configuration file with the following environment variables:"
@@ -104,6 +106,7 @@ show_help() {
     echo "    2 - Python module not found"
     echo "    3 - Invalid arguments"
     echo "    4 - Environment validation failed"
+    echo "    5 - Setup failed"
     echo
 }
 
@@ -112,6 +115,166 @@ show_version() {
     echo "$SCRIPT_NAME version $SCRIPT_VERSION"
     echo "ADOC Export-Import Interactive Toolkit"
     echo "Copyright (c) 2024 ADOC Migration Team"
+}
+
+# Function to detect operating system
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*)    echo "windows";;
+        MINGW*)     echo "windows";;
+        MSYS*)      echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
+# Function to check if uv is installed
+check_uv_installed() {
+    if command -v uv >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to guide uv installation
+install_uv_guide() {
+    local os=$(detect_os)
+    
+    print_error "uv is not installed on your system."
+    echo
+    print_info "Installing uv..."
+    echo
+    
+    case "$os" in
+        "linux")
+            print_info "For Linux, run the following command:"
+            echo "curl -LsSf https://astral.sh/uv/install.sh | sh"
+            echo
+            print_info "After installation, restart your terminal or run:"
+            echo "source ~/.bashrc  # or source ~/.zshrc if using zsh"
+            ;;
+        "macos")
+            print_info "For macOS, you can install uv using:"
+            echo "curl -LsSf https://astral.sh/uv/install.sh | sh"
+            echo
+            print_info "Or using Homebrew:"
+            echo "brew install uv"
+            echo
+            print_info "After installation, restart your terminal or run:"
+            echo "source ~/.zshrc  # or source ~/.bash_profile if using bash"
+            ;;
+        "windows")
+            print_info "For Windows, you can install uv using:"
+            echo "powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\""
+            echo
+            print_info "Or using pip:"
+            echo "pip install uv"
+            ;;
+        *)
+            print_info "For other operating systems, please visit:"
+            echo "https://docs.astral.sh/uv/getting-started/installation/"
+            ;;
+    esac
+    echo
+    print_info "After installing uv, run this command again to continue setup."
+    return 1
+}
+
+# Function to check if virtual environment exists
+check_venv_exists() {
+    if [[ -d ".venv" ]] || [[ -n "${VIRTUAL_ENV:-}" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to create virtual environment
+create_venv_guide() {
+    print_warning "No virtual environment found."
+    echo
+    print_info "Creating a new virtual environment..."
+    echo
+    
+    # Check if we're in the project root (has pyproject.toml)
+    if [[ ! -f "pyproject.toml" ]]; then
+        print_error "pyproject.toml not found in current directory."
+        print_info "Please run this command from the project root directory."
+        return 1
+    fi
+    
+    if uv venv; then
+        print_success "Virtual environment created successfully."
+        echo
+        print_info "Activating virtual environment..."
+        if [[ -f ".venv/bin/activate" ]]; then
+            source .venv/bin/activate
+        elif [[ -f ".venv/Scripts/activate" ]]; then
+            source .venv/Scripts/activate
+        fi
+        return 0
+    else
+        print_error "Failed to create virtual environment."
+        print_info "You can manually create one using:"
+        echo "uv venv"
+        return 1
+    fi
+}
+
+# Function to sync project dependencies
+sync_project_dependencies() {
+    print_info "Syncing project dependencies..."
+    echo
+    
+    # Check if pyproject.toml exists
+    if [[ ! -f "pyproject.toml" ]]; then
+        print_error "pyproject.toml not found in current directory."
+        print_info "Please run this command from the project root directory."
+        return 1
+    fi
+    
+    if uv sync; then
+        print_success "Project dependencies synced successfully."
+        return 0
+    else
+        print_error "Failed to sync project dependencies."
+        print_info "You can manually sync using:"
+        echo "uv sync"
+        return 1
+    fi
+}
+
+# Function to test Python module
+test_python_module() {
+    print_info "Testing Python module import..."
+    echo
+    
+    # Test basic import
+    if uv run python -c "import $PYTHON_MODULE; print('Module imported successfully')" 2>/dev/null; then
+        print_success "Python module '$PYTHON_MODULE' imported successfully."
+        return 0
+    else
+        print_error "Failed to import Python module '$PYTHON_MODULE'."
+        print_info "This might indicate that the project is not properly installed."
+        print_info "Installing project in development mode..."
+        
+        if uv pip install -e .; then
+            print_success "Project installed in development mode."
+            # Test import again
+            if uv run python -c "import $PYTHON_MODULE; print('Module imported successfully after installation')" 2>/dev/null; then
+                print_success "Python module '$PYTHON_MODULE' imported successfully after installation."
+                return 0
+            else
+                print_error "Still failed to import Python module after installation."
+                return 1
+            fi
+        else
+            print_error "Failed to install project in development mode."
+            return 1
+        fi
+    fi
 }
 
 # Function to check if Python module is available
@@ -173,43 +336,101 @@ validate_config_file() {
 check_environment() {
     local config_file="$1"
     local verbose="${2:-false}"
+    local setup_mode="${3:-false}"
     
     if [[ "$verbose" == "true" ]]; then
         print_header "Environment Configuration Check"
         echo
     fi
     
-    # Validate config file
-    if ! validate_config_file "$config_file" >/dev/null 2>&1; then
+    # Step 1: Check if uv is installed
+    if [[ "$verbose" == "true" ]]; then
+        print_info "Checking if uv is installed..."
+    fi
+    if ! check_uv_installed; then
         if [[ "$verbose" == "true" ]]; then
-            validate_config_file "$config_file"
+            install_uv_guide
         fi
         return 1
     fi
+    if [[ "$verbose" == "true" ]]; then
+        print_success "uv is installed"
+    fi
     
-    # Check Python module
+    # Step 2: Check if virtual environment exists
+    if [[ "$verbose" == "true" ]]; then
+        print_info "Checking virtual environment..."
+    fi
+    if ! check_venv_exists; then
+        if [[ "$setup_mode" == "true" ]]; then
+            if [[ "$verbose" == "true" ]]; then
+                create_venv_guide
+            fi
+            return 1
+        else
+            if [[ "$verbose" == "true" ]]; then
+                print_warning "No virtual environment found. Run with --setup to create one."
+            fi
+            return 1
+        fi
+    fi
+    if [[ "$verbose" == "true" ]]; then
+        print_success "Virtual environment found"
+    fi
+    
+    # Step 3: Sync project dependencies (only in setup mode)
+    if [[ "$setup_mode" == "true" ]]; then
+        if [[ "$verbose" == "true" ]]; then
+            sync_project_dependencies
+        fi
+    fi
+    
+    # Step 4: Test Python module
+    if [[ "$verbose" == "true" ]]; then
+        test_python_module
+    fi
     if ! check_python_module >/dev/null 2>&1; then
         if [[ "$verbose" == "true" ]]; then
-            check_python_module
+            print_error "Python module check failed"
         fi
         return 1
     fi
     
-    # Test connection using the tool
+    # Step 5: Validate config file (only if provided)
+    if [[ -n "$config_file" ]]; then
+        if [[ "$verbose" == "true" ]]; then
+            print_info "Validating configuration file..."
+        fi
+        if ! validate_config_file "$config_file" >/dev/null 2>&1; then
+            if [[ "$verbose" == "true" ]]; then
+                validate_config_file "$config_file"
+            fi
+            return 1
+        fi
+        if [[ "$verbose" == "true" ]]; then
+            print_success "Configuration file validated"
+        fi
+        
+        # Step 6: Test connection using the tool (only if config is valid)
+        if [[ "$verbose" == "true" ]]; then
+            print_info "Testing connection to ADOC environment..."
+        fi
+        if uv run python -m "$PYTHON_MODULE" interactive --env-file "$config_file" --help >/dev/null 2>&1; then
+            if [[ "$verbose" == "true" ]]; then
+                print_success "ADOC environment connection test successful"
+            fi
+        else
+            if [[ "$verbose" == "true" ]]; then
+                print_warning "ADOC environment connection test failed (this is normal if credentials are not configured)"
+            fi
+        fi
+    fi
+    
     if [[ "$verbose" == "true" ]]; then
-        print_info "Testing connection to ADOC environment..."
+        echo
+        print_success "Environment configuration check completed successfully!"
     fi
-    if uv run python -m "$PYTHON_MODULE" interactive --env-file "$config_file" --help >/dev/null 2>&1; then
-        if [[ "$verbose" == "true" ]]; then
-            print_success "Environment configuration is valid"
-        fi
-        return 0
-    else
-        if [[ "$verbose" == "true" ]]; then
-            print_error "Failed to initialize the migration tool"
-        fi
-        return 1
-    fi
+    return 0
 }
 
 # Function to find config file
@@ -254,7 +475,7 @@ run_migration_tool() {
     local config_file="$1"
     
     # Validate environment silently
-    if ! check_environment "$config_file" "false" >/dev/null 2>&1; then
+    if ! check_environment "$config_file" "false" "false" >/dev/null 2>&1; then
         print_error "Environment validation failed. Please check your configuration."
         exit 1
     fi
@@ -267,6 +488,7 @@ run_migration_tool() {
 main() {
     local config_file=""
     local check_env_only=false
+    local setup_mode=false
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -287,6 +509,10 @@ main() {
                 check_env_only=true
                 shift
                 ;;
+            --setup)
+                setup_mode=true
+                shift
+                ;;
             -* )
                 print_error "Unknown option: $1"
                 echo "Use --help for usage information."
@@ -300,20 +526,36 @@ main() {
         esac
     done
     
-    # Find configuration file
-    local found_config_file
-    if ! found_config_file=$(find_config_file "$config_file"); then
-        exit 1
+    # Handle setup mode (doesn't require config file)
+    if [[ "$setup_mode" == true ]]; then
+        print_header "Setting up ADOC Migration Toolkit Development Environment"
+        echo
+        if check_environment "" "true" "true"; then
+            print_success "Setup completed successfully!"
+            print_info "You can now run the tool with: $SCRIPT_NAME --check-env"
+            exit 0
+        else
+            print_error "Setup failed. Please follow the instructions above and try again."
+            exit 5
+        fi
     fi
-    config_file="$found_config_file"
-    if [[ -z "$config_file" || ! -f "$config_file" ]]; then
-        print_error "No valid configuration file found."
-        exit 1
+    
+    # Find configuration file (only needed for non-setup operations)
+    if [[ "$check_env_only" == true ]] || [[ "$setup_mode" == false ]]; then
+        local found_config_file
+        if ! found_config_file=$(find_config_file "$config_file"); then
+            exit 1
+        fi
+        config_file="$found_config_file"
+        if [[ -z "$config_file" || ! -f "$config_file" ]]; then
+            print_error "No valid configuration file found."
+            exit 1
+        fi
     fi
     
     # Check if only environment validation is requested
     if [[ "$check_env_only" == true ]]; then
-        if check_environment "$config_file" "true"; then
+        if check_environment "$config_file" "true" "false"; then
             exit 0
         else
             exit 4

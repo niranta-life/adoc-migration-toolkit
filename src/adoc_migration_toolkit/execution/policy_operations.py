@@ -57,7 +57,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/rules?page=0&size=0",
+            endpoint="/catalog-server/api/rules?page=0&size=0&ruleStatus=ACTIVE",
             method='GET'
         )
         
@@ -94,7 +94,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
             try:
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: /catalog-server/api/rules?page={page}&size={page_size}")
+                    print(f"  Endpoint: /catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ACTIVE")
                     print(f"  Method: GET")
                     print(f"  Content-Type: application/json")
                     print(f"  Authorization: Bearer [REDACTED]")
@@ -102,7 +102,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                         print(f"  X-Tenant: {client.tenant}")
                 
                 page_response = client.make_api_call(
-                    endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}",
+                    endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ACTIVE",
                     method='GET'
                 )
                 
@@ -1066,7 +1066,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                 # Prepare query parameters
                 ids_param = ','.join(batch_ids)
                 query_params = {
-                    'ruleStatus': 'ALL',
+                    'ruleStatus': 'ACTIVE',
                     'includeTags': 'true',
                     'ids': ids_param,
                     'filename': batch_filename

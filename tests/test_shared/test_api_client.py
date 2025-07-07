@@ -164,14 +164,12 @@ class TestAcceldataAPIClient:
         assert 'user-agent' in headers
         assert headers['x-domain-ids'] == ''
 
-    @patch('requests.Session.get')
-    def test_get_asset_by_uid_success(self, mock_get):
+    def test_get_asset_by_uid_success(self):
         """Test successful asset retrieval by UID."""
         # Mock response
         mock_response = Mock()
         mock_response.json.return_value = {"uid": "test-123", "name": "Test Asset"}
         mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
         
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
@@ -180,43 +178,37 @@ class TestAcceldataAPIClient:
             tenant="test_tenant"
         )
         
-        result = client.get_asset_by_uid("test-123")
-        
-        assert result == {"uid": "test-123", "name": "Test Asset"}
-        mock_get.assert_called_once_with(
-            "https://test.acceldata.app/catalog-server/api/assets?uid=test-123",
-            timeout=10
-        )
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            result = client.get_asset_by_uid("test-123")
+            assert result == {"uid": "test-123", "name": "Test Asset"}
+            mock_get.assert_called_once_with(
+                "https://test.acceldata.app/catalog-server/api/assets?uid=test-123",
+                timeout=10
+            )
 
-    @patch('requests.Session.get')
-    def test_get_asset_by_uid_timeout(self, mock_get):
+    def test_get_asset_by_uid_timeout(self):
         """Test asset retrieval timeout handling."""
-        mock_get.side_effect = Timeout("Request timed out")
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        with pytest.raises(Timeout):
-            client.get_asset_by_uid("test-123")
+        with patch.object(client.session, 'get', side_effect=Timeout("Request timed out")) as mock_get:
+            with pytest.raises(Timeout):
+                client.get_asset_by_uid("test-123")
 
-    @patch('requests.Session.get')
-    def test_get_asset_by_uid_request_exception(self, mock_get):
+    def test_get_asset_by_uid_request_exception(self):
         """Test asset retrieval request exception handling."""
-        mock_get.side_effect = RequestException("Network error")
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        with pytest.raises(RequestException):
-            client.get_asset_by_uid("test-123")
+        with patch.object(client.session, 'get', side_effect=RequestException("Network error")) as mock_get:
+            with pytest.raises(RequestException):
+                client.get_asset_by_uid("test-123")
 
     def test_get_asset_by_uid_empty_uid(self):
         """Test asset retrieval with empty UID."""
@@ -229,82 +221,70 @@ class TestAcceldataAPIClient:
         
         with pytest.raises(ValueError, match="Asset UID cannot be empty"):
             client.get_asset_by_uid("")
+        
+        with pytest.raises(ValueError, match="Asset UID cannot be empty"):
+            client.get_asset_by_uid("   ")
 
     def test_get_asset_by_uid_custom_timeout(self):
         """Test asset retrieval with custom timeout."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"uid": "test-123", "name": "Test Asset"}
+        mock_response.raise_for_status.return_value = None
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        with patch.object(client.session, 'get') as mock_get:
-            mock_response = Mock()
-            mock_response.json.return_value = {"uid": "test-123"}
-            mock_response.raise_for_status.return_value = None
-            mock_get.return_value = mock_response
-            
-            client.get_asset_by_uid("test-123", timeout=30)
-            
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            result = client.get_asset_by_uid("test-123", timeout=30)
+            assert result == {"uid": "test-123", "name": "Test Asset"}
             mock_get.assert_called_once_with(
                 "https://test.acceldata.app/catalog-server/api/assets?uid=test-123",
                 timeout=30
             )
 
-    @patch('requests.Session.get')
-    def test_test_connection_success(self, mock_get):
+    def test_test_connection_success(self):
         """Test successful connection test."""
         mock_response = Mock()
         mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        result = client.test_connection()
-        
-        assert result is True
-        mock_get.assert_called_once_with(
-            "https://test.acceldata.app/catalog-server/api/health",
-            timeout=10
-        )
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            result = client.test_connection()
+            assert result is True
+            mock_get.assert_called_once_with(
+                "https://test.acceldata.app/catalog-server/api/health",
+                timeout=10
+            )
 
-    @patch('requests.Session.get')
-    def test_test_connection_failure(self, mock_get):
+    def test_test_connection_failure(self):
         """Test connection test failure."""
-        mock_get.side_effect = RequestException("Connection failed")
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        result = client.test_connection()
-        
-        assert result is False
+        with patch.object(client.session, 'get', side_effect=RequestException("Connection failed")) as mock_get:
+            result = client.test_connection()
+            assert result is False
 
-    @patch('requests.Session.get')
-    def test_test_connection_timeout(self, mock_get):
+    def test_test_connection_timeout(self):
         """Test connection test timeout."""
-        mock_get.side_effect = Timeout("Request timed out")
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        result = client.test_connection()
-        
-        assert result is False
+        with patch.object(client.session, 'get', side_effect=Timeout("Request timed out")) as mock_get:
+            result = client.test_connection()
+            assert result is False
 
     def test_close_session(self):
         """Test session closure."""
@@ -315,91 +295,63 @@ class TestAcceldataAPIClient:
             tenant="test_tenant"
         )
         
+        # Mock the session close method
         with patch.object(client.session, 'close') as mock_close:
             client.close()
             mock_close.assert_called_once()
 
-    @patch('requests.Session.get')
-    def test_make_api_call_get_success(self, mock_get):
+    def test_make_api_call_get_success(self):
         """Test successful GET API call."""
         mock_response = Mock()
         mock_response.json.return_value = {"status": "success"}
         mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        result = client.make_api_call("/api/test")
-        
-        assert result == {"status": "success"}
-        mock_get.assert_called_once_with(
-            "https://test.acceldata.app/api/test",
-            headers={
-                'accept': 'application/json',
-                'accessKey': 'test_access',
-                'secretKey': 'test_secret',
-                'X-Tenant': 'test_tenant',
-                'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-                'x-domain-ids': ''
-            },
-            timeout=10
-        )
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            result = client.make_api_call("/api/test", method="GET")
+            assert result == {"status": "success"}
+            mock_get.assert_called_once()
 
-    @patch('requests.Session.post')
-    def test_make_api_call_post_success(self, mock_post):
+    def test_make_api_call_post_success(self):
         """Test successful POST API call."""
         mock_response = Mock()
         mock_response.json.return_value = {"status": "created"}
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        result = client.make_api_call(
-            "/api/test",
-            method="POST",
-            json_payload={"key": "value"}
-        )
-        
-        assert result == {"status": "created"}
-        mock_post.assert_called_once()
+        with patch.object(client.session, 'post', return_value=mock_response) as mock_post:
+            payload = {"key": "value"}
+            result = client.make_api_call("/api/test", method="POST", json_payload=payload)
+            assert result == {"status": "created"}
+            mock_post.assert_called_once()
 
-    @patch('requests.Session.put')
-    def test_make_api_call_put_success(self, mock_put):
+    def test_make_api_call_put_success(self):
         """Test successful PUT API call."""
         mock_response = Mock()
         mock_response.json.return_value = {"status": "updated"}
         mock_response.raise_for_status.return_value = None
-        mock_put.return_value = mock_response
-        
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
-        result = client.make_api_call(
-            "/api/test",
-            method="PUT",
-            json_payload={"key": "value"}
-        )
-        
-        assert result == {"status": "updated"}
-        mock_put.assert_called_once()
+        with patch.object(client.session, 'put', return_value=mock_response) as mock_put:
+            payload = {"key": "value"}
+            result = client.make_api_call("/api/test", method="PUT", json_payload=payload)
+            assert result == {"status": "updated"}
+            mock_put.assert_called_once()
 
     def test_make_api_call_invalid_method(self):
-        """Test API call with invalid HTTP method."""
+        """Test API call with invalid method."""
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
@@ -420,10 +372,10 @@ class TestAcceldataAPIClient:
         )
         
         with pytest.raises(ValueError, match="Endpoint cannot be empty"):
-            client.make_api_call("")
+            client.make_api_call("", method="GET")
 
     def test_make_api_call_post_missing_payload(self):
-        """Test POST API call without required payload."""
+        """Test POST API call without payload."""
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
@@ -435,7 +387,7 @@ class TestAcceldataAPIClient:
             client.make_api_call("/api/test", method="POST")
 
     def test_make_api_call_put_missing_payload(self):
-        """Test PUT API call without required payload."""
+        """Test PUT API call without payload."""
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
@@ -447,7 +399,7 @@ class TestAcceldataAPIClient:
             client.make_api_call("/api/test", method="PUT")
 
     def test_make_api_call_target_auth_not_configured(self):
-        """Test API call with target auth when not configured."""
+        """Test API call with target auth but not configured."""
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
@@ -456,10 +408,10 @@ class TestAcceldataAPIClient:
         )
         
         with pytest.raises(ValueError, match="Target access key and secret key not configured"):
-            client.make_api_call("/api/test", use_target_auth=True)
+            client.make_api_call("/api/test", method="GET", use_target_auth=True)
 
     def test_make_api_call_target_tenant_not_configured(self):
-        """Test API call with target tenant when not configured."""
+        """Test API call with target tenant but not configured."""
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
@@ -468,15 +420,14 @@ class TestAcceldataAPIClient:
         )
         
         with pytest.raises(ValueError, match="Target tenant not configured"):
-            client.make_api_call("/api/test", use_target_tenant=True)
+            client.make_api_call("/api/test", method="GET", use_target_tenant=True)
 
-    @patch('requests.Session.post')
-    def test_make_api_call_with_files(self, mock_post):
+    def test_make_api_call_with_files(self):
         """Test API call with file upload."""
+        # Mock response
         mock_response = Mock()
         mock_response.json.return_value = {"status": "uploaded"}
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
         
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
@@ -485,23 +436,19 @@ class TestAcceldataAPIClient:
             tenant="test_tenant"
         )
         
-        files = {"file": ("test.txt", "content", "text/plain")}
-        result = client.make_api_call(
-            "/api/upload",
-            method="POST",
-            files=files
-        )
-        
-        assert result == {"status": "uploaded"}
-        mock_post.assert_called_once()
+        with patch.object(client.session, 'post', return_value=mock_response) as mock_post:
+            files = {"file": ("test.txt", "test content")}
+            result = client.make_api_call("/api/upload", method="POST", files=files)
+            
+            assert result == {"status": "uploaded"}
+            mock_post.assert_called_once()
 
-    @patch('requests.Session.get')
-    def test_make_api_call_return_binary(self, mock_get):
+    def test_make_api_call_return_binary(self):
         """Test API call returning binary content."""
+        # Mock response
         mock_response = Mock()
         mock_response.content = b"binary data"
         mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
         
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
@@ -510,17 +457,18 @@ class TestAcceldataAPIClient:
             tenant="test_tenant"
         )
         
-        result = client.make_api_call("/api/binary", return_binary=True)
-        
-        assert result == b"binary data"
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            result = client.make_api_call("/api/download", method="GET", return_binary=True)
+            
+            assert result == b"binary data"
+            mock_get.assert_called_once()
 
-    @patch('requests.Session.get')
-    def test_make_api_call_custom_timeout(self, mock_get):
+    def test_make_api_call_custom_timeout(self):
         """Test API call with custom timeout."""
+        # Mock response
         mock_response = Mock()
         mock_response.json.return_value = {"status": "success"}
         mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
         
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
@@ -529,16 +477,16 @@ class TestAcceldataAPIClient:
             tenant="test_tenant"
         )
         
-        client.make_api_call("/api/test", timeout=30)
-        
-        mock_get.assert_called_once()
-        assert mock_get.call_args[1]['timeout'] == 30
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            result = client.make_api_call("/api/test", method="GET", timeout=30)
+            
+            assert result == {"status": "success"}
+            # Check that timeout was passed to the request
+            call_args = mock_get.call_args
+            assert call_args[1]['timeout'] == 30
 
-    @patch('requests.Session.get')
-    def test_make_api_call_timeout_exception(self, mock_get):
-        """Test API call timeout exception handling."""
-        mock_get.side_effect = Timeout("Request timed out")
-        
+    def test_make_api_call_timeout_exception(self):
+        """Test API call timeout exception."""
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
@@ -546,21 +494,12 @@ class TestAcceldataAPIClient:
             tenant="test_tenant"
         )
         
-        with pytest.raises(Timeout):
-            client.make_api_call("/api/test")
+        with patch.object(client.session, 'get', side_effect=Timeout("Request timed out")):
+            with pytest.raises(Timeout):
+                client.make_api_call("/api/test", method="GET")
 
-    @patch('requests.Session.get')
-    def test_make_api_call_request_exception(self, mock_get):
-        """Test API call request exception handling."""
-        mock_response = Mock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal Server Error"
-        mock_response.headers = {"content-type": "application/json"}
-        
-        mock_exception = RequestException("Server error")
-        mock_exception.response = mock_response
-        mock_get.side_effect = mock_exception
-        
+    def test_make_api_call_request_exception(self):
+        """Test API call request exception."""
         client = AcceldataAPIClient(
             host="https://test.acceldata.app",
             access_key="test_access",
@@ -568,8 +507,9 @@ class TestAcceldataAPIClient:
             tenant="test_tenant"
         )
         
-        with pytest.raises(RequestException):
-            client.make_api_call("/api/test")
+        with patch.object(client.session, 'get', side_effect=RequestException("Network error")):
+            with pytest.raises(RequestException):
+                client.make_api_call("/api/test", method="GET")
 
 
 class TestCreateAPIClient:

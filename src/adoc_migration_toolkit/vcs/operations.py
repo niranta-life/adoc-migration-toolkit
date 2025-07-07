@@ -424,12 +424,16 @@ def is_valid_remote_url(url: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
+    if not url or not url.strip():
+        return False
+    
     # Basic URL validation patterns
     https_pattern = r'^https?://[^\s/$.?#].[^\s]*$'
     ssh_pattern = r'^(ssh://)?[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(:[0-9]+)?(/[^\s]*)?$'
     git_pattern = r'^git@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}:[^\s]*$'
+    user_ssh_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}:[^\s]*$'
     
-    return bool(re.match(https_pattern, url) or re.match(ssh_pattern, url) or re.match(git_pattern, url))
+    return bool(re.match(https_pattern, url) or re.match(ssh_pattern, url) or re.match(git_pattern, url) or re.match(user_ssh_pattern, url))
 
 
 def determine_auth_method(url: str) -> str:

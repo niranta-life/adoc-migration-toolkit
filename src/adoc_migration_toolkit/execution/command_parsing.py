@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from adoc_migration_toolkit.shared import globals
 from ..shared.file_utils import get_output_file_path
+import shlex
 
 def parse_api_command(command: str) -> tuple:
     """Parse an API command string into components.
@@ -666,4 +667,44 @@ def parse_vcs_push_command(command: str) -> bool:
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'vcs-push':
         return False
-    return True 
+    return True
+
+def parse_create_lineage_command(command: str) -> tuple:
+    """Parse a create-lineage command string into components.
+    
+    Args:
+        command: Command string like "create-lineage <csv_file> [--dry-run] [--quiet] [--verbose]"
+        
+    Returns:
+        Tuple of (csv_file, dry_run, quiet_mode, verbose_mode)
+    """
+    parts = shlex.split(command.strip())
+    if not parts or parts[0].lower() != 'create-lineage':
+        return None, False, False, False
+    
+    if len(parts) < 2:
+        raise ValueError("CSV file path is required for create-lineage command")
+    
+    csv_file = parts[1]
+    # Check if the CSV file path is actually a flag (indicating no file was provided)
+    if csv_file.startswith('--'):
+        raise ValueError("CSV file path is required for create-lineage command")
+    
+    dry_run = False
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags with proper precedence
+    # Process flags in order to handle precedence correctly
+    for i in range(2, len(parts)):
+        flag = parts[i].lower()
+        if flag == '--dry-run':
+            dry_run = True
+        elif flag == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+        elif flag == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+    
+    return csv_file, dry_run, quiet_mode, verbose_mode 

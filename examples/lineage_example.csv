@@ -1,0 +1,6 @@
+Group ID,Step Order,Source Asset ID,Source Column,Target Asset ID,Target Column,Relationship Type,Transformation,Notes
+G1,1,ADLS_Demo.adlsdemo_ach_entry_details,col1,Customer_Dummy_Data.Customer_Dummy_Data,key1,upstream,join,Join on col1, col2
+G1,1,ADLS_Demo.adlsdemo_ach_entry_details,col2,Customer_Dummy_Data.Customer_Dummy_Data,key2,upstream,join,Join on col1, col2
+G2,1,ADLS_Demo.ingestion_cns_raw_feed1,id,Customer_Dummy_Data.Customer_Dummy_Data,join_id,upstream,join,
+,2,Customer_Dummy_Data.Customer_Dummy_Data,key1,ADLS_Demo.lei_updates_combined,final_key,downstream,filter(key1 > 100),Filtered output
+,,ADLS_Demo.lei_updates_combined,,ADLS_Test.cust_sales_demo,,downstream,,,Full table 

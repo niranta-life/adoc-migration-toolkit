@@ -109,6 +109,10 @@ def interactive(env_file, log_level, verbose):
     policy-xfr [--input input_dir] --source-env-string source --target-env-string target [--quiet] [--verbose]
     
     \b
+    # Lineage Commands
+    create-lineage <csv_file> [--dry-run] [--quiet] [--verbose]
+    
+    \b
     # REST API Commands
     GET /catalog-server/api/assets?uid=123
     PUT /catalog-server/api/assets {"key": "value"}

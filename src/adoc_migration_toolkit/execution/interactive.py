@@ -301,6 +301,32 @@ def show_interactive_help():
     print("      • Generates <output-dir>/asset-export/asset_uids.csv and <output-dir>/policy-import/segmented_spark_uids.csv")
     print("      • Shows detailed processing statistics upon completion")
     
+    print(f"\n{BOLD}🔗 LINEAGE COMMANDS:{RESET}")
+    print(f"  {BOLD}create-lineage{RESET} <csv_file> [--dry-run] [--quiet] [--verbose]")
+    print("    Description: Create lineage relationships between assets from CSV file")
+    print("    Arguments:")
+    print("      csv_file: Path to CSV file containing lineage data")
+    print("      --dry-run: Validate CSV and assets without creating lineage")
+    print("      --quiet: Suppress console output, show only summary")
+    print("      --verbose: Show detailed output including API calls")
+    print("    Examples:")
+    print("      create-lineage lineage_data.csv")
+    print("      create-lineage lineage.csv --dry-run --verbose")
+    print("      create-lineage data/lineage.csv --quiet")
+    print("    CSV Format:")
+    print("      Required columns: Source Asset ID, Target Asset ID, Relationship Type")
+    print("      Optional columns: Group ID, Step Order, Source Column, Target Column, Transformation, Notes")
+    print("      Relationship Type: 'upstream' (source → target) or 'downstream' (target ← source)")
+    print("    Behavior:")
+    print("      • Parses CSV file with lineage relationship data")
+    print("      • Validates that all referenced assets exist in the environment")
+    print("      • Groups lineage by target asset and relationship type")
+    print("      • Creates lineage using POST /torch-pipeline/api/assets/:assetId/lineage")
+    print("      • Supports complex lineage with grouping and multi-step operations")
+    print("      • Generates process names and descriptions from transformation data")
+    print("      • Provides comprehensive validation and error reporting")
+    print("      • Dry-run mode validates without making API calls")
+    
     print(f"\n{BOLD}🔧 VCS COMMANDS:{RESET}")
     print(f"  {BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
     print("    Description: Configure enterprise VCS settings (Git/Mercurial/Subversion, HTTPS/SSH, proxy)")
@@ -686,6 +712,7 @@ def run_interactive(args):
                     'asset-profile-export', 'asset-profile-import',
                     'asset-config-export', 'asset-list-export',
                     'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
+                    'create-lineage',
                     'vcs-config',
                     'vcs-init',
                     'vcs-pull',
@@ -854,6 +881,15 @@ def run_interactive(args):
                         # Use global output dir
                         output_dir = str(globals.GLOBAL_OUTPUT_DIR) if getattr(globals, 'GLOBAL_OUTPUT_DIR', None) else None
                         execute_vcs_push(command, output_dir=output_dir)
+                    continue
+                
+                # Check if it's a create-lineage command
+                if command.lower().startswith('create-lineage'):
+                    from .command_parsing import parse_create_lineage_command
+                    from .lineage_operations import execute_create_lineage
+                    csv_file, dry_run, quiet_mode, verbose_mode = parse_create_lineage_command(command)
+                    if csv_file:
+                        execute_create_lineage(csv_file, client, logger, dry_run, quiet_mode, verbose_mode)
                     continue
                 
                 # Parse the command for GET/PUT requests
