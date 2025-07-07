@@ -20,6 +20,7 @@ start multiple migrations, pause, and resume them independently.
 - [Policy Management](#policy-management)
 - [Segments Management](#segments-management)
 - [Utility Commands](#utility-commands)
+- [Version Control System (VCS)](#version-control-system-vcs)
 - [Parallel Processing](#parallel-processing)
 - [Testing](#testing)
 - [File Structure](#file-structure)
@@ -823,6 +824,251 @@ echo '{"key":"value"}' | ./bin/sjson
 - Handles large JSON files efficiently
 - Provides consistent indentation and formatting
 
+## Version Control System (VCS)
+
+The ADOC Migration Toolkit includes comprehensive Version Control System (VCS) integration for managing migration artifacts and configurations. The VCS commands provide Git-based version control capabilities with support for authentication, proxy settings, and automated workflow management.
+
+### VCS Commands Overview
+
+The toolkit provides four main VCS commands for managing repositories:
+
+- **`vcs-config`**: Configure VCS repository settings and authentication
+- **`vcs-init`**: Initialize a new Git repository in the output directory
+- **`vcs-pull`**: Pull latest changes from the remote repository
+- **`vcs-push`**: Push local changes to the remote repository
+
+### VCS Configuration (`vcs-config`)
+
+Configure VCS repository settings including remote URL, authentication, and connection options.
+
+```bash
+# Interactive configuration mode
+vcs-config
+
+# Command-line configuration
+vcs-config --vcs-type git --remote-url https://github.com/user/repo.git
+vcs-config --vcs-type git --remote-url git@github.com:user/repo.git --ssh-key-path ~/.ssh/id_rsa
+vcs-config --vcs-type git --remote-url https://enterprise.gitlab.com/repo.git --username user --token <token>
+```
+
+**Purpose:**
+- **Repository Setup**: Configure remote repository connection settings
+- **Authentication Management**: Set up various authentication methods
+- **Connection Options**: Configure proxy settings and SSH options
+- **Environment Integration**: Integrate with existing Git workflows
+
+**Supported Authentication Methods:**
+
+**HTTPS with Username/Token:**
+```bash
+vcs-config --vcs-type git --remote-url https://github.com/user/repo.git --username user --token <token>
+```
+- **Use Case**: GitHub, GitLab, Bitbucket with personal access tokens
+- **Security**: Token-based authentication with username
+- **Configuration**: Stored securely in local configuration
+
+**SSH with Key Authentication:**
+```bash
+vcs-config --vcs-type git --remote-url git@github.com:user/repo.git --ssh-key-path ~/.ssh/id_rsa
+```
+- **Use Case**: SSH-based Git repositories
+- **Security**: SSH key-based authentication
+- **Options**: Support for passphrase-protected keys
+
+**Proxy Configuration:**
+```bash
+vcs-config --vcs-type git --remote-url https://github.com/user/repo.git --proxy-url http://proxy:8080 --proxy-username proxy_user --proxy-password proxy_pass
+```
+- **Use Case**: Enterprise environments with proxy requirements
+- **Features**: HTTP/HTTPS proxy support with authentication
+- **Configuration**: Proxy settings stored with repository configuration
+
+**Interactive Mode Features:**
+- **Step-by-step Configuration**: Guided setup process
+- **Validation**: Real-time validation of settings
+- **Default Values**: Smart defaults for common configurations
+- **Error Handling**: Clear error messages and recovery options
+
+**Configuration Storage:**
+- **Local Configuration**: Settings stored in `~/.adoc_migration_config.json`
+- **Security**: Sensitive data (tokens, passwords) stored securely
+- **Persistence**: Configuration persists across sessions
+- **Validation**: Automatic validation of stored settings
+
+### Repository Initialization (`vcs-init`)
+
+Initialize a new Git repository in the output directory for version control of migration artifacts.
+
+```bash
+# Initialize in current output directory
+vcs-init
+
+# Initialize in specific directory
+vcs-init /path/to/repository
+```
+
+**Purpose:**
+- **Repository Creation**: Set up Git repository for migration artifacts
+- **Initial Commit**: Create initial commit with current state
+- **Branch Management**: Set up main branch and initial structure
+- **Workflow Integration**: Prepare repository for collaborative workflows
+
+**Features:**
+- **Directory Creation**: Creates repository directory if it doesn't exist
+- **Git Initialization**: Runs `git init` with proper configuration
+- **Initial Commit**: Creates first commit with current files
+- **Branch Setup**: Configures main branch as default
+- **Ignore File**: Creates `.gitignore` with appropriate exclusions
+
+**Repository Structure:**
+```
+<repository>/
+├── .git/                    # Git repository data
+├── .gitignore              # Git ignore rules
+├── asset-export/           # Asset export files
+├── asset-import/           # Asset import files
+├── policy-export/          # Policy export files
+└── policy-import/          # Policy import files
+```
+
+**Git Configuration:**
+- **User Configuration**: Sets up Git user name and email
+- **Ignore Rules**: Excludes temporary files and sensitive data
+- **Branch Strategy**: Uses main branch as default
+- **Commit Messages**: Descriptive commit messages for migration artifacts
+
+### Pull Operations (`vcs-pull`)
+
+Pull latest changes from the remote repository to synchronize with team changes.
+
+```bash
+# Pull latest changes
+vcs-pull
+```
+
+**Purpose:**
+- **Synchronization**: Get latest changes from remote repository
+- **Conflict Resolution**: Handle merge conflicts automatically
+- **Team Collaboration**: Integrate changes from other team members
+- **Backup Recovery**: Restore from remote repository if needed
+
+**Features:**
+- **Automatic Fetch**: Fetches latest changes from remote
+- **Merge Strategy**: Uses merge strategy for conflict resolution
+- **Conflict Handling**: Automatic conflict resolution where possible
+- **Status Reporting**: Detailed status of pull operations
+- **Error Recovery**: Comprehensive error handling and recovery
+
+**Pull Scenarios:**
+
+**Clean Pull (No Conflicts):**
+- Fetches and merges changes automatically
+- Updates local repository with remote changes
+- Reports success with summary of changes
+
+**Merge Conflicts:**
+- Detects and reports conflicts
+- Provides guidance for manual resolution
+- Maintains repository integrity during conflicts
+
+**Authentication Issues:**
+- Validates stored authentication settings
+- Provides clear error messages for auth problems
+- Guides user through reconfiguration if needed
+
+### Push Operations (`vcs-push`)
+
+Push local changes to the remote repository to share migration artifacts with the team.
+
+```bash
+# Push local changes
+vcs-push
+```
+
+**Purpose:**
+- **Change Sharing**: Share local changes with remote repository
+- **Team Collaboration**: Make changes available to team members
+- **Backup**: Create remote backup of migration artifacts
+- **Version Control**: Maintain version history of migration changes
+
+**Features:**
+- **Pre-push Validation**: Validates repository state before pushing
+- **Conflict Detection**: Checks for remote changes before pushing
+- **Authentication Verification**: Ensures proper authentication
+- **Status Reporting**: Detailed push operation status
+- **Error Handling**: Comprehensive error handling and recovery
+
+**Push Workflow:**
+
+**Pre-push Checks:**
+1. **Repository Validation**: Ensures repository is properly initialized
+2. **Authentication Check**: Verifies stored authentication settings
+3. **Remote Status**: Checks for remote changes that need to be pulled
+4. **Local Changes**: Validates that there are changes to push
+
+**Push Process:**
+1. **Remote Update**: Fetches latest remote changes
+2. **Conflict Resolution**: Handles any merge conflicts
+3. **Push Execution**: Pushes local changes to remote
+4. **Status Reporting**: Reports push results and statistics
+
+**Error Scenarios:**
+
+**Authentication Failures:**
+- Clear error messages for auth problems
+- Guidance for reconfiguring authentication
+- Support for different auth methods
+
+**Merge Conflicts:**
+- Automatic conflict detection
+- Guidance for manual resolution
+- Repository state preservation
+
+**Network Issues:**
+- Retry logic for temporary network problems
+- Clear error messages for connectivity issues
+- Recovery guidance for persistent problems
+
+### VCS Integration Benefits
+
+**Workflow Integration:**
+- **Team Collaboration**: Share migration artifacts with team members
+- **Version History**: Track changes and rollback if needed
+- **Backup Strategy**: Remote backup of migration configurations
+- **Audit Trail**: Complete history of migration changes
+
+**Security Features:**
+- **Secure Storage**: Sensitive data stored securely
+- **Authentication Support**: Multiple authentication methods
+- **Proxy Support**: Enterprise proxy configuration
+- **Access Control**: Repository-level access control
+
+**Automation Support:**
+- **CI/CD Integration**: Integrate with continuous integration workflows
+- **Automated Backups**: Regular backup of migration artifacts
+- **Change Tracking**: Automatic tracking of configuration changes
+- **Deployment Integration**: Integrate with deployment pipelines
+
+### Best Practices
+
+**Repository Management:**
+- **Regular Commits**: Commit changes frequently with descriptive messages
+- **Branch Strategy**: Use feature branches for major changes
+- **Pull Before Push**: Always pull before pushing to avoid conflicts
+- **Backup Strategy**: Use remote repository as backup
+
+**Security Considerations:**
+- **Token Management**: Use personal access tokens with appropriate permissions
+- **SSH Keys**: Use SSH keys for enhanced security
+- **Proxy Configuration**: Configure proxies for enterprise environments
+- **Access Control**: Limit repository access to authorized users
+
+**Workflow Integration:**
+- **Team Coordination**: Coordinate with team members on repository changes
+- **Change Documentation**: Document significant changes in commit messages
+- **Testing**: Test VCS operations in development environment
+- **Monitoring**: Monitor repository status and health
+
 ## Parallel Processing
 
 The ADOC Migration Toolkit includes parallel processing capabilities for significantly faster export operations on large datasets. Parallel processing is available for export commands that process multiple items sequentially, providing substantial performance improvements.
@@ -1459,6 +1705,74 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Saves configuration to ~/.adoc_migration_config.json
       • Persists across multiple interactive sessions
       • Can be changed anytime with another set-output-dir command
+
+🔧 VERSION CONTROL COMMANDS:
+  vcs-config [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]
+    Description: Configure VCS repository settings and authentication
+    Arguments:
+      --vcs-type: VCS type (default: git)
+      --remote-url: Remote repository URL
+      --username: Username for authentication
+      --token: Authentication token
+      --ssh-key-path: Path to SSH private key
+      --ssh-passphrase: SSH key passphrase
+      --proxy-url: Proxy server URL
+      --proxy-username: Proxy username
+      --proxy-password: Proxy password
+    Examples:
+      vcs-config  # Interactive mode
+      vcs-config --vcs-type git --remote-url https://github.com/user/repo.git
+      vcs-config --vcs-type git --remote-url git@github.com:user/repo.git --ssh-key-path ~/.ssh/id_rsa
+      vcs-config --vcs-type git --remote-url https://enterprise.gitlab.com/repo.git --username user --token <token>
+    Features:
+      • Interactive configuration mode with guided setup
+      • Support for HTTPS with username/token authentication
+      • Support for SSH with key-based authentication
+      • Proxy configuration for enterprise environments
+      • Secure storage of authentication credentials
+      • Validation of repository settings
+      • Configuration persistence across sessions
+
+  vcs-init [<base directory>]
+    Description: Initialize a new Git repository in the output directory
+    Arguments:
+      base directory: Optional directory path (defaults to current output directory)
+    Examples:
+      vcs-init
+      vcs-init /path/to/repository
+    Features:
+      • Creates Git repository in specified directory
+      • Sets up initial commit with current files
+      • Configures main branch as default
+      • Creates .gitignore with appropriate exclusions
+      • Sets up Git user configuration
+      • Validates repository initialization
+      • Provides detailed status reporting
+
+  vcs-pull
+    Description: Pull latest changes from the remote repository
+    Examples:
+      vcs-pull
+    Features:
+      • Fetches and merges latest changes from remote
+      • Handles merge conflicts automatically where possible
+      • Validates authentication before pulling
+      • Provides detailed status of pull operations
+      • Error recovery and guidance for issues
+      • Requires VCS configuration from 'vcs-config' command
+
+  vcs-push
+    Description: Push local changes to the remote repository
+    Examples:
+      vcs-push
+    Features:
+      • Pushes local changes to remote repository
+      • Pre-push validation of repository state
+      • Conflict detection and resolution guidance
+      • Authentication verification before pushing
+      • Detailed push operation status reporting
+      • Requires VCS configuration from 'vcs-config' command
+      • Requires a repository initialized with 'vcs-init' command
 
 🚀 GUIDED MIGRATION COMMANDS:
   guided-migration <name>
