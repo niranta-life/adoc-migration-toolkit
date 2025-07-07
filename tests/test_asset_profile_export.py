@@ -17,10 +17,9 @@ class TestAssetProfileExport:
 
     def test_create_progress_bar(self):
         """Test that create_progress_bar returns a tqdm instance."""
-        from tqdm import tqdm
-        
+        from tqdm.std import tqdm as tqdm_type
         progress_bar = create_progress_bar(total=10, desc="Test", unit="items")
-        assert isinstance(progress_bar, tqdm)
+        assert isinstance(progress_bar, tqdm_type)
         assert progress_bar.total == 10
         assert progress_bar.desc == "Test"
         assert progress_bar.unit == "items"

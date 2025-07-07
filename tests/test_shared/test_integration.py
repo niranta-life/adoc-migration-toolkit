@@ -80,18 +80,13 @@ class TestSharedModuleIntegration:
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
         # Test API call
-        with patch('requests.Session.request') as mock_request:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"status": "success"}
-            mock_request.return_value = mock_response
-            
-            response = client.make_api_call("/test")
-            
-            # Verify API call was made
-            mock_request.assert_called_once()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "success"}
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            response = client.make_api_call("/test", method="GET")
+            mock_get.assert_called_once()
             assert response == {"status": "success"}
     
     def test_file_utils_and_logging_integration(self):
@@ -122,18 +117,13 @@ class TestSharedModuleIntegration:
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
         # Test API call with logging
-        with patch('requests.Session.request') as mock_request:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"data": "test"}
-            mock_request.return_value = mock_response
-            
-            response = client.make_api_call("/test")
-            
-            # Verify API call was made
-            mock_request.assert_called_once()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": "test"}
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            response = client.make_api_call("/test", method="GET")
+            mock_get.assert_called_once()
             assert response == {"data": "test"}
     
     def test_complete_workflow_integration(self):
@@ -142,9 +132,7 @@ class TestSharedModuleIntegration:
         mock_logger = MagicMock()
         output_dir = os.path.join(self.temp_dir, "output")
         result = globals.set_global_output_directory(output_dir, mock_logger)
-        
         assert result is True
-        
         # Create API client
         client = api_client.AcceldataAPIClient(
             host="https://api.example.com",
@@ -152,25 +140,20 @@ class TestSharedModuleIntegration:
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
         # Simulate API call
-        with patch('requests.Session.request') as mock_request:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"data": [{"id": 1, "name": "test"}]}
-            mock_request.return_value = mock_response
-            
-            response = client.make_api_call("/data")
-            
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": [{"id": 1, "name": "test"}]}
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            response = client.make_api_call("/data", method="GET")
+            mock_get.assert_called_once()
             # Generate output file path using file utils
             test_csv_file = os.path.join(self.temp_dir, "test.csv")
             output_file = file_utils.get_output_file_path(
                 csv_file=test_csv_file,
                 default_filename="data.json"
             )
-            
             assert isinstance(output_file, Path)
-            # Handle path resolution by comparing resolved paths
             assert output_file.resolve().parts[:len(Path(output_dir).resolve().parts)] == Path(output_dir).resolve().parts
             assert response == {"data": [{"id": 1, "name": "test"}]}
     
@@ -183,17 +166,13 @@ class TestSharedModuleIntegration:
             secret_key="test_secret",
             tenant="test_tenant"
         )
-        
         # Test that API client handles network errors gracefully
-        with patch('requests.Session.request', side_effect=Exception("Network error")):
+        with patch.object(client.session, 'get', side_effect=Exception("Network error")):
             try:
-                response = client.make_api_call("/test")
-                # The client should handle the exception and return None
+                response = client.make_api_call("/test", method="GET")
                 assert response is None
             except Exception:
-                # If an exception is raised, that's also acceptable behavior
                 pass
-        
         # Test file utils error handling
         with patch('pathlib.Path.mkdir', side_effect=PermissionError("Permission denied")):
             test_csv_file = os.path.join(self.temp_dir, "test.csv")
