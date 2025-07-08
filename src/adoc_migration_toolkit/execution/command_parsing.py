@@ -262,25 +262,23 @@ def parse_asset_config_export_command(command: str) -> tuple:
     """Parse an asset-config-export command string into components.
     
     Args:
-        command: Command string like "asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]"
+        command: Command string like "asset-config-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]"
         
     Returns:
-        Tuple of (csv_file, output_file, quiet_mode, verbose_mode)
+        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-config-export':
-        return None, None, False, False
+        return None, None, False, False, False
     
-    if len(parts) < 2:
-        raise ValueError("CSV file path is required for asset-config-export command")
-    
-    csv_file = parts[1]
+    csv_file = None
     output_file = None
     quiet_mode = False
     verbose_mode = False
+    parallel_mode = False
     
     # Check for flags and options
-    i = 2
+    i = 1
     while i < len(parts):
         if parts[i] == '--output-file' and i + 1 < len(parts):
             output_file = parts[i + 1]
@@ -294,14 +292,45 @@ def parse_asset_config_export_command(command: str) -> tuple:
             verbose_mode = True
             quiet_mode = False  # Verbose overrides quiet
             parts.remove('--verbose')
+        elif parts[i] == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
+        elif i == 1 and not parts[i].startswith('--'):
+            # This is the CSV file argument (first non-flag argument)
+            csv_file = parts[i]
+            parts.remove(parts[i])
         else:
             i += 1
+    
+    # Set default CSV file if not provided
+    if not csv_file:
+        from ..shared import globals
+        if globals.GLOBAL_OUTPUT_DIR:
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-export.csv")
+        else:
+            csv_file = "asset-export/asset-all-export.csv"
+        
+        # Check if the default file exists
+        import os
+        if not os.path.exists(csv_file):
+            error_msg = f"Default CSV file not found: {csv_file}"
+            if globals.GLOBAL_OUTPUT_DIR:
+                error_msg += f"\n💡 Please run 'asset-list-export' first to generate the asset-all-export.csv file"
+                error_msg += f"\n   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-export/asset-all-export.csv"
+            else:
+                error_msg += f"\n💡 Please run 'asset-list-export' first to generate the asset-all-export.csv file"
+                error_msg += f"\n   Expected location: asset-export/asset-all-export.csv"
+            raise FileNotFoundError(error_msg)
     
     # Generate default output file if not provided
     if not output_file:
         output_file = get_output_file_path(csv_file, "asset-config-export.csv", category="asset-export")
     
-    return csv_file, output_file, quiet_mode, verbose_mode
+    # For parallel mode, default to quiet mode unless verbose is explicitly specified
+    if parallel_mode and not verbose_mode and not quiet_mode:
+        quiet_mode = True
+    
+    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode
 
 def parse_asset_list_export_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
@@ -733,5 +762,67 @@ def parse_asset_tag_import_command(command: str) -> tuple:
                 print("💡 Use 'asset-tag-import --help' for usage information")
                 return None, False, False, False
             i += 1
+    
+    return csv_file, quiet_mode, verbose_mode, parallel_mode 
+
+def parse_asset_config_import_command(command: str) -> tuple:
+    """Parse an asset-config-import command string into components.
+    
+    Args:
+        command: Command string like "asset-config-import [<csv_file>] [--quiet] [--verbose] [--parallel]"
+        
+    Returns:
+        Tuple of (csv_file, quiet_mode, verbose_mode, parallel_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'asset-config-import':
+        return None, False, False, False
+    
+    csv_file = None
+    quiet_mode = False
+    verbose_mode = False
+    parallel_mode = False
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        arg = parts[i]
+        if arg == '--quiet' or arg == '-q':
+            quiet_mode = True
+            i += 1
+        elif arg == '--verbose' or arg == '-v':
+            verbose_mode = True
+            i += 1
+        elif arg == '--parallel':
+            parallel_mode = True
+            i += 1
+        elif arg == '--help' or arg == '-h':
+            print("\n" + "="*60)
+            print("ASSET-CONFIG-IMPORT COMMAND HELP")
+            print("="*60)
+            print("Usage: asset-config-import [<csv_file>] [--quiet] [--verbose] [--parallel]")
+            print("\nArguments:")
+            print("  csv_file: Path to CSV file with target_uid and config_json columns (optional)")
+            print("\nOptions:")
+            print("  --quiet, -q                   Quiet mode (shows progress bars)")
+            print("  --verbose, -v                 Verbose mode (shows HTTP details)")
+            print("  --parallel                    Use parallel processing (max 5 threads)")
+            print("  --help, -h                    Show this help message")
+            print("\nExamples:")
+            print("  asset-config-import")
+            print("  asset-config-import /path/to/asset-config-import-ready.csv")
+            print("  asset-config-import --quiet --parallel")
+            print("  asset-config-import --verbose")
+            print("="*60)
+            return None, False, False, False
+        else:
+            # This should be the CSV file path
+            if csv_file is None:
+                csv_file = arg
+                i += 1
+            else:
+                print(f"❌ Unknown argument: {arg}")
+                print("💡 Use 'asset-config-import --help' for usage information")
+                return None, False, False, False
     
     return csv_file, quiet_mode, verbose_mode, parallel_mode 

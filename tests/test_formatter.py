@@ -559,6 +559,134 @@ class TestPolicyExportFormatter:
         assert (formatter.policy_export_dir / "segmented_spark_uids.csv").exists()
         assert (formatter.asset_export_dir / "asset_uids.csv").exists()
 
+    def test_process_asset_config_export_csv_success(self, temp_dir):
+        """Test successful processing of asset-config-export.csv."""
+        from src.adoc_migration_toolkit.execution.formatter import PolicyExportFormatter
+        
+        # Create asset-export directory and CSV file
+        asset_export_dir = temp_dir / "asset-export"
+        asset_export_dir.mkdir(parents=True, exist_ok=True)
+        
+        csv_file = asset_export_dir / "asset-config-export.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['target_uid', 'config_json'])
+            writer.writerow(['PROD_DB.asset1', '{"config": "data"}'])
+            writer.writerow(['PROD_DB.asset2', '{"config": "data2"}'])
+            writer.writerow(['DEV_DB.asset3', '{"config": "data3"}'])  # No replacement needed
+        
+        # Create formatter
+        formatter = PolicyExportFormatter(
+            input_dir=str(temp_dir),
+            search_string="PROD_DB",
+            replace_string="DEV_DB",
+            output_dir=str(temp_dir),
+            logger=logging.getLogger(__name__)
+        )
+        
+        # Process the CSV
+        result = formatter.process_asset_config_export_csv()
+        
+        # Check result
+        assert result is True
+        
+        # Check output file
+        output_file = temp_dir / "asset-import" / "asset-config-import-ready.csv"
+        assert output_file.exists()
+        
+        # Read and verify the output
+        with open(output_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        
+        # Check that replacements were made
+        assert rows[1][0] == 'DEV_DB.asset1'  # Should be replaced
+        assert rows[2][0] == 'DEV_DB.asset2'  # Should be replaced
+        assert rows[3][0] == 'DEV_DB.asset3'  # Should remain unchanged
+        
+        # Check that other columns remain unchanged
+        assert rows[1][1] == '{"config": "data"}'
+        assert rows[2][1] == '{"config": "data2"}'
+        assert rows[3][1] == '{"config": "data3"}'
+
+    def test_process_asset_config_export_csv_not_found(self, temp_dir):
+        """Test processing when asset-config-export.csv doesn't exist."""
+        from src.adoc_migration_toolkit.execution.formatter import PolicyExportFormatter
+        
+        # Create formatter
+        formatter = PolicyExportFormatter(
+            input_dir=str(temp_dir),
+            search_string="PROD_DB",
+            replace_string="DEV_DB",
+            output_dir=str(temp_dir),
+            logger=logging.getLogger(__name__)
+        )
+        
+        # Process the CSV (should not fail when file doesn't exist)
+        result = formatter.process_asset_config_export_csv()
+        
+        # Should return True (not an error)
+        assert result is True
+
+    def test_process_asset_config_export_csv_empty(self, temp_dir):
+        """Test processing of empty asset-config-export.csv."""
+        from src.adoc_migration_toolkit.execution.formatter import PolicyExportFormatter
+        
+        # Create asset-export directory and empty CSV file
+        asset_export_dir = temp_dir / "asset-export"
+        asset_export_dir.mkdir(parents=True, exist_ok=True)
+        
+        csv_file = asset_export_dir / "asset-config-export.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            pass  # Empty file
+        
+        # Create formatter
+        formatter = PolicyExportFormatter(
+            input_dir=str(temp_dir),
+            search_string="PROD_DB",
+            replace_string="DEV_DB",
+            output_dir=str(temp_dir),
+            logger=logging.getLogger(__name__)
+        )
+        
+        # Process the CSV
+        result = formatter.process_asset_config_export_csv()
+        
+        # Should return True (not an error)
+        assert result is True
+
+    def test_process_asset_config_export_csv_error(self, temp_dir):
+        """Test processing of asset-config-export.csv with invalid data."""
+        from src.adoc_migration_toolkit.execution.formatter import PolicyExportFormatter
+        
+        # Create asset-export directory and CSV file with invalid data
+        asset_export_dir = temp_dir / "asset-export"
+        asset_export_dir.mkdir(parents=True, exist_ok=True)
+        
+        csv_file = asset_export_dir / "asset-config-export.csv"
+        # Create a file that's not a valid CSV - with unclosed quotes
+        with open(csv_file, 'w', encoding='utf-8') as f:
+            f.write('target_uid,config_json\n"PROD_DB.asset1,"invalid json\n')
+        
+        # Create formatter
+        formatter = PolicyExportFormatter(
+            input_dir=str(temp_dir),
+            search_string="PROD_DB",
+            replace_string="DEV_DB",
+            output_dir=str(temp_dir),
+            logger=logging.getLogger(__name__)
+        )
+        
+        # Process the CSV
+        result = formatter.process_asset_config_export_csv()
+        
+        # Should return True (CSV reader is tolerant)
+        assert result is True
+        
+        # The file should still be processed, just with the malformed data
+        output_file = temp_dir / "asset-import" / "asset-config-import-ready.csv"
+        assert output_file.exists()
+
 
 class TestValidateArguments:
     """Test cases for validate_arguments function."""

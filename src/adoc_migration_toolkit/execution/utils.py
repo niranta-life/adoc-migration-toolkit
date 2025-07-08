@@ -8,7 +8,7 @@ including progress bars, CSV reading, and file path utilities.
 import csv
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from tqdm import tqdm
 
 from ..shared.file_utils import get_output_file_path
@@ -118,6 +118,56 @@ def read_csv_uids_single_column(csv_file: str, logger: logging.Logger) -> List[s
         
         logger.info(f"Read {len(uids)} UIDs from CSV file: {csv_file}")
         return uids
+        
+    except Exception as e:
+        logger.error(f"Error reading CSV file {csv_file}: {e}")
+        raise 
+
+
+def read_csv_asset_data(csv_file: str, logger: logging.Logger) -> List[Dict[str, str]]:
+    """Read asset data from CSV file with 4 columns: source_uid, source_id, target_uid, tags.
+    
+    Args:
+        csv_file: Path to the CSV file
+        logger: Logger instance
+        
+    Returns:
+        List of dictionaries with asset data from the CSV file
+    """
+    asset_data = []
+    
+    try:
+        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            
+            # Skip header row
+            header = next(reader, None)
+            if header:
+                logger.info(f"CSV header: {header}")
+            
+            # Read asset data from all 4 columns
+            for row_num, row in enumerate(reader, start=2):  # Start at 2 since we skipped header
+                if row and len(row) >= 4:
+                    source_uid = row[0].strip()
+                    source_id = row[1].strip()
+                    target_uid = row[2].strip()
+                    tags = row[3].strip()
+                    
+                    if source_uid and source_id and target_uid:  # Skip rows with empty required fields
+                        asset_data.append({
+                            'source_uid': source_uid,
+                            'source_id': source_id,
+                            'target_uid': target_uid,
+                            'tags': tags
+                        })
+                        logger.debug(f"Row {row_num}: Found asset - source_uid: {source_uid}, source_id: {source_id}, target_uid: {target_uid}, tags: {tags}")
+                    else:
+                        logger.warning(f"Row {row_num}: Empty required fields (source_uid, source_id, or target_uid)")
+                else:
+                    logger.warning(f"Row {row_num}: Insufficient columns (need at least 4, got {len(row) if row else 0})")
+        
+        logger.info(f"Read {len(asset_data)} asset records from CSV file: {csv_file}")
+        return asset_data
         
     except Exception as e:
         logger.error(f"Error reading CSV file {csv_file}: {e}")

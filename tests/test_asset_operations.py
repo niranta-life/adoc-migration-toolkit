@@ -19,6 +19,7 @@ from src.adoc_migration_toolkit.execution.asset_operations import (
     execute_asset_profile_export,
     execute_asset_profile_import,
     execute_asset_config_export,
+    execute_asset_config_export_parallel,
     execute_asset_config_import,
     execute_asset_list_export,
     execute_asset_list_export_parallel
@@ -411,19 +412,19 @@ class TestExecuteAssetProfileImport:
 class TestExecuteAssetConfigExport:
     """Test cases for execute_asset_config_export function."""
     
-    def test_execute_asset_config_export_success(self, temp_dir, mock_client, mock_logger, sample_asset_response, sample_config_response):
+    def test_execute_asset_config_export_success(self, temp_dir, mock_client, mock_logger, sample_config_response):
         """Test successful asset config export execution."""
-        # Create test CSV file with single column UIDs
-        csv_file = temp_dir / "test_uids.csv"
+        # Create test CSV file with 4 columns: source_uid, source_id, target_uid, tags
+        csv_file = temp_dir / "test_assets.csv"
         with open(csv_file, 'w') as f:
-            f.write("uid\nasset-1-PROD_DB\nasset-2-PROD_DB")
+            f.write("source_uid,source_id,target_uid,tags\n")
+            f.write("asset-1-PROD_DB,1,asset-1-DEV_DB,tag1:tag2\n")
+            f.write("asset-2-PROD_DB,2,asset-2-DEV_DB,tag3\n")
         
-        # Mock API responses
+        # Mock API responses - only config calls needed now
         mock_client.make_api_call.side_effect = [
-            sample_asset_response,  # Asset details
-            sample_config_response, # Config
-            sample_asset_response,  # Asset details
-            sample_config_response  # Config
+            sample_config_response, # Config for asset 1
+            sample_config_response  # Config for asset 2
         ]
         
         execute_asset_config_export(
@@ -433,19 +434,19 @@ class TestExecuteAssetConfigExport:
             verbose_mode=True
         )
         
-        assert mock_client.make_api_call.call_count == 4  # 2 assets * 2 calls each
+        assert mock_client.make_api_call.call_count == 2  # 2 assets * 1 config call each
         
         # Verify output file was created in global output directory
         import glob
         output_files = glob.glob("adoc-migration-toolkit-*/asset-export/asset-config-export.csv")
         assert len(output_files) > 0
     
-    def test_execute_asset_config_export_no_uids(self, temp_dir, mock_client, mock_logger):
+    def test_execute_asset_config_export_no_assets(self, temp_dir, mock_client, mock_logger):
         """Test asset config export with empty CSV file."""
         # Create empty CSV file
         csv_file = temp_dir / "empty.csv"
         with open(csv_file, 'w') as f:
-            f.write("uid\n")
+            f.write("source_uid,source_id,target_uid,tags\n")
         
         execute_asset_config_export(
             csv_file=str(csv_file),
@@ -458,10 +459,11 @@ class TestExecuteAssetConfigExport:
     
     def test_execute_asset_config_export_api_error(self, temp_dir, mock_client, mock_logger):
         """Test asset config export with API error."""
-        # Create test CSV file
-        csv_file = temp_dir / "test_uids.csv"
+        # Create test CSV file with 4 columns
+        csv_file = temp_dir / "test_assets.csv"
         with open(csv_file, 'w') as f:
-            f.write("uid\nasset-1-PROD_DB")
+            f.write("source_uid,source_id,target_uid,tags\n")
+            f.write("asset-1-PROD_DB,1,asset-1-DEV_DB,tag1\n")
         
         # Mock API error
         mock_client.make_api_call.side_effect = Exception("API Error")
@@ -479,78 +481,271 @@ class TestExecuteAssetConfigImport:
     """Test cases for execute_asset_config_import function."""
     
     def test_execute_asset_config_import_success(self, temp_dir, mock_client, mock_logger):
-        """Test successful asset config import execution."""
-        # Create test CSV file with config data
-        csv_file = temp_dir / "test_configs.csv"
-        config_data = {
-            "config": {
-                "database": "test_db",
-                "connection": {"host": "localhost"}
-            }
+        """Test successful asset config import."""
+        # Create test CSV file
+        csv_file = temp_dir / "test_asset_config_import.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['test.asset.1', '{"config": "data1"}'])
+            writer.writerow(['test.asset.2', '{"config": "data2"}'])
+        
+        # Mock API responses
+        mock_client.make_api_call.side_effect = [
+            {'data': [{'id': 123}]},  # First asset lookup
+            {'success': True},        # First config update
+            {'data': [{'id': 456}]},  # Second asset lookup
+            {'success': True}         # Second config update
+        ]
+        
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            # Test asset config import
+            execute_asset_config_import(str(csv_file), mock_client, mock_logger, quiet_mode=False, verbose_mode=False)
+        
+        # Verify API calls were made correctly
+        assert mock_client.make_api_call.call_count == 4
+        
+        # Check first asset lookup
+        call_args = mock_client.make_api_call.call_args_list[0]
+        assert call_args[1]['method'] == 'GET'
+        assert call_args[1]['endpoint'] == '/catalog-server/api/assets?uid=test.asset.1'
+        
+        # Check first config update
+        call_args = mock_client.make_api_call.call_args_list[1]
+        assert call_args[1]['method'] == 'POST'
+        assert call_args[1]['endpoint'] == '/catalog-server/api/assets/123/config'
+        assert call_args[1]['json_payload'] == {"config": "data1"}
+        
+        # Check second asset lookup
+        call_args = mock_client.make_api_call.call_args_list[2]
+        assert call_args[1]['method'] == 'GET'
+        assert call_args[1]['endpoint'] == '/catalog-server/api/assets?uid=test.asset.2'
+        
+        # Check second config update
+        call_args = mock_client.make_api_call.call_args_list[3]
+        assert call_args[1]['method'] == 'POST'
+        assert call_args[1]['endpoint'] == '/catalog-server/api/assets/456/config'
+        assert call_args[1]['json_payload'] == {"config": "data2"}
+
+    def test_execute_asset_config_import_csv_not_found(self, temp_dir, mock_client, mock_logger):
+        """Test asset config import with non-existent CSV file."""
+        csv_file = temp_dir / "nonexistent.csv"
+        
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            # Test asset config import
+            execute_asset_config_import(str(csv_file), mock_client, mock_logger, quiet_mode=False, verbose_mode=False)
+        
+        # Verify no API calls were made
+        mock_client.make_api_call.assert_not_called()
+
+    def test_execute_asset_config_import_no_assets(self, temp_dir, mock_client, mock_logger):
+        """Test asset config import with empty CSV file."""
+        # Create empty CSV file
+        csv_file = temp_dir / "empty_asset_config_import.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['target_uid', 'config_json'])
+        
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            # Test asset config import
+            execute_asset_config_import(str(csv_file), mock_client, mock_logger, quiet_mode=False, verbose_mode=False)
+        
+        # Verify no API calls were made
+        mock_client.make_api_call.assert_not_called()
+
+    def test_execute_asset_config_import_asset_not_found(self, temp_dir, mock_client, mock_logger):
+        """Test asset config import when asset is not found."""
+        # Create test CSV file
+        csv_file = temp_dir / "test_asset_config_import_not_found.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['target_uid', 'config_json'])
+            writer.writerow(['nonexistent.asset', '{"config": "data"}'])
+        
+        # Mock API response - asset not found
+        mock_client.make_api_call.return_value = {'data': []}
+        
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            # Test asset config import
+            execute_asset_config_import(str(csv_file), mock_client, mock_logger, quiet_mode=False, verbose_mode=False)
+        
+        # Verify only one API call was made (asset lookup)
+        assert mock_client.make_api_call.call_count == 1
+        
+        # Check asset lookup
+        call_args = mock_client.make_api_call.call_args_list[0]
+        assert call_args[1]['method'] == 'GET'
+        assert call_args[1]['endpoint'] == '/catalog-server/api/assets?uid=nonexistent.asset'
+
+
+class TestExecuteAssetConfigExportParallel:
+    """Test cases for execute_asset_config_export_parallel function."""
+    
+    def test_execute_asset_config_export_parallel_success(self, temp_dir, mock_client, mock_logger):
+        """Test successful parallel asset config export."""
+        # Create test CSV file with 4 columns
+        csv_file = temp_dir / "test_parallel_export.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            writer.writerow(['uid1', 'id1', 'target_uid1', 'tag1:tag2'])
+            writer.writerow(['uid2', 'id2', 'target_uid2', 'tag3'])
+            writer.writerow(['uid3', 'id3', 'target_uid3', 'tag4:tag5'])
+            writer.writerow(['uid4', 'id4', 'target_uid4', 'tag6'])
+            writer.writerow(['uid5', 'id5', 'target_uid5', 'tag7'])
+        
+        # Mock API responses
+        mock_client.make_api_call.return_value = {
+            "config": "test_config_data",
+            "version": "1.0"
         }
         
-        with open(csv_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['target-env', 'config_json'])
-            writer.writerow(['asset-1-DEV_DB', json.dumps(config_data)])
-        
-        execute_asset_config_import(
-            csv_file=str(csv_file),
-            client=mock_client,
-            logger=mock_logger,
-            dry_run=False,
-            verbose_mode=True
-        )
-        
-        mock_logger.info.assert_called()
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            # Test parallel export
+            execute_asset_config_export_parallel(str(csv_file), mock_client, mock_logger, quiet_mode=True)
+            
+            # Verify export file was created
+            output_file = temp_dir / "asset-export" / "asset-config-export.csv"
+            assert output_file.exists()
+            
+            # Verify CSV content
+            with open(output_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader)
+                assert header == ['target_uid', 'config_json']
+                
+                rows = list(reader)
+                assert len(rows) == 5, "Should have 5 data rows"
+                
+                # Check that all target UIDs are present
+                target_uids = [row[0] for row in rows]
+                expected_uids = ['target_uid1', 'target_uid2', 'target_uid3', 'target_uid4', 'target_uid5']
+                assert set(target_uids) == set(expected_uids)
+                
+                # Check that config JSON is valid
+                for row in rows:
+                    config_json = row[1]
+                    config_data = json.loads(config_json)
+                    assert isinstance(config_data, dict)
+                    assert 'config' in config_data
+            
+            # Verify API calls were made
+            assert mock_client.make_api_call.call_count == 5
+            
+            # Check that calls were made with correct endpoints
+            call_args = []
+            for call in mock_client.make_api_call.call_args_list:
+                if call.args:
+                    call_args.append(call.args[0])
+                elif call.kwargs and 'endpoint' in call.kwargs:
+                    call_args.append(call.kwargs['endpoint'])
+            
+            expected_endpoints = [
+                '/catalog-server/api/assets/id1/config',
+                '/catalog-server/api/assets/id2/config',
+                '/catalog-server/api/assets/id3/config',
+                '/catalog-server/api/assets/id4/config',
+                '/catalog-server/api/assets/id5/config'
+            ]
+            assert set(call_args) == set(expected_endpoints)
     
-    def test_execute_asset_config_import_dry_run(self, temp_dir, mock_client, mock_logger):
-        """Test asset config import in dry run mode."""
+    def test_execute_asset_config_export_parallel_no_assets(self, temp_dir, mock_client, mock_logger):
+        """Test parallel asset config export with no assets."""
+        # Create empty CSV file
+        csv_file = temp_dir / "test_empty_parallel_export.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+        
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            # Test parallel export
+            execute_asset_config_export_parallel(str(csv_file), mock_client, mock_logger, quiet_mode=True)
+            
+            # Verify no API calls were made
+            mock_client.make_api_call.assert_not_called()
+            
+            # Verify warning was logged
+            mock_logger.warning.assert_called_with("No asset data found in CSV file")
+    
+    def test_execute_asset_config_export_parallel_api_error(self, temp_dir, mock_client, mock_logger):
+        """Test parallel asset config export with API error."""
         # Create test CSV file
-        csv_file = temp_dir / "test_configs.csv"
-        config_data = {"config": {"setting": "value"}}
-        
-        with open(csv_file, 'w', newline='') as f:
+        csv_file = temp_dir / "test_parallel_export_error.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['target-env', 'config_json'])
-            writer.writerow(['asset-1-DEV_DB', json.dumps(config_data)])
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            writer.writerow(['uid1', 'id1', 'target_uid1', 'tag1'])
         
-        execute_asset_config_import(
-            csv_file=str(csv_file),
-            client=mock_client,
-            logger=mock_logger,
-            dry_run=True
-        )
+        # Mock API to raise exception
+        mock_client.make_api_call.side_effect = Exception("API Error")
         
-        # In dry run mode, should show what would be executed
-        mock_logger.info.assert_called()
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            # Test parallel export
+            execute_asset_config_export_parallel(str(csv_file), mock_client, mock_logger, quiet_mode=True)
+            
+            # Verify error was logged
+            mock_logger.error.assert_called()
+            
+            # Verify export file was still created (with no successful exports)
+            output_file = temp_dir / "asset-export" / "asset-config-export.csv"
+            assert output_file.exists()
+            
+            # Verify CSV only has header
+            with open(output_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader)
+                assert header == ['target_uid', 'config_json']
+                
+                rows = list(reader)
+                assert len(rows) == 0, "Should have no data rows due to error"
     
-    def test_execute_asset_config_import_csv_not_found(self, mock_client, mock_logger):
-        """Test asset config import with nonexistent CSV file."""
-        execute_asset_config_import(
-            csv_file="/nonexistent/file.csv",
-            client=mock_client,
-            logger=mock_logger
-        )
+    def test_parallel_mode_defaults_to_quiet(self, temp_dir, mock_client, mock_logger):
+        """Test that parallel mode defaults to quiet mode for asset-config-export."""
+        from src.adoc_migration_toolkit.execution.command_parsing import parse_asset_config_export_command
+        import os
         
-        mock_logger.error.assert_called()
-    
-    def test_execute_asset_config_import_invalid_json(self, temp_dir, mock_client, mock_logger):
-        """Test asset config import with invalid JSON in CSV."""
-        # Create CSV with invalid JSON
-        csv_file = temp_dir / "invalid_json.csv"
-        with open(csv_file, 'w', newline='') as f:
+        # Create a mock CSV file for testing
+        csv_file = temp_dir / "asset-export" / "asset-all-export.csv"
+        csv_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['target-env', 'config_json'])
-            writer.writerow(['asset-1-DEV_DB', 'invalid json'])
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            writer.writerow(['uid1', 'id1', 'target_uid1', 'tag1'])
         
-        execute_asset_config_import(
-            csv_file=str(csv_file),
-            client=mock_client,
-            logger=mock_logger
-        )
+        real_exists = os.path.exists
         
-        mock_logger.error.assert_called()
+        def mock_exists(path):
+            if str(path).endswith('asset-export/asset-all-export.csv'):
+                return True
+            return real_exists(path)
+        
+        with patch('src.adoc_migration_toolkit.execution.command_parsing.globals.GLOBAL_OUTPUT_DIR', temp_dir), \
+             patch('os.path.exists', side_effect=mock_exists):
+            # Test command with --parallel but no --quiet or --verbose
+            command = "asset-config-export --parallel"
+            csv_file, output_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_config_export_command(command)
+            
+            # Verify that parallel mode defaults to quiet mode
+            assert parallel_mode is True
+            assert quiet_mode is True
+            assert verbose_mode is False
+            
+            # Test command with --parallel and --verbose
+            command = "asset-config-export --parallel --verbose"
+            csv_file, output_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_config_export_command(command)
+            
+            # Verify that --verbose overrides the quiet default
+            assert parallel_mode is True
+            assert quiet_mode is False
+            assert verbose_mode is True
+            
+            # Test command with --parallel and --quiet
+            command = "asset-config-export --parallel --quiet"
+            csv_file, output_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_config_export_command(command)
+            
+            # Verify that --quiet is respected
+            assert parallel_mode is True
+            assert quiet_mode is True
+            assert verbose_mode is False
 
 
 class TestExecuteAssetListExport:
@@ -850,16 +1045,16 @@ class TestAssetOperationsIntegration:
         # Verify both operations completed
         assert mock_client.make_api_call.call_count >= 2
     
-    def test_asset_config_export_import_workflow(self, temp_dir, mock_client, mock_logger, sample_asset_response, sample_config_response):
+    def test_asset_config_export_import_workflow(self, temp_dir, mock_client, mock_logger, sample_config_response):
         """Test complete asset config export and import workflow."""
         # Step 1: Export configs
-        csv_file = temp_dir / "test_uids.csv"
+        csv_file = temp_dir / "test_assets.csv"
         with open(csv_file, 'w') as f:
-            f.write("uid\nasset-1-PROD_DB")
+            f.write("source_uid,source_id,target_uid,tags\n")
+            f.write("asset-1-PROD_DB,1,asset-1-DEV_DB,tag1\n")
         
-        # Mock export API responses
+        # Mock export API responses - only config call needed
         mock_client.make_api_call.side_effect = [
-            sample_asset_response,
             sample_config_response
         ]
         
@@ -885,7 +1080,7 @@ class TestAssetOperationsIntegration:
         )
         
         # Verify both operations completed
-        assert mock_client.make_api_call.call_count >= 2
+        assert mock_client.make_api_call.call_count >= 1
     
     def test_error_handling_across_operations(self, temp_dir, mock_client, mock_logger):
         """Test error handling across different asset operations."""

@@ -14,7 +14,7 @@ from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
-from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import
+from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import
 from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
@@ -128,24 +128,58 @@ def show_interactive_help():
     print("      • Supports dry-run mode for previewing changes")
     
     print(f"\n{BOLD}🔍 ASSET CONFIGURATION COMMANDS:{RESET}")
-    print(f"  {BOLD}asset-config-export{RESET} <csv_file> [--output-file <file>] [--quiet] [--verbose]")
+    print(f"  {BOLD}asset-config-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
     print("    Description: Export asset configurations from source environment to CSV file")
     print("    Arguments:")
-    print("      csv_file: Path to CSV file with UIDs in the first column")
+    print("      csv_file: Path to CSV file with 4 columns: source_uid, source_id, target_uid, tags (optional)")
     print("      --output-file: Specify custom output file (optional)")
-    print("      --quiet: Suppress console output, show only summary (default)")
+    print("      --quiet: Suppress console output, show only summary")
     print("      --verbose: Show detailed output including headers and responses")
+    print("      --parallel: Use parallel processing for faster export (max 5 threads, quiet mode default)")
     print("    Examples:")
-    print("      asset-config-export <output-dir>/asset-export/asset_uids.csv")
+    print("      asset-config-export")
+    print("      asset-config-export <output-dir>/asset-export/asset-all-export.csv")
     print("      asset-config-export uids.csv --output-file configs.csv --verbose")
+    print("      asset-config-export --parallel")
+    print("      asset-config-export --parallel --verbose")
     print("    Behavior:")
-    print("      • Reads UIDs from the first column of the CSV file")
-    print("      • Makes REST call to '/catalog-server/api/assets?uid=<uid>' to get asset ID")
-    print("      • Uses asset ID to call '/catalog-server/api/assets/<id>/config'")
-    print("      • Writes compressed JSON response to CSV with target-env UID")
-    print("      • Shows status for each UID in quiet mode")
+    print("      • Reads from asset-export/asset-all-export.csv by default if no CSV file specified")
+    print("      • Reads CSV with 4 columns: source_uid, source_id, target_uid, tags")
+    print("      • Uses source_id to call '/catalog-server/api/assets/<source_id>/config'")
+    print("      • Writes compressed JSON response to CSV with target_uid")
+    print("      • Shows status for each asset in quiet mode")
     print("      • Shows HTTP headers and response objects in verbose mode")
-    print("      • Output format: target-env, config_json (compressed)")
+    print("      • Output format: target_uid, config_json (compressed)")
+    print("      • Parallel mode: Uses up to 5 threads, work divided equally between threads")
+    print("      • Parallel mode: Quiet mode is default (shows tqdm progress bars)")
+    print("      • Parallel mode: Use --verbose to see URL, headers, and response for each call")
+    print("      • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)")
+    print("      • Default mode: Silent (no progress bars)")
+    
+    print(f"\n  {BOLD}asset-config-import{RESET} [<csv_file>] [--quiet] [--verbose] [--parallel]")
+    print("    Description: Import asset configurations to target environment from CSV file")
+    print("    Arguments:")
+    print("      csv_file: Path to CSV file with target_uid and config_json columns (optional)")
+    print("      --quiet: Show progress bars (default for parallel mode)")
+    print("      --verbose: Show detailed output including HTTP requests and responses")
+    print("      --parallel: Use parallel processing for faster import (max 5 threads)")
+    print("    Examples:")
+    print("      asset-config-import")
+    print("      asset-config-import /path/to/asset-config-import-ready.csv")
+    print("      asset-config-import --quiet --parallel")
+    print("      asset-config-import --verbose")
+    print("    Behavior:")
+    print("      • Reads from asset-import/asset-config-import-ready.csv by default if no CSV file specified")
+    print("      • Reads CSV with 2 columns: target_uid, config_json")
+    print("      • Gets asset ID using GET /catalog-server/api/assets?uid=<target_uid>")
+    print("      • Updates config using POST /catalog-server/api/assets/<id>/config")
+    print("      • Shows progress bar in quiet mode")
+    print("      • Shows HTTP details in verbose mode")
+    print("      • Parallel mode: Uses up to 5 threads, work divided equally between threads")
+    print("      • Parallel mode: Quiet mode is default (shows tqdm progress bars)")
+    print("      • Parallel mode: Use --verbose to see HTTP details for each call")
+    print("      • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)")
+    print("      • Default mode: Silent (no progress bars)")
     
     print(f"\n  {BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel]")
     print("    Description: Export all assets from source environment to CSV file")
@@ -329,6 +363,8 @@ def show_interactive_help():
     print("      • Creates organized output directory structure")
     print("      • Extracts data quality policy assets to CSV files")
     print("      • Generates <output-dir>/asset-export/asset_uids.csv and <output-dir>/policy-import/segmented_spark_uids.csv")
+    print("      • Processes asset-all-export.csv -> asset-all-import-ready.csv")
+    print("      • Processes asset-config-export.csv -> asset-config-import-ready.csv")
     print("      • Shows detailed processing statistics upon completion")
     
     print(f"\n{BOLD}🔧 VCS COMMANDS:{RESET}")
@@ -782,15 +818,7 @@ def run_interactive(args):
                         execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode)
                     continue
                 
-                # Check if it's an asset-config-export command
-                if command.lower().startswith('asset-config-export'):
-                    from .command_parsing import parse_asset_config_export_command
-                    csv_file, output_file, quiet_mode, verbose_mode = parse_asset_config_export_command(command)
-                    if csv_file:
-                        execute_asset_config_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
-                    continue
-                
-                # Check if it's an asset-list-export command
+                # Check if it's an asset-list-export command (check this first to avoid conflicts)
                 if command.lower().startswith('asset-list-export'):
                     from .command_parsing import parse_asset_list_export_command
                     quiet_mode, verbose_mode, parallel_mode = parse_asset_list_export_command(command)
@@ -798,6 +826,41 @@ def run_interactive(args):
                         execute_asset_list_export_parallel(client, logger, quiet_mode, verbose_mode)
                     else:
                         execute_asset_list_export(client, logger, quiet_mode, verbose_mode)
+                    continue
+            
+                
+                # Check if it's an asset-config-export command
+                if command.lower().startswith('asset-config-export'):
+                    from .command_parsing import parse_asset_config_export_command
+                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_config_export_command(command)
+                    if csv_file:
+                        if parallel_mode:
+                            execute_asset_config_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                        else:
+                            execute_asset_config_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's an asset-config-import command
+                if command.lower().startswith('asset-config-import'):
+                    from .command_parsing import parse_asset_config_import_command
+                    csv_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_config_import_command(command)
+                    
+                    # Use default CSV file if not specified
+                    if not csv_file:
+                        if globals.GLOBAL_OUTPUT_DIR:
+                            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-config-import-ready.csv")
+                        else:
+                            # Try to find the latest toolkit directory
+                            current_dir = Path.cwd()
+                            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                            if toolkit_dirs:
+                                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                                latest_toolkit_dir = toolkit_dirs[0]
+                                csv_file = str(latest_toolkit_dir / "asset-import" / "asset-config-import-ready.csv")
+                            else:
+                                csv_file = "asset-config-import-ready.csv"
+                    
+                    execute_asset_config_import(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode)
                     continue
                 
                 # Check if it's an asset-tag-import command

@@ -630,6 +630,8 @@ policy-xfr --input data/samples --source-env-string "old" --target-env-string "n
 - `*_import_ready/` directories with translated ZIP files
 - `segmented_spark_uids.csv` - UIDs of segmented SPARK assets requiring special handling
 - `asset_uids.csv` - All asset UIDs for profile and configuration management
+- `asset-all-import-ready.csv` - Processed asset-all-export.csv with environment string replacement
+- `asset-config-import-ready.csv` - Processed asset-config-export.csv with environment string replacement
 - Processing statistics and validation reports
 
 **Critical Requirements:**
@@ -1518,24 +1520,59 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Supports dry-run mode for previewing changes
 
 🔍 ASSET CONFIGURATION COMMANDS:
-  asset-config-export <csv_file> [--output-file <file>] [--quiet] [--verbose]
+  asset-config-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]
     Description: Export asset configurations from source environment to CSV file
     Arguments:
-      csv_file: Path to CSV file with UIDs in the first column
+      csv_file: Path to CSV file with 4 columns: source_uid, source_id, target_uid, tags (optional, defaults to asset-export/asset-all-export.csv)
       --output-file: Specify custom output file (optional)
-      --quiet: Suppress console output, show only summary (default)
+      --quiet: Suppress console output, show only summary
       --verbose: Show detailed output including headers and responses
+      --parallel: Use parallel processing for faster export (max 5 threads, quiet mode default)
     Examples:
-      asset-config-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
+      asset-config-export
+      asset-config-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset-all-export.csv
       asset-config-export uids.csv --output-file configs.csv --verbose
+      asset-config-export --parallel
+      asset-config-export --parallel --verbose
     Behavior:
-      • Reads UIDs from the first column of the CSV file
-      • Makes REST call to '/catalog-server/api/assets?uid=<uid>' to get asset ID
-      • Uses asset ID to call '/catalog-server/api/assets/<id>/config'
-      • Writes compressed JSON response to CSV with target-env UID
-      • Shows status for each UID in quiet mode
+      • Reads from asset-export/asset-all-export.csv by default if no CSV file specified
+      • Reads CSV with 4 columns: source_uid, source_id, target_uid, tags
+      • Uses source_id to call '/catalog-server/api/assets/<source_id>/config'
+      • Writes compressed JSON response to CSV with target_uid
+      • Shows status for each asset in quiet mode
       • Shows HTTP headers and response objects in verbose mode
-      • Output format: target-env, config_json (compressed)
+      • Output format: target_uid, config_json (compressed)
+      • Output file: asset-export/asset-config-export.csv
+      • Parallel mode: Uses up to 5 threads, work divided equally between threads
+      • Parallel mode: Quiet mode is default (shows tqdm progress bars)
+      • Parallel mode: Use --verbose to see URL, headers, and response for each call
+      • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)
+      • Default mode: Silent (no progress bars)
+
+  asset-config-import [<csv_file>] [--quiet] [--verbose] [--parallel]
+    Description: Import asset configurations to target environment from CSV file
+    Arguments:
+      csv_file: Path to CSV file with target_uid and config_json columns (optional, defaults to asset-import/asset-config-import-ready.csv)
+      --quiet: Show progress bars (default for parallel mode)
+      --verbose: Show detailed output including HTTP requests and responses
+      --parallel: Use parallel processing for faster import (max 5 threads)
+    Examples:
+      asset-config-import
+      asset-config-import /path/to/asset-config-import-ready.csv
+      asset-config-import --quiet --parallel
+      asset-config-import --verbose
+    Behavior:
+      • Reads from asset-import/asset-config-import-ready.csv by default if no CSV file specified
+      • Reads CSV with 2 columns: target_uid, config_json
+      • Gets asset ID using GET /catalog-server/api/assets?uid=<target_uid>
+      • Updates config using POST /catalog-server/api/assets/<id>/config
+      • Shows progress bar in quiet mode
+      • Shows HTTP details in verbose mode
+      • Parallel mode: Uses up to 5 threads, work divided equally between threads
+      • Parallel mode: Quiet mode is default (shows tqdm progress bars)
+      • Parallel mode: Use --verbose to see HTTP details for each call
+      • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)
+      • Default mode: Silent (no progress bars)
 
   asset-list-export [--quiet] [--verbose] [--parallel]
     Description: Export all assets from source environment to CSV file
