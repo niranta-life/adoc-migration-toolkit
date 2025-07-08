@@ -1485,7 +1485,7 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                 apply_response = client.make_api_call(
                     endpoint="/catalog-server/api/rules/import/policy-definitions/apply-config",
                     method='POST',
-                    json=apply_payload,
+                    json_payload=apply_payload,
                     use_target_auth=True,
                     use_target_tenant=True
                 )
