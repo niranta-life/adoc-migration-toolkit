@@ -1122,7 +1122,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0")
+            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -1130,7 +1130,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/assets/discover?size=0&page=0",
+            endpoint="/catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true",
             method='GET'
         )
         
@@ -1167,7 +1167,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
             try:
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}")
+                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true")
                     print(f"  Method: GET")
                     print(f"  Content-Type: application/json")
                     print(f"  Authorization: Bearer [REDACTED]")
@@ -1175,7 +1175,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                         print(f"  X-Tenant: {client.tenant}")
                 
                 page_response = client.make_api_call(
-                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}",
+                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true",
                     method='GET'
                 )
                 
@@ -1186,21 +1186,13 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                 # Extract assets from response
                 if page_response and 'data' in page_response and 'assets' in page_response['data']:
                     page_assets = page_response['data']['assets']
-                    # Extract the actual asset objects from the nested structure
-                    actual_assets = []
-                    for asset_wrapper in page_assets:
-                        if 'asset' in asset_wrapper:
-                            actual_assets.append(asset_wrapper['asset'])
-                        else:
-                            # Fallback: if no 'asset' wrapper, use the object directly
-                            actual_assets.append(asset_wrapper)
-                    
-                    all_assets.extend(actual_assets)
+                    # Store the full asset wrapper to preserve tags
+                    all_assets.extend(page_assets)
                     
                     if not quiet_mode:
-                        print(f"✅ Page {page + 1}: Retrieved {len(actual_assets)} assets")
+                        print(f"✅ Page {page + 1}: Retrieved {len(page_assets)} assets")
                     else:
-                        print(f"✅ Page {page + 1}/{total_pages}: {len(actual_assets)} assets")
+                        print(f"✅ Page {page + 1}/{total_pages}: {len(page_assets)} assets")
                     
                     successful_pages += 1
                 else:
@@ -1223,19 +1215,12 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                             if location in page_response['data']:
                                 page_assets = page_response['data'][location]
                                 if isinstance(page_assets, list):
-                                    # Handle nested asset structure
-                                    actual_assets = []
-                                    for asset_wrapper in page_assets:
-                                        if 'asset' in asset_wrapper:
-                                            actual_assets.append(asset_wrapper['asset'])
-                                        else:
-                                            actual_assets.append(asset_wrapper)
-                                    
-                                    all_assets.extend(actual_assets)
+                                    # Store the full asset wrapper to preserve tags
+                                    all_assets.extend(page_assets)
                                     if not quiet_mode:
-                                        print(f"✅ Page {page + 1}: Found {len(actual_assets)} assets in 'data.{location}'")
+                                        print(f"✅ Page {page + 1}: Found {len(page_assets)} assets in 'data.{location}'")
                                     else:
-                                        print(f"✅ Page {page + 1}/{total_pages}: {len(actual_assets)} assets")
+                                        print(f"✅ Page {page + 1}/{total_pages}: {len(page_assets)} assets")
                                     successful_pages += 1
                                     assets_found = True
                                     break
@@ -1264,19 +1249,37 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
-            # Write header
-            writer.writerow(['uid', 'id'])
+            # Write header: source_uid, source_id, target_uid, tags
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
             
             # Write asset data
-            for asset in all_assets:
-                uid = asset.get('uid', '')
-                asset_id = asset.get('id', '')
+            for asset_wrapper in all_assets:
+                # Extract asset information from the wrapper structure
+                if 'asset' in asset_wrapper:
+                    asset = asset_wrapper['asset']
+                else:
+                    # Fallback: if no 'asset' wrapper, use the object directly
+                    asset = asset_wrapper
                 
-                writer.writerow([uid, asset_id])
+                # Extract required fields
+                asset_id = asset.get('id', '')
+                asset_uid = asset.get('uid', '')
+                
+                # Extract tags and concatenate with colon separator
+                tags = []
+                if 'tags' in asset_wrapper and asset_wrapper['tags']:
+                    for tag in asset_wrapper['tags']:
+                        if 'name' in tag:
+                            tags.append(tag['name'])
+                
+                tags_str = ':'.join(tags) if tags else ''
+                
+                # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
+                writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
         
-        # Step 4: Sort the CSV file by uid, then id
+        # Step 4: Sort the CSV file by source_uid, then source_id
         if not quiet_mode:
-            print("Sorting CSV file by uid, then id...")
+            print("Sorting CSV file by source_uid, then source_id...")
         
         # Read all rows
         rows = []
@@ -1285,16 +1288,16 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
             header = next(reader)  # Skip header
             rows = list(reader)
         
-        # Sort rows: first by uid, then by id
+        # Sort rows: first by source_uid, then by source_id
         def sort_key(row):
-            uid = row[0] if len(row) > 0 else ''
-            asset_id = row[1] if len(row) > 1 else ''
-            # Convert asset_id to int for proper numeric sorting, fallback to string
+            source_uid = row[0] if len(row) > 0 else ''
+            source_id = row[1] if len(row) > 1 else ''
+            # Convert source_id to int for proper numeric sorting, fallback to string
             try:
-                asset_id_int = int(asset_id) if asset_id else 0
+                source_id_int = int(source_id) if source_id else 0
             except (ValueError, TypeError):
-                asset_id_int = 0
-            return (uid, asset_id_int)
+                source_id_int = 0
+            return (source_uid, source_id_int)
         
         rows.sort(key=sort_key)
         

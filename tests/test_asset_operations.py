@@ -564,13 +564,22 @@ class TestExecuteAssetListExport:
             }
         }
         
-        # Mock page responses
+        # Mock page responses with tags
         page_response = {
             "data": {
                 "assets": [
-                    {"asset": {"id": 1, "uid": "asset-1"}},
-                    {"asset": {"id": 2, "uid": "asset-2"}},
-                    {"asset": {"id": 3, "uid": "asset-3"}}
+                    {
+                        "asset": {"id": 1, "uid": "asset-1"},
+                        "tags": [{"name": "tag1"}, {"name": "tag2"}]
+                    },
+                    {
+                        "asset": {"id": 2, "uid": "asset-2"},
+                        "tags": [{"name": "tag3"}]
+                    },
+                    {
+                        "asset": {"id": 3, "uid": "asset-3"},
+                        "tags": []
+                    }
                 ]
             }
         }
@@ -597,8 +606,13 @@ class TestExecuteAssetListExport:
             reader = csv.reader(f)
             rows = list(reader)
             
-        assert rows[0] == ['uid', 'id']
+        assert rows[0] == ['source_uid', 'source_id', 'target_uid', 'tags']
         assert len(rows) > 1  # Header + data rows
+        
+        # Verify first row has correct format
+        assert rows[1] == ['asset-1', '1', 'asset-1', 'tag1:tag2']
+        assert rows[2] == ['asset-2', '2', 'asset-2', 'tag3']
+        assert rows[3] == ['asset-3', '3', 'asset-3', '']
     
     def test_execute_asset_list_export_no_assets(self, temp_dir, mock_client, mock_logger):
         """Test asset list export with no assets."""
@@ -656,11 +670,14 @@ class TestExecuteAssetListExport:
             }
         }
         
-        # Mock page response
+        # Mock page response with tags
         page_response = {
             "data": {
                 "assets": [
-                    {"asset": {"id": 1, "uid": "asset-1"}}
+                    {
+                        "asset": {"id": 1, "uid": "asset-1"},
+                        "tags": [{"name": "test-tag"}]
+                    }
                 ]
             }
         }
@@ -720,7 +737,7 @@ class TestExecuteAssetListExport:
             reader = csv.reader(f)
             rows = list(reader)
             
-        assert rows[0] == ['uid', 'id']
+        assert rows[0] == ['source_uid', 'source_id', 'target_uid', 'tags']
         assert len(rows) == 3  # Header + 2 data rows
 
 
