@@ -110,7 +110,7 @@ def interactive(env_file, log_level, verbose):
     \b
     # Asset Configuration Commands
     asset-config-export <csv_file> [--output-file file] [--quiet] [--verbose]
-    asset-list-export [--quiet] [--verbose]
+    asset-list-export [--quiet] [--verbose] [--parallel]
     
     \b
     # Policy Commands

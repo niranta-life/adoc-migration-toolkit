@@ -307,17 +307,18 @@ def parse_asset_list_export_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
     
     Args:
-        command: Command string like "asset-list-export [--quiet] [--verbose]"
+        command: Command string like "asset-list-export [--quiet] [--verbose] [--parallel]"
         
     Returns:
-        Tuple of (quiet_mode, verbose_mode)
+        Tuple of (quiet_mode, verbose_mode, parallel_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-list-export':
-        return False, False
+        return False, False, False
     
     quiet_mode = False
     verbose_mode = False
+    parallel_mode = False
     
     # Check for flags
     if '--quiet' in parts:
@@ -330,7 +331,11 @@ def parse_asset_list_export_command(command: str) -> tuple:
         quiet_mode = False  # Verbose overrides quiet
         parts.remove('--verbose')
     
-    return quiet_mode, verbose_mode
+    if '--parallel' in parts:
+        parallel_mode = True
+        parts.remove('--parallel')
+    
+    return quiet_mode, verbose_mode, parallel_mode
 
 def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.
@@ -667,3 +672,66 @@ def parse_vcs_push_command(command: str) -> bool:
     if not parts or parts[0].lower() != 'vcs-push':
         return False
     return True 
+
+def parse_asset_tag_import_command(command: str) -> tuple:
+    """Parse an asset-tag-import command string into components.
+    
+    Args:
+        command: Command string like "asset-tag-import [csv_file] [--quiet] [--verbose] [--parallel]"
+        
+    Returns:
+        Tuple of (csv_file, quiet_mode, verbose_mode, parallel_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'asset-tag-import':
+        return None, False, False, False
+    
+    csv_file = None
+    quiet_mode = False
+    verbose_mode = False
+    parallel_mode = False
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        arg = parts[i]
+        if arg == '--quiet' or arg == '-q':
+            quiet_mode = True
+            i += 1
+        elif arg == '--verbose' or arg == '-v':
+            verbose_mode = True
+            i += 1
+        elif arg == '--parallel' or arg == '-p':
+            parallel_mode = True
+            i += 1
+        elif arg == '--help' or arg == '-h':
+            print("\n" + "="*60)
+            print("ASSET-TAG-IMPORT COMMAND HELP")
+            print("="*60)
+            print("Usage: asset-tag-import [csv_file] [options]")
+            print("\nArguments:")
+            print("  csv_file: Path to CSV file (defaults to asset-all-import-ready.csv)")
+            print("\nOptions:")
+            print("  --quiet, -q: Suppress console output, show only summary")
+            print("  --verbose, -v: Show detailed output including API calls")
+            print("  --parallel, -p: Use parallel processing for faster import")
+            print("  --help, -h: Show this help message")
+            print("\nExamples:")
+            print("  asset-tag-import")
+            print("  asset-tag-import --quiet")
+            print("  asset-tag-import --verbose")
+            print("  asset-tag-import --parallel")
+            print("  asset-tag-import /path/to/asset-data.csv --verbose --parallel")
+            print("="*60)
+            return None, False, False, False
+        else:
+            # This should be the CSV file path
+            if csv_file is None:
+                csv_file = arg
+            else:
+                print(f"❌ Unknown argument: {arg}")
+                print("💡 Use 'asset-tag-import --help' for usage information")
+                return None, False, False, False
+            i += 1
+    
+    return csv_file, quiet_mode, verbose_mode, parallel_mode 

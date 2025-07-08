@@ -306,6 +306,69 @@ class PolicyExportFormatter:
             self.logger.error(error_msg)
             self.stats["errors"].append(error_msg)
     
+    def process_asset_all_export_csv(self) -> bool:
+        """Process the asset-all-export.csv file to replace source-env-string with target-env-string in the target_uid column.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Look for asset-all-export.csv in the asset-export directory
+            asset_export_csv = self.asset_export_dir / "asset-all-export.csv"
+            
+            if not asset_export_csv.exists():
+                self.logger.info(f"asset-all-export.csv not found at {asset_export_csv}")
+                return True  # Not an error, just no file to process
+            
+            self.logger.info(f"Processing asset-all-export.csv: {asset_export_csv}")
+            
+            # Read the CSV file
+            rows = []
+            with open(asset_export_csv, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+            
+            if not rows:
+                self.logger.warning("asset-all-export.csv is empty")
+                return True
+            
+            # Process the target_uid column (column 2)
+            changes_made = 0
+            for i, row in enumerate(rows):
+                if len(row) >= 3:  # Ensure we have at least 3 columns
+                    target_uid = row[2]
+                    if self.search_string in target_uid:
+                        # Replace the source-env-string with target-env-string
+                        new_target_uid = target_uid.replace(self.search_string, self.replace_string)
+                        rows[i][2] = new_target_uid
+                        changes_made += 1
+                        self.logger.debug(f"Updated target_uid: {target_uid} -> {new_target_uid}")
+            
+            # Create asset-import directory if it doesn't exist
+            asset_import_dir = self.base_output_dir / "asset-import"
+            asset_import_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Write the processed CSV to asset-import/asset-all-import-ready.csv
+            output_csv = asset_import_dir / "asset-all-import-ready.csv"
+            
+            with open(output_csv, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                writer.writerows(rows)
+            
+            self.logger.info(f"Processed asset-all-export.csv: {changes_made} changes made")
+            self.logger.info(f"Output written to: {output_csv}")
+            
+            # Update statistics
+            self.stats["changes_made"] += changes_made
+            
+            return True
+            
+        except Exception as e:
+            error_msg = f"Error processing asset-all-export.csv: {e}"
+            self.logger.error(error_msg)
+            self.stats["errors"].append(error_msg)
+            return False
+    
     def replace_in_value(self, value: Any) -> Any:
         """Recursively replace substrings in a value with error handling.
         
@@ -652,6 +715,9 @@ class PolicyExportFormatter:
             self.write_extracted_assets_csv()
             self.write_all_assets_csv()
             
+            # Process asset-all-export.csv if it exists
+            csv_processed = self.process_asset_all_export_csv()
+            
             stats = {
                 "total_files": total_files,
                 "json_files": len(json_files),
@@ -662,6 +728,7 @@ class PolicyExportFormatter:
                 "changes_made": self.stats["changes_made"],
                 "extracted_assets": len(self.extracted_assets),
                 "all_assets": len(self.all_asset_uids),
+                "csv_processed": csv_processed,
                 "errors": self.stats["errors"],
                 # Policy statistics
                 "total_policies_processed": self.stats["total_policies_processed"],
@@ -687,6 +754,7 @@ class PolicyExportFormatter:
                 "changes_made": self.stats["changes_made"],
                 "extracted_assets": len(self.extracted_assets),
                 "all_assets": len(self.all_asset_uids),
+                "csv_processed": False,
                 "errors": self.stats["errors"],
                 # Policy statistics
                 "total_policies_processed": self.stats["total_policies_processed"],
@@ -863,6 +931,8 @@ def execute_formatter(input_dir: str, source_string: str, target_string: str, ou
                 print(f"Assets extracted:    {stats['extracted_assets']}")
             if stats.get('all_assets', 0) > 0:
                 print(f"All assets found:    {stats['all_assets']}")
+            if stats.get('csv_processed', False):
+                print(f"CSV file processed:  asset-all-export.csv -> asset-all-import-ready.csv")
             if stats.get('total_policies_processed', 0) > 0:
                 print(f"\nPolicy Statistics:")
                 print(f"  Total policies processed: {stats['total_policies_processed']}")

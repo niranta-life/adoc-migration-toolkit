@@ -14,7 +14,7 @@ from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
-from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_list_export
+from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import
 from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
@@ -147,15 +147,17 @@ def show_interactive_help():
     print("      • Shows HTTP headers and response objects in verbose mode")
     print("      • Output format: target-env, config_json (compressed)")
     
-    print(f"\n  {BOLD}asset-list-export{RESET} [--quiet] [--verbose]")
+    print(f"\n  {BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel]")
     print("    Description: Export all assets from source environment to CSV file")
     print("    Arguments:")
     print("      --quiet: Suppress console output, show only summary")
     print("      --verbose: Show detailed output including headers and responses")
+    print("      --parallel: Use parallel processing for faster export (max 5 threads)")
     print("    Examples:")
     print("      asset-list-export")
     print("      asset-list-export --quiet")
     print("      asset-list-export --verbose")
+    print("      asset-list-export --parallel")
     print("    Behavior:")
     print("      • Uses '/catalog-server/api/assets/discover' endpoint with pagination")
     print("      • First call gets total count with size=0&page=0&profiled_assets=true&parents=true")
@@ -167,6 +169,32 @@ def show_interactive_help():
     print("      • Sorts output by source_uid first, then by source_id")
     print("      • Shows page-by-page progress in quiet mode")
     print("      • Shows detailed request/response in verbose mode")
+    print("      • Provides comprehensive statistics upon completion")
+    print("      • Parallel mode: Divides pages among threads, combines results, deletes temp files")
+    
+    print(f"\n  {BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
+    print("    Description: Import tags for assets from CSV file")
+    print("    Arguments:")
+    print("      csv_file: Path to CSV file (defaults to asset-all-import-ready.csv)")
+    print("    Options:")
+    print("      --quiet, -q: Suppress console output, show only summary")
+    print("      --verbose, -v: Show detailed output including API calls")
+    print("      --parallel, -p: Use parallel processing for faster import")
+    print("    Examples:")
+    print("      asset-tag-import")
+    print("      asset-tag-import --quiet")
+    print("      asset-tag-import --verbose")
+    print("      asset-tag-import --parallel")
+    print("      asset-tag-import /path/to/asset-data.csv --verbose --parallel")
+    print("    Behavior:")
+    print("      • Reads asset data from asset-all-import-ready.csv (or specified file)")
+    print("      • Processes each asset to get asset ID from target_uid")
+    print("      • Imports tags for each asset using POST /catalog-server/api/assets/<id>/tag")
+    print("      • Tags are colon-separated in the CSV file")
+    print("      • Uses target environment authentication")
+    print("      • Shows progress bar in quiet mode")
+    print("      • Shows detailed API calls in verbose mode")
+    print("      • Parallel mode: Uses up to 5 threads for faster processing")
     print("      • Provides comprehensive statistics upon completion")
     
     print(f"\n{BOLD}📋 POLICY COMMANDS:{RESET}")
@@ -686,7 +714,7 @@ def run_interactive(args):
                 valid_commands = [
                     'segments-export', 'segments-import',
                     'asset-profile-export', 'asset-profile-import',
-                    'asset-config-export', 'asset-list-export',
+                    'asset-config-export', 'asset-list-export', 'asset-tag-import',
                     'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
                     'vcs-config',
                     'vcs-init',
@@ -765,8 +793,34 @@ def run_interactive(args):
                 # Check if it's an asset-list-export command
                 if command.lower().startswith('asset-list-export'):
                     from .command_parsing import parse_asset_list_export_command
-                    quiet_mode, verbose_mode = parse_asset_list_export_command(command)
-                    execute_asset_list_export(client, logger, quiet_mode, verbose_mode)
+                    quiet_mode, verbose_mode, parallel_mode = parse_asset_list_export_command(command)
+                    if parallel_mode:
+                        execute_asset_list_export_parallel(client, logger, quiet_mode, verbose_mode)
+                    else:
+                        execute_asset_list_export(client, logger, quiet_mode, verbose_mode)
+                    continue
+                
+                # Check if it's an asset-tag-import command
+                if command.lower().startswith('asset-tag-import'):
+                    from .command_parsing import parse_asset_tag_import_command
+                    csv_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_tag_import_command(command)
+                    
+                    # Use default CSV file if not specified
+                    if not csv_file:
+                        if globals.GLOBAL_OUTPUT_DIR:
+                            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-all-import-ready.csv")
+                        else:
+                            # Try to find the latest toolkit directory
+                            current_dir = Path.cwd()
+                            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                            if toolkit_dirs:
+                                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                                latest_toolkit_dir = toolkit_dirs[0]
+                                csv_file = str(latest_toolkit_dir / "asset-import" / "asset-all-import-ready.csv")
+                            else:
+                                csv_file = "asset-all-import-ready.csv"
+                    
+                    execute_asset_tag_import(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode)
                     continue
                 
                 # Check if it's a policy-list-export command

@@ -427,7 +427,7 @@ Asset configurations contain the detailed technical settings and parameters that
 asset-config-export <csv_file> [--output-file file] [--quiet] [--verbose]
 
 # Export all assets from source environment
-asset-list-export [--quiet] [--verbose]
+asset-list-export [--quiet] [--verbose] [--parallel]
 ```
 
 **Purpose:**
@@ -1537,15 +1537,17 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Shows HTTP headers and response objects in verbose mode
       • Output format: target-env, config_json (compressed)
 
-  asset-list-export [--quiet] [--verbose]
+  asset-list-export [--quiet] [--verbose] [--parallel]
     Description: Export all assets from source environment to CSV file
     Arguments:
       --quiet: Suppress console output, show only summary
       --verbose: Show detailed output including headers and responses
+      --parallel: Use parallel processing for faster export (max 5 threads)
     Examples:
       asset-list-export
       asset-list-export --quiet
       asset-list-export --verbose
+      asset-list-export --parallel
     Behavior:
       • Uses '/catalog-server/api/assets/discover' endpoint with pagination
       • First call gets total count with size=0&page=0

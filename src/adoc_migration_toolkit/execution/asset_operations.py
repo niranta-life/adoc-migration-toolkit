@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from adoc_migration_toolkit.execution.utils import create_progress_bar, read_csv_uids, read_csv_uids_single_column
 from ..shared.file_utils import get_output_file_path
@@ -359,64 +360,18 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
             # Close progress bar
             progress_bar.close()
             
-            # Print completion status
-            if not quiet_mode:
-                print(f"✅ Export completed - {successful} successful, {failed} failed")
-            
-            # Print comprehensive statistics
+            # Print summary
             if not quiet_mode:
                 print("\n" + "="*80)
-                print("ASSET PROFILE EXPORT STATISTICS")
+                print("ASSET PROFILE EXPORT COMPLETED")
                 print("="*80)
-                
-                # File information
-                print(f"📁 FILE INFORMATION:")
-                print(f"  Input CSV: {csv_file}")
-                print(f"  Output CSV: {output_file}")
-                print(f"  File size: {output_path.stat().st_size:,} bytes")
-                
-                # Processing statistics
-                print(f"\n📊 PROCESSING STATISTICS:")
-                print(f"  Total assets to process: {len(env_mappings)}")
-                print(f"  Successfully processed: {successful}")
-                print(f"  Failed to process: {failed}")
-                print(f"  Success rate: {(successful / len(env_mappings) * 100):.1f}%")
-                print(f"  Failure rate: {(failed / len(env_mappings) * 100):.1f}%")
-                
-                # Performance metrics
-                if successful > 0:
-                    print(f"\n⚡ PERFORMANCE METRICS:")
-                    print(f"  Average profiles per asset: {total_assets_processed / successful:.1f}")
-                    print(f"  Total profiles exported: {total_assets_processed}")
-                
-                # Error summary
-                if failed > 0:
-                    print(f"\n⚠️  ERROR SUMMARY:")
-                    print(f"  Assets with missing data field: {sum(1 for i in failed_indices if i < len(env_mappings))}")
-                    print(f"  Assets with empty data array: {sum(1 for i in failed_indices if i < len(env_mappings))}")
-                    print(f"  Assets with missing ID field: {sum(1 for i in failed_indices if i < len(env_mappings))}")
-                    print(f"  API call failures: {failed}")
-                
-                # Output format information
-                print(f"\n📋 OUTPUT FORMAT:")
-                print(f"  CSV columns: target-env, profile_json")
-                print(f"  JSON encoding: UTF-8")
-                print(f"  CSV quoting: QUOTE_ALL")
-                print(f"  Line endings: Platform default")
-                
-                # Validation results
-                print(f"\n✅ VALIDATION:")
-                print(f"  CSV file readable: Yes")
-                print(f"  Header format: Correct")
-                print(f"  JSON entries: Valid and parseable")
-                print(f"  Data integrity: Verified")
-                
+                if verbose_mode:
+                    print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+                print(f"Output file: {output_file}")
+                print(f"Total mappings processed: {len(env_mappings)}")
+                print(f"Successful: {successful}")
+                print(f"Failed: {failed}")
                 print("="*80)
-                
-                if failed > 0:
-                    print("⚠️  Export completed with errors. Check log file for details.")
-                else:
-                    print("✅ Export completed successfully!")
             else:
                 print(f"✅ Asset profile export completed: {successful} successful, {failed} failed")
                 print(f"Output written to: {output_file}")
@@ -1332,6 +1287,382 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         logger.error(error_msg)
 
 
+def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute the asset-list-export command with parallel processing.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    try:
+        # Determine output file path
+        if globals.GLOBAL_OUTPUT_DIR:
+            output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-export.csv"
+        else:
+            output_file = Path("asset-all-export.csv")
+        
+        if not quiet_mode:
+            print(f"\nExporting all assets from ADOC environment (Parallel Mode)")
+            print(f"Output will be written to: {output_file}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            print("="*80)
+        
+        # Step 1: Get total count of assets
+        if not quiet_mode:
+            print("Getting total asset count...")
+        
+        if verbose_mode:
+            print("\nGET Request Headers:")
+            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true")
+            print(f"  Method: GET")
+            print(f"  Content-Type: application/json")
+            print(f"  Authorization: Bearer [REDACTED]")
+            if hasattr(client, 'tenant') and client.tenant:
+                print(f"  X-Tenant: {client.tenant}")
+        
+        count_response = client.make_api_call(
+            endpoint="/catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true",
+            method='GET'
+        )
+        
+        if verbose_mode:
+            print("\nCount Response:")
+            print(json.dumps(count_response, indent=2, ensure_ascii=False))
+        
+        # Extract total count
+        if not count_response or 'meta' not in count_response or 'count' not in count_response['meta']:
+            error_msg = "Failed to get total asset count from response"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        total_count = count_response['meta']['count']
+        page_size = 500  # Default page size
+        total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+        
+        if not quiet_mode:
+            print(f"Total assets found: {total_count}")
+            print(f"Page size: {page_size}")
+            print(f"Total pages to retrieve: {total_pages}")
+        
+        # Calculate thread configuration
+        max_threads = 5
+        min_pages_per_thread = 2
+        
+        if total_pages < min_pages_per_thread:
+            num_threads = 1
+            pages_per_thread = total_pages
+        else:
+            num_threads = min(max_threads, (total_pages + min_pages_per_thread - 1) // min_pages_per_thread)
+            pages_per_thread = (total_pages + num_threads - 1) // num_threads
+        
+        if not quiet_mode:
+            print(f"Using {num_threads} threads to process {total_pages} pages")
+            print(f"Pages per thread: {pages_per_thread}")
+            print("="*80)
+        
+        # Process pages in parallel
+        thread_results = []
+        temp_files = []
+        
+        # Funny thread names for progress indicators (all same length)
+        thread_names = [
+            "Rocket Thread     ",
+            "Lightning Thread  ", 
+            "Unicorn Thread    ",
+            "Dragon Thread     ",
+            "Shark Thread      "
+        ]
+        
+        def process_page_chunk(thread_id, start_page, end_page):
+            """Process a chunk of pages for a specific thread."""
+            # Create a thread-local client instance
+            thread_client = type(client)(
+                host=client.host,
+                access_key=client.access_key,
+                secret_key=client.secret_key,
+                tenant=getattr(client, 'tenant', None)
+            )
+            
+            # Create temporary file for this thread
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+            temp_files.append(temp_file.name)
+            
+            # Create progress bar for this thread
+            progress_bar = create_progress_bar(
+                total=end_page - start_page,
+                desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+                unit="pages",
+                disable=quiet_mode,
+                position=thread_id,
+                leave=False
+            )
+            
+            successful_pages = 0
+            failed_pages = 0
+            total_assets = 0
+            
+            # Process each page in this thread's range
+            for page in range(start_page, end_page):
+                try:
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Processing page {page + 1}")
+                        print(f"GET Request Headers:")
+                        print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                            print(f"  X-Tenant: {thread_client.tenant}")
+                    
+                    page_response = thread_client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true",
+                        method='GET'
+                    )
+                    
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Page {page + 1} Response:")
+                        print(json.dumps(page_response, indent=2, ensure_ascii=False))
+                    
+                    # Extract assets from response
+                    if page_response and 'data' in page_response and 'assets' in page_response['data']:
+                        page_assets = page_response['data']['assets']
+                        
+                        # Write assets to temporary CSV file
+                        with open(temp_file.name, 'a', newline='', encoding='utf-8') as f:
+                            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                            
+                            # Write asset data
+                            for asset_wrapper in page_assets:
+                                # Extract asset information from the wrapper structure
+                                if 'asset' in asset_wrapper:
+                                    asset = asset_wrapper['asset']
+                                else:
+                                    # Fallback: if no 'asset' wrapper, use the object directly
+                                    asset = asset_wrapper
+                                
+                                # Extract required fields
+                                asset_id = asset.get('id', '')
+                                asset_uid = asset.get('uid', '')
+                                
+                                # Extract tags and concatenate with colon separator
+                                tags = []
+                                if 'tags' in asset_wrapper and asset_wrapper['tags']:
+                                    for tag in asset_wrapper['tags']:
+                                        if 'name' in tag:
+                                            tags.append(tag['name'])
+                                
+                                tags_str = ':'.join(tags) if tags else ''
+                                
+                                # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
+                                writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
+                        
+                        if not quiet_mode:
+                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                            print(f"{thread_name} - ✅ Page {page + 1}: Retrieved {len(page_assets)} assets")
+                        else:
+                            print(f"✅ Page {page + 1}: {len(page_assets)} assets")
+                        
+                        successful_pages += 1
+                        total_assets += len(page_assets)
+                    else:
+                        # Try alternative response structures
+                        assets_found = False
+                        if page_response and 'data' in page_response:
+                            # Try different possible locations for assets
+                            possible_asset_locations = ['assets', 'asset', 'items', 'results']
+                            for location in possible_asset_locations:
+                                if location in page_response['data']:
+                                    page_assets = page_response['data'][location]
+                                    if isinstance(page_assets, list):
+                                        # Write assets to temporary CSV file
+                                        with open(temp_file.name, 'a', newline='', encoding='utf-8') as f:
+                                            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                                            
+                                            # Write asset data
+                                            for asset_wrapper in page_assets:
+                                                # Extract asset information from the wrapper structure
+                                                if 'asset' in asset_wrapper:
+                                                    asset = asset_wrapper['asset']
+                                                else:
+                                                    # Fallback: if no 'asset' wrapper, use the object directly
+                                                    asset = asset_wrapper
+                                                
+                                                # Extract required fields
+                                                asset_id = asset.get('id', '')
+                                                asset_uid = asset.get('uid', '')
+                                                
+                                                # Extract tags and concatenate with colon separator
+                                                tags = []
+                                                if 'tags' in asset_wrapper and asset_wrapper['tags']:
+                                                    for tag in asset_wrapper['tags']:
+                                                        if 'name' in tag:
+                                                            tags.append(tag['name'])
+                                                
+                                                tags_str = ':'.join(tags) if tags else ''
+                                                
+                                                # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
+                                                writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
+                                        
+                                        if not quiet_mode:
+                                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                                            print(f"{thread_name} - ✅ Page {page + 1}: Found {len(page_assets)} assets in 'data.{location}'")
+                                        else:
+                                            print(f"✅ Page {page + 1}: {len(page_assets)} assets")
+                                        
+                                        successful_pages += 1
+                                        total_assets += len(page_assets)
+                                        assets_found = True
+                                        break
+                        
+                        if not assets_found:
+                            error_msg = f"Invalid response format for page {page + 1} - no assets found"
+                            if not quiet_mode:
+                                thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                                print(f"\n{thread_name} - ❌ {error_msg}")
+                            logger.error(f"Thread {thread_id}: {error_msg}")
+                            failed_pages += 1
+                    
+                except Exception as e:
+                    error_msg = f"Failed to retrieve page {page + 1}: {e}"
+                    if not quiet_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - ❌ {error_msg}")
+                    logger.error(f"Thread {thread_id}: {error_msg}")
+                    failed_pages += 1
+                
+                # Update progress bar
+                progress_bar.update(1)
+            
+            progress_bar.close()
+            
+            return {
+                'thread_id': thread_id,
+                'successful_pages': successful_pages,
+                'failed_pages': failed_pages,
+                'total_assets': total_assets,
+                'temp_file': temp_file.name
+            }
+        
+        # Start threads
+        threads = []
+        for i in range(num_threads):
+            start_page = i * pages_per_thread
+            end_page = min(start_page + pages_per_thread, total_pages)
+            
+            thread = threading.Thread(
+                target=lambda tid=i, start=start_page, end=end_page: thread_results.append(
+                    process_page_chunk(tid, start, end)
+                )
+            )
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Merge temporary files
+        if not quiet_mode:
+            print("\nMerging temporary files...")
+        
+        # Create output directory if needed
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Read all rows from temporary files
+        all_rows = []
+        for temp_file in temp_files:
+            try:
+                with open(temp_file, 'r', newline='', encoding='utf-8') as temp_csv:
+                    reader = csv.reader(temp_csv)
+                    for row in reader:
+                        if len(row) >= 4:  # Ensure we have all required columns
+                            all_rows.append(row)
+            except Exception as e:
+                logger.error(f"Error reading temporary file {temp_file}: {e}")
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file)
+                except Exception as e:
+                    logger.warning(f"Could not delete temporary file {temp_file}: {e}")
+        
+        # Sort rows: first by source_uid, then by source_id
+        if not quiet_mode:
+            print("Sorting CSV file by source_uid, then source_id...")
+        
+        def sort_key(row):
+            source_uid = row[0] if len(row) > 0 else ''
+            source_id = row[1] if len(row) > 1 else ''
+            # Convert source_id to int for proper numeric sorting, fallback to string
+            try:
+                source_id_int = int(source_id) if source_id else 0
+            except (ValueError, TypeError):
+                source_id_int = 0
+            return (source_uid, source_id_int)
+        
+        all_rows.sort(key=sort_key)
+        
+        # Write final output with header
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header: source_uid, source_id, target_uid, tags
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            
+            # Write sorted data
+            writer.writerows(all_rows)
+        
+        # Print statistics
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("ASSET LIST EXPORT COMPLETED (PARALLEL MODE)")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total assets exported: {len(all_rows)}")
+            print(f"Threads used: {num_threads}")
+            
+            total_successful_pages = 0
+            total_failed_pages = 0
+            total_assets_exported = 0
+            
+            for result in thread_results:
+                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
+                print(f"{thread_name}: {result['successful_pages']} successful pages, {result['failed_pages']} failed pages, {result['total_assets']} assets")
+                total_successful_pages += result['successful_pages']
+                total_failed_pages += result['failed_pages']
+                total_assets_exported += result['total_assets']
+            
+            print(f"\nTotal successful pages: {total_successful_pages}")
+            print(f"Total failed pages: {total_failed_pages}")
+            print(f"Total pages processed: {total_pages}")
+            print(f"Total assets exported: {total_assets_exported}")
+            
+            # Calculate success rate
+            if total_pages > 0:
+                success_rate = (total_successful_pages / total_pages) * 100
+                print(f"Success rate: {success_rate:.1f}%")
+            
+            print("="*80)
+        else:
+            print(f"✅ Asset list export completed: {len(all_rows)} assets exported to {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error in parallel asset-list-export: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise
+
+
 def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
     """Execute the asset-profile-export command with parallel processing.
     
@@ -1691,3 +2022,501 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             print(f"❌ {error_msg}")
         logger.error(error_msg)
         raise 
+
+
+def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, parallel_mode: bool = False):
+    """Execute the asset-tag-import command.
+    
+    Args:
+        csv_file: Path to the CSV file containing asset data
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        parallel_mode: Whether to use parallel processing
+    """
+    try:
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {csv_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'policy-xfr' first to generate the asset-all-import-ready.csv file")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-all-import-ready.csv")
+            else:
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-all-import-ready.csv")
+            logger.error(error_msg)
+            return
+        
+        # Read CSV data
+        asset_data = []
+        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            for row in reader:
+                if len(row) >= 4:  # Ensure we have at least 4 columns
+                    source_uid = row[0]
+                    source_id = row[1]
+                    target_uid = row[2]
+                    tags_str = row[3]
+                    
+                    # Parse tags (colon-separated)
+                    tags = []
+                    if tags_str and tags_str.strip():
+                        tags = [tag.strip() for tag in tags_str.split(':') if tag.strip()]
+                    
+                    asset_data.append({
+                        'source_uid': source_uid,
+                        'source_id': source_id,
+                        'target_uid': target_uid,
+                        'tags': tags
+                    })
+        
+        if not asset_data:
+            print("❌ No valid asset data found in CSV file")
+            logger.warning("No valid asset data found in CSV file")
+            return
+        
+        # Filter out assets with no tags
+        assets_with_tags = [asset for asset in asset_data if asset['tags']]
+        
+        if not assets_with_tags:
+            print("ℹ️  No assets with tags found in CSV file")
+            logger.info("No assets with tags found in CSV file")
+            return
+        
+        if not quiet_mode:
+            print(f"\nImporting tags for {len(assets_with_tags)} assets from CSV file")
+            print(f"Input file: {csv_file}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            if parallel_mode:
+                print("🚀 PARALLEL MODE - Using multiple threads for faster processing")
+            print("="*80)
+        
+        if parallel_mode:
+            execute_asset_tag_import_parallel(assets_with_tags, client, logger, quiet_mode, verbose_mode)
+        else:
+            execute_asset_tag_import_sequential(assets_with_tags, client, logger, quiet_mode, verbose_mode)
+        
+    except Exception as e:
+        error_msg = f"Error in asset-tag-import: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+
+
+def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute asset tag import in sequential mode.
+    
+    Args:
+        assets_with_tags: List of asset data dictionaries
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    total_assets = len(assets_with_tags)
+    successful_assets = 0
+    failed_assets = 0
+    total_tags_imported = 0
+    total_tags_failed = 0
+    
+    # Create progress bar
+    progress_bar = create_progress_bar(
+        total=total_assets,
+        desc="Importing asset tags",
+        unit="assets",
+        disable=quiet_mode
+    )
+    
+    for asset in assets_with_tags:
+        try:
+            target_uid = asset['target_uid']
+            tags = asset['tags']
+            
+            if verbose_mode:
+                print(f"\nProcessing asset: {target_uid}")
+                print(f"Tags to import: {tags}")
+                print("-" * 60)
+            
+            # Step 1: Get asset ID from UID
+            if verbose_mode:
+                print(f"GET Request:")
+                print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
+                print(f"  Method: GET")
+                print(f"  Content-Type: application/json")
+                print(f"  Authorization: Bearer [REDACTED]")
+                if hasattr(client, 'tenant') and client.tenant:
+                    print(f"  X-Tenant: {client.tenant}")
+            
+            asset_response = client.make_api_call(
+                endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                method='GET'
+            )
+            
+            if verbose_mode:
+                print(f"Asset Response:")
+                print(json.dumps(asset_response, indent=2, ensure_ascii=False))
+            
+            # Extract asset ID
+            assets_list = []
+            if asset_response and 'data' in asset_response:
+                if isinstance(asset_response['data'], list):
+                    assets_list = asset_response['data']
+                elif isinstance(asset_response['data'], dict) and 'assets' in asset_response['data']:
+                    assets_list = asset_response['data']['assets']
+            if not assets_list:
+                error_msg = f"No asset found for UID: {target_uid}"
+                if verbose_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_assets += 1
+                progress_bar.update(1)
+                continue
+            asset_id = assets_list[0].get('id') if assets_list and isinstance(assets_list[0], dict) else None
+            if not asset_id:
+                error_msg = f"No asset ID found for UID: {target_uid}"
+                if verbose_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_assets += 1
+                progress_bar.update(1)
+                continue
+            
+            if verbose_mode:
+                print(f"Found asset ID: {asset_id}")
+            
+            # Step 2: Import each tag
+            asset_tags_successful = 0
+            asset_tags_failed = 0
+            
+            for tag in tags:
+                try:
+                    if verbose_mode:
+                        print(f"\nPOST Request:")
+                        print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
+                        print(f"  Method: POST")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(client, 'tenant') and client.tenant:
+                            print(f"  X-Tenant: {client.tenant}")
+                        print(f"  Request Body: {{\"name\": \"{tag}\"}}")
+                    
+                    tag_response = client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
+                        method='POST',
+                        json_payload={"name": tag}
+                    )
+                    
+                    if verbose_mode:
+                        print(f"Tag Response:")
+                        print(json.dumps(tag_response, indent=2, ensure_ascii=False))
+                    
+                    if tag_response:
+                        asset_tags_successful += 1
+                        total_tags_imported += 1
+                        if verbose_mode:
+                            print(f"✅ Successfully imported tag: {tag}")
+                    else:
+                        asset_tags_failed += 1
+                        total_tags_failed += 1
+                        if verbose_mode:
+                            print(f"❌ Failed to import tag: {tag}")
+                
+                except Exception as e:
+                    error_msg = f"Error importing tag '{tag}' for asset {target_uid}: {e}"
+                    if verbose_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    asset_tags_failed += 1
+                    total_tags_failed += 1
+            
+            # Update asset statistics
+            if asset_tags_failed == 0:
+                successful_assets += 1
+                if verbose_mode:
+                    print(f"✅ Successfully processed asset: {target_uid} ({asset_tags_successful} tags)")
+            else:
+                failed_assets += 1
+                if verbose_mode:
+                    print(f"⚠️  Partially processed asset: {target_uid} ({asset_tags_successful} successful, {asset_tags_failed} failed)")
+            
+            progress_bar.update(1)
+            
+        except Exception as e:
+            error_msg = f"Error processing asset {asset.get('target_uid', 'unknown')}: {e}"
+            if verbose_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            failed_assets += 1
+            progress_bar.update(1)
+    
+    progress_bar.close()
+    
+    # Print statistics
+    if not quiet_mode:
+        print("\n" + "="*80)
+        print("ASSET TAG IMPORT COMPLETED")
+        print("="*80)
+        print(f"Total assets processed: {total_assets}")
+        print(f"Successful assets: {successful_assets}")
+        print(f"Failed assets: {failed_assets}")
+        print(f"Total tags imported: {total_tags_imported}")
+        print(f"Total tags failed: {total_tags_failed}")
+        print("="*80)
+    else:
+        print(f"✅ Asset tag import completed: {successful_assets}/{total_assets} assets successful, {total_tags_imported} tags imported")
+
+
+def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute asset tag import in parallel mode.
+    
+    Args:
+        assets_with_tags: List of asset data dictionaries
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    # Calculate thread configuration
+    max_threads = 5
+    min_assets_per_thread = 10
+    
+    if len(assets_with_tags) < min_assets_per_thread:
+        num_threads = 1
+        assets_per_thread = len(assets_with_tags)
+    else:
+        num_threads = min(max_threads, (len(assets_with_tags) + min_assets_per_thread - 1) // min_assets_per_thread)
+        assets_per_thread = (len(assets_with_tags) + num_threads - 1) // num_threads
+    
+    if not quiet_mode:
+        print(f"Using {num_threads} threads to process {len(assets_with_tags)} assets")
+        print(f"Assets per thread: {assets_per_thread}")
+        print("="*80)
+    
+    # Process assets in parallel
+    thread_results = []
+    
+    # Funny thread names for progress indicators (all same length)
+    thread_names = [
+        "Rocket Thread     ",
+        "Lightning Thread  ", 
+        "Unicorn Thread    ",
+        "Dragon Thread     ",
+        "Shark Thread      "
+    ]
+    
+    def process_asset_chunk(thread_id, start_index, end_index):
+        """Process a chunk of assets for a specific thread."""
+        # Create a thread-local client instance
+        thread_client = type(client)(
+            host=client.host,
+            access_key=client.access_key,
+            secret_key=client.secret_key,
+            tenant=getattr(client, 'tenant', None)
+        )
+        
+        # Get assets for this thread
+        thread_assets = assets_with_tags[start_index:end_index]
+        
+        # Create progress bar for this thread
+        progress_bar = create_progress_bar(
+            total=len(thread_assets),
+            desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+            unit="assets",
+            disable=quiet_mode,
+            position=thread_id,
+            leave=False
+        )
+        
+        successful_assets = 0
+        failed_assets = 0
+        total_tags_imported = 0
+        total_tags_failed = 0
+        
+        # Process each asset in this thread's range
+        for asset in thread_assets:
+            try:
+                target_uid = asset['target_uid']
+                tags = asset['tags']
+                
+                if verbose_mode:
+                    thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                    print(f"\n{thread_name} - Processing asset: {target_uid}")
+                    print(f"Tags to import: {tags}")
+                    print("-" * 60)
+                
+                # Step 1: Get asset ID from UID
+                if verbose_mode:
+                    print(f"GET Request:")
+                    print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                        print(f"  X-Tenant: {thread_client.tenant}")
+                
+                asset_response = thread_client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                    method='GET'
+                )
+                
+                if verbose_mode:
+                    print(f"Asset Response:")
+                    print(json.dumps(asset_response, indent=2, ensure_ascii=False))
+                
+                # Extract asset ID
+                if not asset_response or 'data' not in asset_response:
+                    error_msg = f"No 'data' field found in asset response for UID: {target_uid}"
+                    if verbose_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_assets += 1
+                    progress_bar.update(1)
+                    continue
+                
+                assets_list = []
+                if asset_response and 'data' in asset_response:
+                    if isinstance(asset_response['data'], list):
+                        assets_list = asset_response['data']
+                    elif isinstance(asset_response['data'], dict) and 'assets' in asset_response['data']:
+                        assets_list = asset_response['data']['assets']
+                if not assets_list:
+                    error_msg = f"No asset found for UID: {target_uid}"
+                    if verbose_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_assets += 1
+                    progress_bar.update(1)
+                    continue
+                asset_id = assets_list[0].get('id') if assets_list and isinstance(assets_list[0], dict) else None
+                if not asset_id:
+                    error_msg = f"No asset ID found for UID: {target_uid}"
+                    if verbose_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_assets += 1
+                    progress_bar.update(1)
+                    continue
+                
+                if verbose_mode:
+                    print(f"Found asset ID: {asset_id}")
+                
+                # Step 2: Import each tag
+                asset_tags_successful = 0
+                asset_tags_failed = 0
+                
+                for tag in tags:
+                    try:
+                        if verbose_mode:
+                            print(f"\nPOST Request:")
+                            print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
+                            print(f"  Method: POST")
+                            print(f"  Content-Type: application/json")
+                            print(f"  Authorization: Bearer [REDACTED]")
+                            if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                                print(f"  X-Tenant: {thread_client.tenant}")
+                            print(f"  Request Body: {{\"name\": \"{tag}\"}}")
+                        
+                        tag_response = thread_client.make_api_call(
+                            endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
+                            method='POST',
+                            json_payload={"name": tag}
+                        )
+                        
+                        if verbose_mode:
+                            print(f"Tag Response:")
+                            print(json.dumps(tag_response, indent=2, ensure_ascii=False))
+                        
+                        if tag_response:
+                            asset_tags_successful += 1
+                            total_tags_imported += 1
+                            if verbose_mode:
+                                print(f"✅ Successfully imported tag: {tag}")
+                        else:
+                            asset_tags_failed += 1
+                            total_tags_failed += 1
+                            if verbose_mode:
+                                print(f"❌ Failed to import tag: {tag}")
+                    
+                    except Exception as e:
+                        error_msg = f"Error importing tag '{tag}' for asset {target_uid}: {e}"
+                        if verbose_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        asset_tags_failed += 1
+                        total_tags_failed += 1
+                
+                # Update asset statistics
+                if asset_tags_failed == 0:
+                    successful_assets += 1
+                    if verbose_mode:
+                        print(f"✅ Successfully processed asset: {target_uid} ({asset_tags_successful} tags)")
+                else:
+                    failed_assets += 1
+                    if verbose_mode:
+                        print(f"⚠️  Partially processed asset: {target_uid} ({asset_tags_successful} successful, {asset_tags_failed} failed)")
+                
+                progress_bar.update(1)
+                
+            except Exception as e:
+                error_msg = f"Error processing asset {asset.get('target_uid', 'unknown')}: {e}"
+                if verbose_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_assets += 1
+                progress_bar.update(1)
+        
+        progress_bar.close()
+        
+        return {
+            'thread_id': thread_id,
+            'successful_assets': successful_assets,
+            'failed_assets': failed_assets,
+            'total_tags_imported': total_tags_imported,
+            'total_tags_failed': total_tags_failed
+        }
+    
+    # Execute parallel processing
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        
+        for i in range(num_threads):
+            start_index = i * assets_per_thread
+            end_index = min(start_index + assets_per_thread, len(assets_with_tags))
+            
+            future = executor.submit(process_asset_chunk, i, start_index, end_index)
+            futures.append(future)
+        
+        # Collect results
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                thread_results.append(result)
+            except Exception as e:
+                logger.error(f"Thread execution error: {e}")
+    
+    # Aggregate results
+    total_successful_assets = sum(r['successful_assets'] for r in thread_results)
+    total_failed_assets = sum(r['failed_assets'] for r in thread_results)
+    total_tags_imported = sum(r['total_tags_imported'] for r in thread_results)
+    total_tags_failed = sum(r['total_tags_failed'] for r in thread_results)
+    
+    # Print statistics
+    if not quiet_mode:
+        print("\n" + "="*80)
+        print("ASSET TAG IMPORT COMPLETED (PARALLEL MODE)")
+        print("="*80)
+        print(f"Total assets processed: {len(assets_with_tags)}")
+        print(f"Successful assets: {total_successful_assets}")
+        print(f"Failed assets: {total_failed_assets}")
+        print(f"Total tags imported: {total_tags_imported}")
+        print(f"Total tags failed: {total_tags_failed}")
+        print(f"Threads used: {num_threads}")
+        print("="*80)
+    else:
+        print(f"✅ Asset tag import completed: {total_successful_assets}/{len(assets_with_tags)} assets successful, {total_tags_imported} tags imported") 

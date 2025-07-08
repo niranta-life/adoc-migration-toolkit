@@ -20,7 +20,8 @@ from src.adoc_migration_toolkit.execution.asset_operations import (
     execute_asset_profile_import,
     execute_asset_config_export,
     execute_asset_config_import,
-    execute_asset_list_export
+    execute_asset_list_export,
+    execute_asset_list_export_parallel
 )
 from src.adoc_migration_toolkit.shared import globals
 
@@ -739,6 +740,68 @@ class TestExecuteAssetListExport:
             
         assert rows[0] == ['source_uid', 'source_id', 'target_uid', 'tags']
         assert len(rows) == 3  # Header + 2 data rows
+    
+    def test_execute_asset_list_export_parallel_success(self, temp_dir, mock_client, mock_logger):
+        """Test successful parallel asset list export execution."""
+        # Mock count response
+        count_response = {
+            "meta": {
+                "count": 10
+            }
+        }
+        
+        # Mock page responses with tags
+        page_response = {
+            "data": {
+                "assets": [
+                    {
+                        "asset": {"id": 1, "uid": "asset-1"},
+                        "tags": [{"name": "tag1"}, {"name": "tag2"}]
+                    },
+                    {
+                        "asset": {"id": 2, "uid": "asset-2"},
+                        "tags": [{"name": "tag3"}]
+                    }
+                ]
+            }
+        }
+        
+        # Mock multiple page calls for parallel processing
+        mock_client.make_api_call.side_effect = [
+            count_response,  # Count call
+            page_response,   # Page 0
+            page_response,   # Page 1
+            page_response,   # Page 2
+            page_response,   # Page 3
+            page_response    # Page 4
+        ]
+        
+        # Mock the client constructor to return the same mock client
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir), \
+             patch.object(type(mock_client), '__init__', return_value=None), \
+             patch.object(type(mock_client), '__new__', return_value=mock_client):
+            
+            execute_asset_list_export_parallel(
+                client=mock_client,
+                logger=mock_logger,
+                verbose_mode=False
+            )
+        
+        # Verify output file was created
+        output_file = temp_dir / "asset-export" / "asset-all-export.csv"
+        assert output_file.exists()
+        
+        # Verify CSV content
+        with open(output_file, 'r') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            
+        assert rows[0] == ['source_uid', 'source_id', 'target_uid', 'tags']
+        assert len(rows) > 1  # Header + data rows
+        
+        # Verify first row has correct format
+        assert rows[1] == ['asset-1', '1', 'asset-1', 'tag1:tag2']
+        assert rows[2] == ['asset-2', '2', 'asset-2', 'tag3']
 
 
 class TestAssetOperationsIntegration:
