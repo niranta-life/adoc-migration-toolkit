@@ -602,7 +602,7 @@ The policy transformer  is a critical component that processes policy export ZIP
 
 ```bash
 # Format policy export files with string replacement
-policy-xfr [--input input_dir] --source-env-string <source> --target-env-string <target> [options]
+policy-xfr [--input input_dir] --string-transform "A":"B", "C":"D", "E":"F" [options]
 ```
 
 **Purpose:**
@@ -621,10 +621,13 @@ policy-xfr [--input input_dir] --source-env-string <source> --target-env-string 
 **Examples:**
 ```bash
 # Basic string replacement
-policy-xfr --source-env-string "PROD_DB" --target-env-string "DEV_DB"
+policy-xfr --string-transform "PROD_DB":"DEV_DB"
+
+# Multiple string transformations
+policy-xfr --string-transform "PROD_DB":"DEV_DB", "PROD_URL":"DEV_URL", "PROD_API":"DEV_API"
 
 # With custom input directory
-policy-xfr --input data/samples --source-env-string "old" --target-env-string "new" --verbose
+policy-xfr --input data/samples --string-transform "old":"new", "test":"prod" --verbose
 ```
 
 **Generated Outputs:**
@@ -636,10 +639,11 @@ policy-xfr --input data/samples --source-env-string "old" --target-env-string "n
 - Processing statistics and validation reports
 
 **Critical Requirements:**
-- Environment strings must match exactly (case-sensitive)
-- Source environment strings must exist in the policy files
-- Target environment strings should be valid for the target environment
+- String transformations must match exactly (case-sensitive)
+- Source strings must exist in the policy files
+- Target strings should be valid for the target environment
 - Input directory should contain valid policy export ZIP files
+- Multiple transformations are applied efficiently in a single pass
 
 ## Segments Management
 
@@ -1452,8 +1456,8 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
     Import policy definitions from ZIP files to target environment
   rule-tag-export [--quiet] [--verbose] [--parallel]
     Export rule tags for all policies from policies-all-export.csv
-  policy-xfr [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]
-    Format policy export files by replacing substrings in JSON files and ZIP archives
+  policy-xfr [--input <input_dir>] --string-transform "A":"B", "C":"D", "E":"F" [options]
+    Format policy export files by replacing multiple substrings in JSON files and ZIP archives
 
 🔧 VCS COMMANDS:
   vcs-config [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]

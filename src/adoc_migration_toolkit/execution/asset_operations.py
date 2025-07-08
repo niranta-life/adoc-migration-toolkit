@@ -2211,9 +2211,9 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
             for tag in tags:
                 try:
                     if verbose_mode:
-                        print(f"\nPOST Request:")
+                        print(f"\nPUT Request:")
                         print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
-                        print(f"  Method: POST")
+                        print(f"  Method: PUT")
                         print(f"  Content-Type: application/json")
                         print(f"  Authorization: Bearer [REDACTED]")
                         if hasattr(client, 'tenant') and client.tenant:
@@ -2222,7 +2222,7 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
                     
                     tag_response = client.make_api_call(
                         endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
-                        method='POST',
+                        method='PUT',
                         json_payload={"name": tag},
                         use_target_auth=True,
                         use_target_tenant=True
@@ -2431,9 +2431,9 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
                 for tag in tags:
                     try:
                         if verbose_mode:
-                            print(f"\nPOST Request:")
+                            print(f"\nPUT Request:")
                             print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
-                            print(f"  Method: POST")
+                            print(f"  Method: PUT")
                             print(f"  Content-Type: application/json")
                             print(f"  Authorization: Bearer [REDACTED]")
                             if hasattr(thread_client, 'tenant') and thread_client.tenant:
@@ -2442,7 +2442,7 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
                         
                         tag_response = thread_client.make_api_call(
                             endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
-                            method='POST',
+                            method='PUT',
                             json_payload={"name": tag},
                             use_target_auth=True,
                             use_target_tenant=True

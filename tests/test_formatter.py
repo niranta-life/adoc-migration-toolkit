@@ -88,13 +88,11 @@ class TestPolicyExportFormatter:
         """Test PolicyExportFormatter initialization with valid parameters."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         assert formatter.input_dir == temp_dir.resolve()
-        assert formatter.search_string == "PROD_DB"
-        assert formatter.replace_string == "DEV_DB"
+        assert formatter.string_transforms == {"PROD_DB": "DEV_DB"}
         assert formatter.output_dir.exists()
         assert formatter.asset_export_dir.exists()
         assert formatter.policy_export_dir.exists()
@@ -104,26 +102,23 @@ class TestPolicyExportFormatter:
         with pytest.raises(ValueError, match="Input directory cannot be empty"):
             PolicyExportFormatter(
                 input_dir="",
-                search_string="PROD_DB",
-                replace_string="DEV_DB"
+                string_transforms={"PROD_DB": "DEV_DB"}
             )
     
-    def test_init_with_empty_search_string(self, temp_dir):
-        """Test PolicyExportFormatter initialization with empty search string."""
-        with pytest.raises(ValueError, match="Search string cannot be empty"):
+    def test_init_with_empty_string_transforms(self, temp_dir):
+        """Test PolicyExportFormatter initialization with empty string transforms."""
+        with pytest.raises(ValueError, match="String transforms must be a non-empty dictionary"):
             PolicyExportFormatter(
                 input_dir=str(temp_dir),
-                search_string="",
-                replace_string="DEV_DB"
+                string_transforms={}
             )
     
-    def test_init_with_none_replace_string(self, temp_dir):
-        """Test PolicyExportFormatter initialization with None replace string."""
-        with pytest.raises(ValueError, match="Replace string cannot be None"):
+    def test_init_with_invalid_string_transforms(self, temp_dir):
+        """Test PolicyExportFormatter initialization with invalid string transforms."""
+        with pytest.raises(ValueError, match="String transforms must be a non-empty dictionary"):
             PolicyExportFormatter(
                 input_dir=str(temp_dir),
-                search_string="PROD_DB",
-                replace_string=None
+                string_transforms=None
             )
     
     def test_init_with_nonexistent_input_dir(self):
@@ -131,8 +126,7 @@ class TestPolicyExportFormatter:
         with pytest.raises(FileNotFoundError):
             PolicyExportFormatter(
                 input_dir="/nonexistent/directory",
-                search_string="PROD_DB",
-                replace_string="DEV_DB"
+                string_transforms={"PROD_DB": "DEV_DB"}
             )
     
     def test_init_with_file_as_input_dir(self, temp_dir):
@@ -143,8 +137,7 @@ class TestPolicyExportFormatter:
         with pytest.raises(ValueError, match="Input path is not a directory"):
             PolicyExportFormatter(
                 input_dir=str(test_file),
-                search_string="PROD_DB",
-                replace_string="DEV_DB"
+                string_transforms={"PROD_DB": "DEV_DB"}
             )
     
     def test_init_with_custom_output_dir(self, temp_dir):
@@ -153,8 +146,7 @@ class TestPolicyExportFormatter:
         
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(custom_output)
         )
         
@@ -167,8 +159,7 @@ class TestPolicyExportFormatter:
         """Test replace_in_value with string values."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Test string replacement
@@ -185,8 +176,7 @@ class TestPolicyExportFormatter:
         """Test replace_in_value with dictionary values."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         input_dict = {
@@ -214,8 +204,7 @@ class TestPolicyExportFormatter:
         """Test replace_in_value with list values."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         input_list = [
@@ -239,8 +228,7 @@ class TestPolicyExportFormatter:
         """Test replace_in_value with non-string types."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Test with numbers, booleans, None
@@ -249,12 +237,33 @@ class TestPolicyExportFormatter:
         assert formatter.replace_in_value(None) == None
         assert formatter.stats["changes_made"] == 0
     
+    def test_replace_in_value_multiple_transforms(self, temp_dir):
+        """Test replace_in_value with multiple string transformations."""
+        formatter = PolicyExportFormatter(
+            input_dir=str(temp_dir),
+            string_transforms={"PROD_DB": "DEV_DB", "PROD_URL": "DEV_URL", "PROD_API": "DEV_API"}
+        )
+        
+        # Test multiple replacements in a single string
+        result = formatter.replace_in_value("PROD_DB.users at PROD_URL with PROD_API")
+        assert result == "DEV_DB.users at DEV_URL with DEV_API"
+        assert formatter.stats["changes_made"] == 3
+        
+        # Test string with only some matches
+        result = formatter.replace_in_value("PROD_DB.users at other_url")
+        assert result == "DEV_DB.users at other_url"
+        assert formatter.stats["changes_made"] == 4  # Incremented by 1
+        
+        # Test string with no matches
+        result = formatter.replace_in_value("other_database.users")
+        assert result == "other_database.users"
+        assert formatter.stats["changes_made"] == 4  # Should not increment
+    
     def test_extract_data_quality_assets_list(self, temp_dir, sample_policy_data):
         """Test extract_data_quality_assets with list of policies."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         formatter.extract_data_quality_assets(sample_policy_data)
@@ -281,8 +290,7 @@ class TestPolicyExportFormatter:
         """Test extract_data_quality_assets with single policy."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         single_policy = {
@@ -305,8 +313,7 @@ class TestPolicyExportFormatter:
         """Test write_extracted_assets_csv method."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Add some extracted assets
@@ -331,8 +338,7 @@ class TestPolicyExportFormatter:
         """Test write_all_assets_csv method."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Add some assets
@@ -360,8 +366,7 @@ class TestPolicyExportFormatter:
         
         formatter = PolicyExportFormatter(
             input_dir=str(resolved_temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Create test JSON file within the input directory
@@ -393,8 +398,7 @@ class TestPolicyExportFormatter:
         
         formatter = PolicyExportFormatter(
             input_dir=str(resolved_temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Create test JSON file with data quality policy definitions
@@ -417,8 +421,7 @@ class TestPolicyExportFormatter:
         """Test JSON file processing with nonexistent file."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         nonexistent_file = temp_dir / "nonexistent.json"
@@ -431,8 +434,7 @@ class TestPolicyExportFormatter:
         """Test JSON file processing with invalid JSON."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Create invalid JSON file
@@ -448,8 +450,7 @@ class TestPolicyExportFormatter:
         """Test successful ZIP file processing."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Create test ZIP file
@@ -487,8 +488,7 @@ class TestPolicyExportFormatter:
         """Test ZIP file processing with nonexistent file."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         nonexistent_file = temp_dir / "nonexistent.zip"
@@ -501,8 +501,7 @@ class TestPolicyExportFormatter:
         """Test ZIP file processing with invalid ZIP file."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Create invalid ZIP file
@@ -518,8 +517,7 @@ class TestPolicyExportFormatter:
         """Test process_directory with empty directory."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         stats = formatter.process_directory()
@@ -534,8 +532,7 @@ class TestPolicyExportFormatter:
         """Test process_directory with JSON and ZIP files."""
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB"
+            string_transforms={"PROD_DB": "DEV_DB"}
         )
         
         # Create test files
@@ -578,8 +575,7 @@ class TestPolicyExportFormatter:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=logging.getLogger(__name__)
         )
@@ -616,8 +612,7 @@ class TestPolicyExportFormatter:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=logging.getLogger(__name__)
         )
@@ -633,7 +628,7 @@ class TestPolicyExportFormatter:
         from src.adoc_migration_toolkit.execution.formatter import PolicyExportFormatter
         
         # Create asset-export directory and empty CSV file
-        asset_export_dir = temp_dir / "asset-export"
+        asset_export_dir = temp_dir / "asset_export_dir"
         asset_export_dir.mkdir(parents=True, exist_ok=True)
         
         csv_file = asset_export_dir / "asset-config-export.csv"
@@ -643,8 +638,7 @@ class TestPolicyExportFormatter:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=logging.getLogger(__name__)
         )
@@ -671,8 +665,7 @@ class TestPolicyExportFormatter:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=logging.getLogger(__name__)
         )
@@ -695,8 +688,7 @@ class TestValidateArguments:
         """Test validate_arguments with valid arguments."""
         args = Mock()
         args.input_dir = str(temp_dir)
-        args.search_string = "PROD_DB"
-        args.replace_string = "DEV_DB"
+        args.string_transforms = {"PROD_DB": "DEV_DB"}
         
         # Should not raise any exception
         validate_arguments(args)
@@ -711,32 +703,29 @@ class TestValidateArguments:
         with pytest.raises(ValueError, match="Input directory cannot be empty"):
             validate_arguments(args)
     
-    def test_validate_arguments_empty_search_string(self, temp_dir):
-        """Test validate_arguments with empty search string."""
+    def test_validate_arguments_empty_string_transforms(self, temp_dir):
+        """Test validate_arguments with empty string transforms."""
         args = Mock()
         args.input_dir = str(temp_dir)
-        args.search_string = ""
-        args.replace_string = "DEV_DB"
+        args.string_transforms = {}
         
-        with pytest.raises(ValueError, match="Search string cannot be empty"):
+        with pytest.raises(ValueError, match="String transforms must be a non-empty dictionary"):
             validate_arguments(args)
     
-    def test_validate_arguments_none_replace_string(self, temp_dir):
-        """Test validate_arguments with None replace string."""
+    def test_validate_arguments_invalid_string_transforms(self, temp_dir):
+        """Test validate_arguments with invalid string transforms."""
         args = Mock()
         args.input_dir = str(temp_dir)
-        args.search_string = "PROD_DB"
-        args.replace_string = None
+        args.string_transforms = None
         
-        with pytest.raises(ValueError, match="Replace string cannot be None"):
+        with pytest.raises(ValueError, match="String transforms must be a non-empty dictionary"):
             validate_arguments(args)
     
     def test_validate_arguments_nonexistent_input_dir(self):
         """Test validate_arguments with nonexistent input directory."""
         args = Mock()
         args.input_dir = "/nonexistent/directory"
-        args.search_string = "PROD_DB"
-        args.replace_string = "DEV_DB"
+        args.string_transforms = {"PROD_DB": "DEV_DB"}
         
         with pytest.raises(FileNotFoundError):
             validate_arguments(args)
@@ -747,85 +736,77 @@ class TestParseFormatterCommand:
     
     def test_parse_formatter_command_valid(self):
         """Test parse_formatter_command with valid command."""
-        command = 'policy-xfr --source-env-string PROD_DB --target-env-string DEV_DB'
+        command = 'policy-xfr --string-transform "PROD_DB":"DEV_DB"'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
         assert input_dir is None
-        assert source_string == "PROD_DB"
-        assert target_string == "DEV_DB"
+        assert string_transforms == {"PROD_DB": "DEV_DB"}
         assert output_dir is None
         assert quiet_mode is False
         assert verbose_mode is False
     
     def test_parse_formatter_command_with_input_dir(self):
         """Test parse_formatter_command with input directory."""
-        command = 'policy-xfr --input /path/to/input --source-env-string PROD_DB --target-env-string DEV_DB'
+        command = 'policy-xfr --input /path/to/input --string-transform "PROD_DB":"DEV_DB"'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
         assert input_dir == "/path/to/input"
-        assert source_string == "PROD_DB"
-        assert target_string == "DEV_DB"
+        assert string_transforms == {"PROD_DB": "DEV_DB"}
     
     def test_parse_formatter_command_with_output_dir(self):
         """Test parse_formatter_command with output directory."""
-        command = 'policy-xfr --output-dir /path/to/output --source-env-string PROD_DB --target-env-string DEV_DB'
+        command = 'policy-xfr --output-dir /path/to/output --string-transform "PROD_DB":"DEV_DB"'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
         assert output_dir == "/path/to/output"
-        assert source_string == "PROD_DB"
-        assert target_string == "DEV_DB"
+        assert string_transforms == {"PROD_DB": "DEV_DB"}
     
     def test_parse_formatter_command_with_flags(self):
         """Test parse_formatter_command with quiet and verbose flags."""
-        command = 'policy-xfr --source-env-string PROD_DB --target-env-string DEV_DB --quiet --verbose'
+        command = 'policy-xfr --string-transform "PROD_DB":"DEV_DB" --quiet --verbose'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
         assert quiet_mode is True
         assert verbose_mode is True
     
-    def test_parse_formatter_command_missing_source_string(self):
-        """Test parse_formatter_command with missing source string."""
-        command = 'policy-xfr --target-env-string DEV_DB'
+    def test_parse_formatter_command_missing_string_transform(self):
+        """Test parse_formatter_command with missing string transform."""
+        command = 'policy-xfr --input /path/to/input'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
         assert input_dir is None
-        assert source_string is None
-        assert target_string is None
+        assert string_transforms is None
     
-    def test_parse_formatter_command_missing_target_string(self):
-        """Test parse_formatter_command with missing target string."""
-        command = 'policy-xfr --source-env-string PROD_DB'
+    def test_parse_formatter_command_multiple_transforms(self):
+        """Test parse_formatter_command with multiple string transformations."""
+        command = 'policy-xfr --string-transform "A":"B", "C":"D", "E":"F"'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
-        assert input_dir is None
-        assert source_string is None
-        assert target_string is None
+        assert string_transforms == {"A": "B", "C": "D", "E": "F"}
     
     def test_parse_formatter_command_help(self):
         """Test parse_formatter_command with help flag."""
         command = 'policy-xfr --help'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
         assert input_dir is None
-        assert source_string is None
-        assert target_string is None
+        assert string_transforms is None
     
     def test_parse_formatter_command_unknown_argument(self):
         """Test parse_formatter_command with unknown argument."""
-        command = 'policy-xfr --unknown-arg value --source-env-string PROD_DB --target-env-string DEV_DB'
+        command = 'policy-xfr --unknown-arg value --string-transform "A":"B"'
         
-        input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+        input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
         
         assert input_dir is None
-        assert source_string is None
-        assert target_string is None
+        assert string_transforms is None
 
 
 class TestExecuteFormatter:
@@ -845,8 +826,7 @@ class TestExecuteFormatter:
         
         execute_formatter(
             input_dir=str(temp_dir),
-            source_string="PROD_DB",
-            target_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=None,
             quiet_mode=False,
             verbose_mode=False,
@@ -873,8 +853,7 @@ class TestExecuteFormatter:
         with patch('src.adoc_migration_toolkit.execution.formatter.globals.GLOBAL_OUTPUT_DIR', global_output_dir):
             execute_formatter(
                 input_dir=None,
-                source_string="PROD_DB",
-                target_string="DEV_DB",
+                string_transforms={"PROD_DB": "DEV_DB"},
                 output_dir=None,
                 quiet_mode=False,
                 verbose_mode=False,
@@ -901,8 +880,7 @@ class TestExecuteFormatter:
         with patch('pathlib.Path.cwd', return_value=temp_dir):
             execute_formatter(
                 input_dir=None,
-                source_string="PROD_DB",
-                target_string="DEV_DB",
+                string_transforms={"PROD_DB": "DEV_DB"},
                 output_dir=None,
                 quiet_mode=False,
                 verbose_mode=False,
@@ -918,8 +896,7 @@ class TestExecuteFormatter:
         with patch('pathlib.Path.cwd', return_value=Path("/tmp")):
             execute_formatter(
                 input_dir=None,
-                source_string="PROD_DB",
-                target_string="DEV_DB",
+                string_transforms={"PROD_DB": "DEV_DB"},
                 output_dir=None,
                 quiet_mode=False,
                 verbose_mode=False,
@@ -938,8 +915,7 @@ class TestExecuteFormatter:
         
         execute_formatter(
             input_dir=str(temp_dir),
-            source_string="PROD_DB",
-            target_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=None,
             quiet_mode=True,
             verbose_mode=False,
@@ -957,8 +933,7 @@ class TestExecuteFormatter:
         
         execute_formatter(
             input_dir=str(temp_dir),
-            source_string="PROD_DB",
-            target_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=None,
             quiet_mode=False,
             verbose_mode=False,

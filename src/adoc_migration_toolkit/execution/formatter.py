@@ -22,14 +22,13 @@ from ..shared import globals
 class PolicyExportFormatter:
     """Professional JSON string replacement tool with comprehensive error handling."""
     
-    def __init__(self, input_dir: str, search_string: str, replace_string: str, 
+    def __init__(self, input_dir: str, string_transforms: dict, 
                  output_dir: Optional[str] = None, logger: Optional[logging.Logger] = None):
         """Initialize the PolicyExportFormatter with validation.
         
         Args:
             input_dir (str): Directory containing JSON files and ZIP files to process
-            search_string (str): Substring to search for
-            replace_string (str): Substring to replace with
+            string_transforms (dict): Dictionary of string transformations {source: target}
             output_dir (str): Output directory (optional)
             logger (Logger): Logger instance (optional)
             
@@ -43,16 +42,12 @@ class PolicyExportFormatter:
         if not input_dir or not input_dir.strip():
             raise ValueError("Input directory cannot be empty")
         
-        if not search_string or not search_string.strip():
-            raise ValueError("Search string cannot be empty")
-        
-        if replace_string is None:
-            raise ValueError("Replace string cannot be None")
+        if not string_transforms or not isinstance(string_transforms, dict):
+            raise ValueError("String transforms must be a non-empty dictionary")
         
         # Setup paths
         self.input_dir = Path(input_dir).resolve()
-        self.search_string = search_string.strip()
-        self.replace_string = replace_string
+        self.string_transforms = string_transforms
         
         # Validate input directory
         if not self.input_dir.exists():
@@ -110,8 +105,9 @@ class PolicyExportFormatter:
         self.logger.info(f"Output directory (processed files): {self.output_dir}")
         self.logger.info(f"Asset export directory: {self.asset_export_dir}")
         self.logger.info(f"Policy export directory: {self.policy_export_dir}")
-        self.logger.info(f"Search string: '{self.search_string}'")
-        self.logger.info(f"Replace string: '{self.replace_string}'")
+        self.logger.info(f"String transformations: {len(self.string_transforms)} transformations")
+        for source, target in self.string_transforms.items():
+            self.logger.info(f"  '{source}' -> '{target}'")
     
     def extract_data_quality_assets(self, data: Any) -> None:
         """Extract uid and backingAssetId from non-segmented data quality policies.
@@ -267,8 +263,10 @@ class PolicyExportFormatter:
                 sorted_assets = sorted(self.extracted_assets)
                 
                 for uid in sorted_assets:
-                    # Apply the same string replacement logic to create target-env
-                    target_env = uid.replace(self.search_string, self.replace_string)
+                    # Apply string transformations to create target-env
+                    target_env = uid
+                    for source, target in self.string_transforms.items():
+                        target_env = target_env.replace(source, target)
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.extracted_assets)} unique assets to {csv_file}")
@@ -295,8 +293,10 @@ class PolicyExportFormatter:
                 sorted_assets = sorted(self.all_asset_uids)
                 
                 for uid in sorted_assets:
-                    # Apply the same string replacement logic to create target-env
-                    target_env = uid.replace(self.search_string, self.replace_string)
+                    # Apply string transformations to create target-env
+                    target_env = uid
+                    for source, target in self.string_transforms.items():
+                        target_env = target_env.replace(source, target)
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.all_asset_uids)} unique assets to {csv_file}")
@@ -337,12 +337,16 @@ class PolicyExportFormatter:
             for i, row in enumerate(rows):
                 if len(row) >= 1:  # Ensure we have at least 1 column
                     target_uid = row[0]
-                    if self.search_string in target_uid:
-                        # Replace the source-env-string with target-env-string
-                        new_target_uid = target_uid.replace(self.search_string, self.replace_string)
-                        rows[i][0] = new_target_uid
+                    original_target_uid = target_uid
+                    # Apply string transformations
+                    for source, target in self.string_transforms.items():
+                        if source in target_uid:
+                            target_uid = target_uid.replace(source, target)
+                    
+                    if target_uid != original_target_uid:
+                        rows[i][0] = target_uid
                         changes_made += 1
-                        self.logger.debug(f"Updated target_uid: {target_uid} -> {new_target_uid}")
+                        self.logger.debug(f"Updated target_uid: {original_target_uid} -> {target_uid}")
             
             # Create asset-import directory if it doesn't exist
             asset_import_dir = self.base_output_dir / "asset-import"
@@ -400,12 +404,16 @@ class PolicyExportFormatter:
             for i, row in enumerate(rows):
                 if len(row) >= 3:  # Ensure we have at least 3 columns
                     target_uid = row[2]
-                    if self.search_string in target_uid:
-                        # Replace the source-env-string with target-env-string
-                        new_target_uid = target_uid.replace(self.search_string, self.replace_string)
-                        rows[i][2] = new_target_uid
+                    original_target_uid = target_uid
+                    # Apply string transformations
+                    for source, target in self.string_transforms.items():
+                        if source in target_uid:
+                            target_uid = target_uid.replace(source, target)
+                    
+                    if target_uid != original_target_uid:
+                        rows[i][2] = target_uid
                         changes_made += 1
-                        self.logger.debug(f"Updated target_uid: {target_uid} -> {new_target_uid}")
+                        self.logger.debug(f"Updated target_uid: {original_target_uid} -> {target_uid}")
             
             # Create asset-import directory if it doesn't exist
             asset_import_dir = self.base_output_dir / "asset-import"
@@ -443,12 +451,20 @@ class PolicyExportFormatter:
         """
         try:
             if isinstance(value, str):
-                # Replace substring in string values
-                if self.search_string in value:
-                    new_value = value.replace(self.search_string, self.replace_string)
-                    self.stats["changes_made"] += 1
-                    self.logger.debug(f"Replaced '{value}' -> '{new_value}'")
-                    return new_value
+                # Apply all string transformations efficiently
+                original_value = value
+                modified_value = value
+                changes_made = 0
+                
+                for source, target in self.string_transforms.items():
+                    if source in modified_value:
+                        modified_value = modified_value.replace(source, target)
+                        changes_made += 1
+                
+                if changes_made > 0:
+                    self.stats["changes_made"] += changes_made
+                    self.logger.debug(f"Replaced '{original_value}' -> '{modified_value}'")
+                    return modified_value
                 return value
             elif isinstance(value, dict):
                 # Recursively process dictionary values
@@ -844,11 +860,8 @@ def validate_arguments(args: argparse.Namespace) -> None:
     if not args.input_dir or not args.input_dir.strip():
         raise ValueError("Input directory cannot be empty")
     
-    if not args.search_string or not args.search_string.strip():
-        raise ValueError("Search string cannot be empty")
-    
-    if args.replace_string is None:
-        raise ValueError("Replace string cannot be None")
+    if not args.string_transforms or not isinstance(args.string_transforms, dict):
+        raise ValueError("String transforms must be a non-empty dictionary")
     
     # Check if input directory exists
     input_path = Path(args.input_dir)
@@ -864,13 +877,12 @@ def parse_formatter_command(command: str) -> tuple:
     Args:
         command (str): The command string
     Returns:
-        tuple: (input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode)
+        tuple: (input_dir, string_transforms, output_dir, quiet_mode, verbose_mode)
     """
     try:
         args_str = command[len('policy-xfr'):].strip()
         input_dir = None
-        source_string = None
-        target_string = None
+        string_transforms = {}
         output_dir = None
         quiet_mode = False
         verbose_mode = False
@@ -884,11 +896,56 @@ def parse_formatter_command(command: str) -> tuple:
             elif arg == '--output-dir' and i + 1 < len(args):
                 output_dir = args[i + 1]
                 i += 2
+            elif arg == '--string-transform' and i + 1 < len(args):
+                # Collect all args until next -- or end
+                transform_parts = []
+                j = i + 1
+                while j < len(args) and not args[j].startswith('--'):
+                    transform_parts.append(args[j])
+                    j += 1
+                
+                if not transform_parts:
+                    print("❌ Missing string transform argument")
+                    print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                    return None, None, None, None, False
+                
+                transform_arg = ' '.join(transform_parts)
+                try:
+                    # Parse format: "A":"B", "C":"D", "E":"F"
+                    transforms = {}
+                    # Remove outer quotes if present
+                    if transform_arg.startswith('"') and transform_arg.endswith('"'):
+                        transform_arg = transform_arg[1:-1]
+                    
+                    # Split by comma and process each pair
+                    pairs = [pair.strip() for pair in transform_arg.split(',')]
+                    for pair in pairs:
+                        if ':' in pair:
+                            source, target = pair.split(':', 1)
+                            source = source.strip().strip('"')
+                            target = target.strip().strip('"')
+                            if source and target:
+                                transforms[source] = target
+                    
+                    string_transforms.update(transforms)
+                except Exception as e:
+                    print(f"❌ Error parsing string transform argument: {e}")
+                    print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                    return None, None, None, None, False
+                i = j
             elif arg == '--source-env-string' and i + 1 < len(args):
+                # Legacy support for backward compatibility
                 source_string = args[i + 1]
-                i += 2
+                target_string = args[i + 2] if i + 2 < len(args) else ""
+                if target_string and not target_string.startswith('--'):
+                    string_transforms[source_string] = target_string
+                    i += 3
+                else:
+                    print("❌ Missing target string for --source-env-string")
+                    print("💡 Use 'policy-xfr --help' for usage information")
+                    return None, None, None, None, False
             elif arg == '--target-env-string' and i + 1 < len(args):
-                target_string = args[i + 1]
+                # This should only be used with --source-env-string, skip here
                 i += 2
             elif arg == '--quiet' or arg == '-q':
                 quiet_mode = True
@@ -900,10 +957,10 @@ def parse_formatter_command(command: str) -> tuple:
                 print("\n" + "="*60)
                 print("POLICY-XFR COMMAND HELP")
                 print("="*60)
-                print("Usage: policy-xfr [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
+                print("Usage: policy-xfr [--input <input_dir>] --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" [options]")
                 print("\nArguments:")
-                print("  --source-env-string <string>  Substring to search for (source environment) [REQUIRED]")
-                print("  --target-env-string <string>  Substring to replace with (target environment) [REQUIRED]")
+                print("  --string-transform <transforms>  Multiple string transformations [REQUIRED]")
+                print("                                   Format: \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
                 print("\nOptions:")
                 print("  --input <dir>                 Input directory (auto-detected from policy-export if not specified)")
                 print("  --output-dir <dir>            Output directory (defaults to organized subdirectories)")
@@ -911,35 +968,34 @@ def parse_formatter_command(command: str) -> tuple:
                 print("  --verbose, -v                 Verbose mode (detailed output)")
                 print("  --help, -h                    Show this help message")
                 print("\nExamples:")
+                print("  policy-xfr --string-transform \"PROD_DB\":\"DEV_DB\", \"PROD_URL\":\"DEV_URL\"")
+                print("  policy-xfr --input data/samples --string-transform \"old\":\"new\", \"test\":\"prod\"")
+                print("  policy-xfr --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" --verbose")
+                print("\nLegacy Support:")
                 print("  policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\"")
-                print("  policy-xfr --input data/samples --source-env-string \"old\" --target-env-string \"new\"")
-                print("  policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\" --verbose")
                 print("="*60)
-                return None, None, None, None, False, False
+                return None, None, None, None, False
             else:
                 print(f"❌ Unknown argument: {arg}")
                 print("💡 Use 'policy-xfr --help' for usage information")
-                return None, None, None, None, False, False
-        if not source_string:
-            print("❌ Missing required argument: --source-env-string")
+                return None, None, None, None, False
+        
+        if not string_transforms:
+            print("❌ Missing required argument: --string-transform")
             print("💡 Use 'policy-xfr --help' for usage information")
-            return None, None, None, None, False, False
-        if not target_string:
-            print("❌ Missing required argument: --target-env-string")
-            print("💡 Use 'policy-xfr --help' for usage information")
-            return None, None, None, None, False, False
-        return input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode
+            return None, None, None, None, False
+        
+        return input_dir, string_transforms, output_dir, quiet_mode, verbose_mode
     except Exception as e:
         print(f"❌ Error parsing policy-xfr command: {e}")
-        return None, None, None, None, False, False
+        return None, None, None, None, False
 
-def execute_formatter(input_dir: str, source_string: str, target_string: str, output_dir: str, 
+def execute_formatter(input_dir: str, string_transforms: dict, output_dir: str, 
                      quiet_mode: bool, verbose_mode: bool, logger):
     """Execute formatter command in interactive mode.
     Args:
         input_dir (str): Input directory (can be None for auto-detection)
-        source_string (str): Source environment string
-        target_string (str): Target environment string
+        string_transforms (dict): Dictionary of string transformations {source: target}
         output_dir (str): Output directory (can be None for default)
         quiet_mode (bool): Quiet mode flag
         verbose_mode (bool): Verbose mode flag
@@ -970,8 +1026,7 @@ def execute_formatter(input_dir: str, source_string: str, target_string: str, ou
                     print(f"📁 Using input directory: {input_dir}")
         formatter = PolicyExportFormatter(
             input_dir=input_dir,
-            search_string=source_string,
-            replace_string=target_string,
+            string_transforms=string_transforms,
             output_dir=output_dir,
             logger=logger
         )
@@ -984,8 +1039,9 @@ def execute_formatter(input_dir: str, source_string: str, target_string: str, ou
             print(f"Output directory:    {formatter.output_dir}")
             print(f"Asset export dir:    {formatter.asset_export_dir}")
             print(f"Policy export dir:   {formatter.policy_export_dir}")
-            print(f"Source env string:   '{source_string}'")
-            print(f"Target env string:   '{target_string}'")
+            print(f"String transformations: {len(string_transforms)} transformations")
+            for source, target in string_transforms.items():
+                print(f"  '{source}' -> '{target}'")
             print(f"Total files found:   {stats['total_files']}")
             if stats['json_files'] > 0:
                 print(f"JSON files:          {stats['json_files']}")

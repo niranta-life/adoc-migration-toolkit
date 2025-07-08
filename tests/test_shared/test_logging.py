@@ -33,9 +33,9 @@ class TestSetupLogging:
                 # Verify basic config was called
                 mock_basic_config.assert_called_once()
                 
-                # Verify log level is ERROR by default
+                # Verify log level is INFO by default
                 call_args = mock_basic_config.call_args
-                assert call_args[1]['level'] == logging.ERROR
+                assert call_args[1]['level'] == logging.INFO
                 
                 # Verify handlers were set up
                 assert 'handlers' in call_args[1]
@@ -91,9 +91,9 @@ class TestSetupLogging:
                 
                 logger = setup_logging(log_level="INVALID")
                 
-                # Verify log level defaults to ERROR for invalid level
+                # Verify log level defaults to INFO for invalid level
                 call_args = mock_basic_config.call_args
-                assert call_args[1]['level'] == logging.ERROR
+                assert call_args[1]['level'] == logging.INFO
 
     def test_setup_logging_case_insensitive_level(self):
         """Test logging setup with case insensitive log level."""

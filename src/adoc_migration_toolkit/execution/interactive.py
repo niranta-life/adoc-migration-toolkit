@@ -132,8 +132,8 @@ def show_interactive_help():
     print("    Import policy definitions from ZIP files to target environment")
     print(f"  {BOLD}rule-tag-export{RESET} [--quiet] [--verbose] [--parallel]")
     print("    Export rule tags for all policies from policies-all-export.csv")
-    print(f"  {BOLD}policy-xfr{RESET} [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
-    print("    Format policy export files by replacing substrings in JSON files and ZIP archives")
+    print(f"  {BOLD}policy-xfr{RESET} [--input <input_dir>] --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" [options]")
+    print("    Format policy export files by replacing multiple substrings in JSON files and ZIP archives")
     
     print(f"\n{BOLD}🔧 VCS COMMANDS:{RESET}")
     print(f"  {BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
@@ -497,23 +497,25 @@ def show_command_help(command_name: str):
         print("      • Parallel mode: Significantly faster for large rule sets")
     
     elif command_name == 'policy-xfr':
-        print(f"\n{BOLD}policy-xfr{RESET} [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
-        print("    Description: Format policy export files by replacing substrings in JSON files and ZIP archives")
+        print(f"\n{BOLD}policy-xfr{RESET} [--input <input_dir>] --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" [options]")
+        print("    Description: Format policy export files by replacing multiple substrings in JSON files and ZIP archives")
         print("    Arguments:")
-        print("      --source-env-string: Substring to search for (source environment) [REQUIRED]")
-        print("      --target-env-string: Substring to replace with (target environment) [REQUIRED]")
+        print("      --string-transform: Multiple string transformations [REQUIRED]")
+        print("                          Format: \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
         print("    Options:")
         print("      --input: Input directory (auto-detected from policy-export if not specified)")
         print("      --output-dir: Output directory (defaults to organized subdirectories)")
         print("      --quiet: Suppress console output, show only summary")
         print("      --verbose: Show detailed output including processing details")
         print("    Examples:")
+        print("      policy-xfr --string-transform \"PROD_DB\":\"DEV_DB\", \"PROD_URL\":\"DEV_URL\"")
+        print("      policy-xfr --input data/samples --string-transform \"old\":\"new\", \"test\":\"prod\"")
+        print("      policy-xfr --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" --verbose")
+        print("    Legacy Support:")
         print("      policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\"")
-        print("      policy-xfr --input data/samples --source-env-string \"old\" --target-env-string \"new\"")
-        print("      policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\" --verbose")
         print("    Behavior:")
         print("      • Processes JSON files and ZIP archives in the input directory")
-        print("      • Replaces all occurrences of source string with target string")
+        print("      • Replaces all occurrences of multiple source strings with their target strings")
         print("      • Maintains file structure and count")
         print("      • Auto-detects input directory from <output-dir>/policy-export if not specified")
         print("      • Creates organized output directory structure")
@@ -1199,9 +1201,9 @@ def run_interactive(args):
                 
                 # Check if it's a policy-xfr command
                 if command.lower().startswith('policy-xfr'):
-                    input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
-                    if source_string and target_string:
-                        execute_formatter(input_dir, source_string, target_string, output_dir, quiet_mode, verbose_mode, logger)
+                    input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
+                    if string_transforms:
+                        execute_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
                     continue
                 
                 # Check if it's a set-output-dir command
