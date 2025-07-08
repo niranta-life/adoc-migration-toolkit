@@ -511,7 +511,7 @@ class TestExecuteAssetConfigImport:
         
         # Check first config update
         call_args = mock_client.make_api_call.call_args_list[1]
-        assert call_args[1]['method'] == 'POST'
+        assert call_args[1]['method'] == 'PUT'
         assert call_args[1]['endpoint'] == '/catalog-server/api/assets/123/config'
         assert call_args[1]['json_payload'] == {"config": "data1"}
         
@@ -522,7 +522,7 @@ class TestExecuteAssetConfigImport:
         
         # Check second config update
         call_args = mock_client.make_api_call.call_args_list[3]
-        assert call_args[1]['method'] == 'POST'
+        assert call_args[1]['method'] == 'PUT'
         assert call_args[1]['endpoint'] == '/catalog-server/api/assets/456/config'
         assert call_args[1]['json_payload'] == {"config": "data2"}
 

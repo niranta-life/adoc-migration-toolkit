@@ -3059,6 +3059,18 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         asset_data = []
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
+            # Skip header row if it exists
+            header = next(reader, None)
+            if header and len(header) >= 2:
+                if 'target_uid' in header[0].lower() or 'config_json' in header[1].lower():
+                    pass  # This is a header row, skip
+                else:
+                    # This might be data, add it back
+                    if header[0].strip() and header[1].strip():
+                        asset_data.append({
+                            'target_uid': header[0].strip(),
+                            'config_json': header[1].strip()
+                        })
             for row in reader:
                 if len(row) >= 2:  # Ensure we have at least target_uid and config_json
                     target_uid = row[0].strip()
