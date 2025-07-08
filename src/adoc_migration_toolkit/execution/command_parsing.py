@@ -769,16 +769,17 @@ def parse_asset_config_import_command(command: str) -> tuple:
     """Parse an asset-config-import command string into components.
     
     Args:
-        command: Command string like "asset-config-import [<csv_file>] [--quiet] [--verbose] [--parallel]"
+        command: Command string like "asset-config-import [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]"
         
     Returns:
-        Tuple of (csv_file, quiet_mode, verbose_mode, parallel_mode)
+        Tuple of (csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-config-import':
-        return None, False, False, False
+        return None, False, False, False, False
     
     csv_file = None
+    dry_run = False
     quiet_mode = False
     verbose_mode = False
     parallel_mode = False
@@ -787,7 +788,10 @@ def parse_asset_config_import_command(command: str) -> tuple:
     i = 1
     while i < len(parts):
         arg = parts[i]
-        if arg == '--quiet' or arg == '-q':
+        if arg == '--dry-run':
+            dry_run = True
+            i += 1
+        elif arg == '--quiet' or arg == '-q':
             quiet_mode = True
             i += 1
         elif arg == '--verbose' or arg == '-v':
@@ -800,21 +804,22 @@ def parse_asset_config_import_command(command: str) -> tuple:
             print("\n" + "="*60)
             print("ASSET-CONFIG-IMPORT COMMAND HELP")
             print("="*60)
-            print("Usage: asset-config-import [<csv_file>] [--quiet] [--verbose] [--parallel]")
+            print("Usage: asset-config-import [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]")
             print("\nArguments:")
             print("  csv_file: Path to CSV file with target_uid and config_json columns (optional)")
             print("\nOptions:")
-            print("  --quiet, -q                   Quiet mode (shows progress bars)")
-            print("  --verbose, -v                 Verbose mode (shows HTTP details)")
-            print("  --parallel                    Use parallel processing (max 5 threads)")
-            print("  --help, -h                    Show this help message")
+            print("  --dry-run                  Preview requests and payloads without making API calls")
+            print("  --quiet, -q                Quiet mode (shows progress bars)")
+            print("  --verbose, -v              Verbose mode (shows HTTP details)")
+            print("  --parallel                 Use parallel processing (max 5 threads)")
+            print("  --help, -h                 Show this help message")
             print("\nExamples:")
             print("  asset-config-import")
             print("  asset-config-import /path/to/asset-config-import-ready.csv")
-            print("  asset-config-import --quiet --parallel")
+            print("  asset-config-import --dry-run --quiet --parallel")
             print("  asset-config-import --verbose")
             print("="*60)
-            return None, False, False, False
+            return None, False, False, False, False
         else:
             # This should be the CSV file path
             if csv_file is None:
@@ -823,6 +828,6 @@ def parse_asset_config_import_command(command: str) -> tuple:
             else:
                 print(f"❌ Unknown argument: {arg}")
                 print("💡 Use 'asset-config-import --help' for usage information")
-                return None, False, False, False
+                return None, False, False, False, False
     
-    return csv_file, quiet_mode, verbose_mode, parallel_mode 
+    return csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode 

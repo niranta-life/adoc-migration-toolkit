@@ -513,7 +513,13 @@ class TestExecuteAssetConfigImport:
         call_args = mock_client.make_api_call.call_args_list[1]
         assert call_args[1]['method'] == 'PUT'
         assert call_args[1]['endpoint'] == '/catalog-server/api/assets/123/config'
-        assert call_args[1]['json_payload'] == {"config": "data1"}
+        expected_payload_1 = {
+            "assetConfiguration": {
+                "assetId": 123,
+                "config": "data1"
+            }
+        }
+        assert call_args[1]['json_payload'] == expected_payload_1
         
         # Check second asset lookup
         call_args = mock_client.make_api_call.call_args_list[2]
@@ -524,7 +530,13 @@ class TestExecuteAssetConfigImport:
         call_args = mock_client.make_api_call.call_args_list[3]
         assert call_args[1]['method'] == 'PUT'
         assert call_args[1]['endpoint'] == '/catalog-server/api/assets/456/config'
-        assert call_args[1]['json_payload'] == {"config": "data2"}
+        expected_payload_2 = {
+            "assetConfiguration": {
+                "assetId": 456,
+                "config": "data2"
+            }
+        }
+        assert call_args[1]['json_payload'] == expected_payload_2
 
     def test_execute_asset_config_import_csv_not_found(self, temp_dir, mock_client, mock_logger):
         """Test asset config import with non-existent CSV file."""
@@ -1075,8 +1087,7 @@ class TestAssetOperationsIntegration:
         execute_asset_config_import(
             csv_file=str(import_csv),
             client=mock_client,
-            logger=mock_logger,
-            dry_run=True  # Use dry run for testing
+            logger=mock_logger
         )
         
         # Verify both operations completed
