@@ -33,7 +33,6 @@ __all__ = [
     
     # CLI functionality
     'main',
-    'run_asset_export',
     'run_interactive',
     
     # Shared utilities

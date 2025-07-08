@@ -1,0 +1,32 @@
+# Build dependencies for ADOC Migration Toolkit
+# These packages are required for building standalone executables with PyInstaller
+
+# Core PyInstaller packages
+pyinstaller>=5.13.0
+pyinstaller-hooks-contrib>=2023.0
+
+# Optional: UPX compression (for smaller executables)
+# Note: UPX is a separate binary that needs to be installed system-wide
+# On macOS: brew install upx
+# On Ubuntu: sudo apt-get install upx
+# On Windows: Download from https://upx.github.io/
+
+# Optional: Code signing tools
+# For Windows: signtool (comes with Windows SDK)
+# For macOS: codesign (built into macOS)
+# For Linux: Various signing tools available
+
+# Development tools (optional, for advanced builds)
+setuptools>=65.0.0
+wheel>=0.38.0
+twine>=4.0.0  # For uploading to PyPI
+
+# Testing dependencies (for build verification)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Code quality tools (for build verification)
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.0.0 

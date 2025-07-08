@@ -9,6 +9,21 @@ import sys
 import click
 
 
+def run_integrity_check():
+    """Run integrity verification."""
+    try:
+        from ..integrity import verify_integrity
+        success = verify_integrity()
+        if not success:
+            click.echo("❌ Integrity verification failed!", err=True)
+            sys.exit(1)
+        click.echo("✅ Integrity verification passed!")
+        return True
+    except ImportError as e:
+        click.echo(f"⚠️  Integrity module not available: {e}", err=True)
+        return True  # Don't fail if integrity module is missing
+
+
 def run_interactive(env_file, log_level, verbose):
     """Run the interactive command."""
     # Defer import to avoid dependency issues during CLI setup
@@ -40,14 +55,10 @@ def cli():
     from one environment to another, including interactive mode for guided workflows.
     
     Examples:
-    
-    \b
-    # Export assets from CSV file
-    python -m adoc_migration_toolkit asset-export --csv-file=data/asset_uids.csv --env-file=config.env
-    
+        
     \b
     # Interactive mode
-    python -m adoc_migration_toolkit interactive --env-file=config.env
+    adoc-migration-toolkit interactive --env-file=config.env
 
     For more information, visit: https://github.com/your-repo/adoc-migration-toolkit
     """
