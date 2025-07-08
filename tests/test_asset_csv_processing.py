@@ -49,8 +49,7 @@ class TestAssetAllExportCSVProcessing:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=mock_logger
         )
@@ -92,8 +91,7 @@ class TestAssetAllExportCSVProcessing:
         # Create formatter without creating the CSV file
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=mock_logger
         )
@@ -124,8 +122,7 @@ class TestAssetAllExportCSVProcessing:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=mock_logger
         )
@@ -156,8 +153,7 @@ class TestAssetAllExportCSVProcessing:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=mock_logger
         )
@@ -199,8 +195,7 @@ class TestAssetAllExportCSVProcessing:
         # Create formatter
         formatter = PolicyExportFormatter(
             input_dir=str(temp_dir),
-            search_string="PROD_DB",
-            replace_string="DEV_DB",
+            string_transforms={"PROD_DB": "DEV_DB"},
             output_dir=str(temp_dir),
             logger=mock_logger
         )

@@ -17,8 +17,7 @@ class TestPolicyExportFormatter:
         with tempfile.TemporaryDirectory() as temp_dir:
             replacer = PolicyExportFormatter(
                 input_dir=temp_dir,
-                search_string="old",
-                replace_string="new"
+                string_transforms={"old": "new"}
             )
             
             # Test string replacement
@@ -34,8 +33,7 @@ class TestPolicyExportFormatter:
         with tempfile.TemporaryDirectory() as temp_dir:
             replacer = PolicyExportFormatter(
                 input_dir=temp_dir,
-                search_string="old",
-                replace_string="new"
+                string_transforms={"old": "new"}
             )
             
             data = {
@@ -62,8 +60,7 @@ class TestPolicyExportFormatter:
         with tempfile.TemporaryDirectory() as temp_dir:
             replacer = PolicyExportFormatter(
                 input_dir=temp_dir,
-                search_string="old",
-                replace_string="new"
+                string_transforms={"old": "new"}
             )
             
             data = ["old_item", "unchanged", "old_another"]
@@ -77,28 +74,25 @@ class TestPolicyExportFormatter:
         with pytest.raises(FileNotFoundError):
             PolicyExportFormatter(
                 input_dir="/nonexistent/directory",
-                search_string="old",
-                replace_string="new"
+                string_transforms={"old": "new"}
             )
 
     def test_empty_search_string(self):
         """Test initialization with empty search string."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            with pytest.raises(ValueError, match="Search string cannot be empty"):
+            with pytest.raises(ValueError, match="String transforms must be a non-empty dictionary"):
                 PolicyExportFormatter(
                     input_dir=temp_dir,
-                    search_string="",
-                    replace_string="new"
+                    string_transforms={}
                 )
 
     def test_none_replace_string(self):
         """Test initialization with None replace string."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            with pytest.raises(ValueError, match="Replace string cannot be None"):
+            with pytest.raises(ValueError, match="String transforms must be a non-empty dictionary"):
                 PolicyExportFormatter(
                     input_dir=temp_dir,
-                    search_string="old",
-                    replace_string=None
+                    string_transforms=None
                 )
 
 

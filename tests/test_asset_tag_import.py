@@ -100,6 +100,9 @@ class TestAssetTagImport:
     
     def test_execute_asset_tag_import_sequential_success(self, sample_csv_file, mock_client, mock_logger):
         """Test successful sequential asset tag import."""
+        # Reset mock to ensure clean state
+        mock_client.reset_mock()
+        
         # Mock API responses
         mock_client.make_api_call.side_effect = [
             # First asset response
@@ -148,14 +151,17 @@ class TestAssetTagImport:
             # First asset tags
             assert calls[1][1]['endpoint'] == '/catalog-server/api/assets/asset_id_1/tag'
             assert calls[1][1]['method'] == 'PUT'
-            assert json.loads(calls[1][1]['data']) == {'name': 'tag1'}
+            assert calls[1][1]['json_payload'] == {'name': 'tag1'}
             
             assert calls[2][1]['endpoint'] == '/catalog-server/api/assets/asset_id_1/tag'
             assert calls[2][1]['method'] == 'PUT'
-            assert json.loads(calls[2][1]['data']) == {'name': 'tag2'}
+            assert calls[2][1]['json_payload'] == {'name': 'tag2'}
     
     def test_execute_asset_tag_import_sequential_asset_not_found(self, sample_csv_file, mock_client, mock_logger):
         """Test sequential asset tag import when asset is not found."""
+        # Reset mock to ensure clean state
+        mock_client.reset_mock()
+        
         # Mock API response for asset not found
         mock_client.make_api_call.return_value = {
             'data': {
@@ -172,6 +178,9 @@ class TestAssetTagImport:
     
     def test_execute_asset_tag_import_sequential_no_asset_id(self, sample_csv_file, mock_client, mock_logger):
         """Test sequential asset tag import when asset has no ID."""
+        # Reset mock to ensure clean state
+        mock_client.reset_mock()
+        
         # Mock API response for asset without ID
         mock_client.make_api_call.return_value = {
             'data': {
@@ -188,6 +197,9 @@ class TestAssetTagImport:
     
     def test_execute_asset_tag_import_sequential_invalid_response(self, sample_csv_file, mock_client, mock_logger):
         """Test sequential asset tag import with invalid API response."""
+        # Reset mock to ensure clean state
+        mock_client.reset_mock()
+        
         # Mock invalid API response
         mock_client.make_api_call.return_value = None
         
@@ -200,6 +212,9 @@ class TestAssetTagImport:
     
     def test_execute_asset_tag_import_parallel_success(self, sample_csv_file, mock_client, mock_logger):
         """Test successful parallel asset tag import."""
+        # Reset mock to ensure clean state
+        mock_client.reset_mock()
+        
         # Mock the client class to return our mock client
         with patch('src.adoc_migration_toolkit.execution.asset_operations.type') as mock_type:
             mock_type.return_value = mock_client
@@ -264,6 +279,9 @@ class TestAssetTagImport:
     
     def test_csv_parsing_with_colon_separated_tags(self, temp_dir, mock_client, mock_logger):
         """Test CSV parsing with colon-separated tags."""
+        # Reset mock to ensure clean state
+        mock_client.reset_mock()
+        
         csv_file = temp_dir / "tags.csv"
         with open(csv_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
@@ -300,6 +318,6 @@ class TestAssetTagImport:
             assert len(tag_calls) == 3
             
             # Verify tag names (only the first tag from each asset should be processed due to the mock setup)
-            tag_names = [json.loads(call[1]['data'])['name'] for call in tag_calls]
+            tag_names = [call[1]['json_payload']['name'] for call in tag_calls]
             # The test data has 3 assets with tags, but the mock only returns one response per asset
             assert len(tag_names) == 3 

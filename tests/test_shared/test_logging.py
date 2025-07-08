@@ -137,7 +137,7 @@ class TestSetupLogging:
         """Test that formatter is configured correctly."""
         with patch('logging.basicConfig') as mock_basic_config:
             with patch('logging.getLogger') as mock_get_logger:
-                with patch('logging.Formatter') as mock_formatter:
+                with patch('adoc_migration_toolkit.shared.logging.CustomFormatter') as mock_formatter:
                     with patch('logging.FileHandler') as mock_file_handler:
                         mock_handler = Mock()
                         mock_file_handler.return_value = mock_handler
@@ -148,18 +148,15 @@ class TestSetupLogging:
                         
                         logger = setup_logging()
                         
-                        # Verify Formatter was created with correct format
-                        mock_formatter.assert_called_once()
-                        call_args = mock_formatter.call_args
-                        assert '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s' in call_args[0]
-                        assert call_args[1]['datefmt'] == '%Y-%m-%d %H:%M:%S'
+                        # Verify CustomFormatter was created without arguments
+                        mock_formatter.assert_called_once_with()
 
     def test_setup_logging_handler_setup(self):
         """Test that handler is properly configured."""
         with patch('logging.basicConfig') as mock_basic_config:
             with patch('logging.getLogger') as mock_get_logger:
                 with patch('logging.FileHandler') as mock_file_handler:
-                    with patch('logging.Formatter') as mock_formatter:
+                    with patch('adoc_migration_toolkit.shared.logging.CustomFormatter') as mock_formatter:
                         mock_handler = Mock()
                         mock_file_handler.return_value = mock_handler
                         mock_formatter_instance = Mock()
