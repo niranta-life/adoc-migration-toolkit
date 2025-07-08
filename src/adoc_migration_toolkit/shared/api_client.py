@@ -87,6 +87,7 @@ class AcceldataAPIClient:
         self.logger = logger or logging.getLogger(__name__)
         self.tenant_type = tenant_type
         self.log_file_path = None  # Will be set from environment file if available
+        self.host_template = None  # Will store the original host URL with ${tenant} placeholder
         
         # Load configuration from environment file if provided
         if env_file:
@@ -98,8 +99,10 @@ class AcceldataAPIClient:
             self.tenant = tenant or os.getenv('AD_SOURCE_TENANT')
             # Check for log file path in environment variables
             self.log_file_path = os.getenv('AD_LOG_FILE_PATH')
-            # If host contains ${tenant}, substitute with correct tenant
+            # Store the original host template if it contains ${tenant}
             if self.host and "${tenant}" in self.host:
+                self.host_template = self.host
+                # If host contains ${tenant}, substitute with correct tenant
                 sub_tenant = self.tenant
                 self.host = self.host.replace("${tenant}", sub_tenant)
         # Validate required configuration
@@ -161,8 +164,10 @@ class AcceldataAPIClient:
         self.target_tenant = config.get('AD_TARGET_TENANT')
         # Extract log file path if available
         self.log_file_path = config.get('AD_LOG_FILE_PATH')
-        # Substitute ${tenant} in host
+        # Store the original host template if it contains ${tenant}
         if self.host and "${tenant}" in self.host:
+            self.host_template = self.host
+            # Substitute ${tenant} in host
             if tenant_type == "target" and self.target_tenant:
                 sub_tenant = self.target_tenant
             else:
@@ -236,7 +241,8 @@ class AcceldataAPIClient:
             raise ValueError("Asset UID cannot be empty")
         
         timeout = timeout or self.DEFAULT_TIMEOUT
-        url = f"{self.host}/catalog-server/api/assets?uid={uid}"
+        host_url = self._build_host_url(use_target_tenant=False)  # Always use source for this method
+        url = f"{host_url}/catalog-server/api/assets?uid={uid}"
         
         self.logger.info(f"Getting asset details for UID: {uid} (timeout: {timeout}s)")
         
@@ -271,7 +277,8 @@ class AcceldataAPIClient:
         timeout = timeout or self.DEFAULT_TIMEOUT
         
         try:
-            response = self.session.get(f"{self.host}/catalog-server/api/health", timeout=timeout)
+            host_url = self._build_host_url(use_target_tenant=False)  # Always use source for connection test
+            response = self.session.get(f"{host_url}/catalog-server/api/health", timeout=timeout)
             response.raise_for_status()
             self.logger.info("API connection test successful")
             return True
@@ -298,6 +305,27 @@ class AcceldataAPIClient:
         if hasattr(self, 'session'):
             self.session.close()
             self.logger.info("API client session closed")
+
+    def _build_host_url(self, use_target_tenant: bool = False) -> str:
+        """
+        Build the host URL with the correct tenant substitution.
+        
+        Args:
+            use_target_tenant: Whether to use target tenant
+            
+        Returns:
+            Host URL with tenant substituted
+        """
+        if self.host_template and "${tenant}" in self.host_template:
+            # Use the template and substitute with the correct tenant
+            if use_target_tenant and self.target_tenant:
+                tenant = self.target_tenant
+            else:
+                tenant = self.tenant
+            return self.host_template.replace("${tenant}", tenant).rstrip('/')
+        else:
+            # No template, use the host as is
+            return self.host.rstrip('/')
 
     def make_api_call(self, endpoint: str, method: str = 'GET', json_payload: Optional[Dict[str, Any]] = None, 
                      use_target_auth: bool = False, use_target_tenant: bool = False, return_binary: bool = False,
@@ -343,8 +371,9 @@ class AcceldataAPIClient:
         access_key, secret_key = self._get_auth_credentials(use_target_auth)
         tenant = self._get_tenant(use_target_tenant)
         
-        # Build the full URL
-        url = f"{self.host}{endpoint}"
+        # Build the full URL with dynamic host
+        host_url = self._build_host_url(use_target_tenant)
+        url = f"{host_url}{endpoint}"
         
         # Setup headers for this request
         headers = self._build_request_headers(access_key, secret_key, tenant)

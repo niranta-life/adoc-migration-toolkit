@@ -399,35 +399,37 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
         csv_path = Path(csv_file)
         if not csv_path.exists():
             error_msg = f"CSV file does not exist: {csv_file}"
-            print(f"❌ {error_msg}")
-            print(f"💡 Please run 'asset-profile-export' first to generate the asset-profiles-import-ready.csv file")
-            if globals.GLOBAL_OUTPUT_DIR:
-                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-profiles-import-ready.csv")
-            else:
-                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-profiles-import-ready.csv")
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+                print(f"💡 Please run 'asset-profile-export' first to generate the asset-profiles-import-ready.csv file")
+                if globals.GLOBAL_OUTPUT_DIR:
+                    print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-profiles-import-ready.csv")
+                else:
+                    print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-profiles-import-ready.csv")
             logger.error(error_msg)
             return
         
-        print(f"\nProcessing asset profile import from CSV file: {csv_file}")
-        if dry_run:
-            print("🔍 DRY RUN MODE - No actual API calls will be made")
-            print("📋 Will show detailed information about what would be executed")
-        if quiet_mode:
-            print("🔇 QUIET MODE - Minimal output")
-        if verbose_mode:
-            print("🔊 VERBOSE MODE - Detailed output including headers and responses")
-        print("="*80)
-        
-        # Show environment information in dry-run mode
-        if dry_run:
-            print("\n🌍 TARGET ENVIRONMENT INFORMATION:")
-            print(f"  Host: {client.host}")
-            if hasattr(client, 'target_tenant') and client.target_tenant:
-                print(f"  Target Tenant: {client.target_tenant}")
-            else:
-                print(f"  Source Tenant: {client.tenant} (will be used as target)")
-            print(f"  Authentication: Target access key and secret key")
+        if not quiet_mode:
+            print(f"\nProcessing asset profile import from CSV file: {csv_file}")
+            if dry_run:
+                print("🔍 DRY RUN MODE - No actual API calls will be made")
+                print("📋 Will show detailed information about what would be executed")
+            if quiet_mode:
+                print("🔇 QUIET MODE - Minimal output")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
+            
+            # Show environment information in dry-run mode
+            if dry_run:
+                print("\n🌍 TARGET ENVIRONMENT INFORMATION:")
+                print(f"  Host: {client.host}")
+                if hasattr(client, 'target_tenant') and client.target_tenant:
+                    print(f"  Target Tenant: {client.target_tenant}")
+                else:
+                    print(f"  Source Tenant: {client.tenant} (will be used as target)")
+                print(f"  Authentication: Target access key and secret key")
+                print("="*80)
         
         # Read CSV file
         import_mappings = []
@@ -437,7 +439,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
             
             if len(header) != 2 or header[0] != 'target-env' or header[1] != 'profile_json':
                 error_msg = f"Invalid CSV format. Expected header: ['target-env', 'profile_json'], got: {header}"
-                print(f"❌ {error_msg}")
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
                 logger.error(error_msg)
                 return
             
@@ -504,18 +507,19 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     }
                     
                     # Show detailed dry-run information for first API call
-                    print(f"\n🔍 DRY RUN - API CALL #1: Get Asset Details")
-                    print(f"  Method: GET")
-                    print(f"  Endpoint: /catalog-server/api/assets?uid={target_env}")
-                    print(f"  Headers:")
-                    print(f"    Content-Type: application/json")
-                    print(f"    Authorization: Bearer [REDACTED]")
-                    if hasattr(client, 'target_tenant') and client.target_tenant:
-                        print(f"    X-Tenant: {client.target_tenant}")
-                    else:
-                        print(f"    X-Tenant: {client.tenant}")
-                    print(f"  Expected Response: Asset details with ID field")
-                    print(f"  Mock Response: {json.dumps(asset_response, indent=2, ensure_ascii=False)}")
+                    if not quiet_mode:
+                        print(f"\n🔍 DRY RUN - API CALL #1: Get Asset Details")
+                        print(f"  Method: GET")
+                        print(f"  Endpoint: /catalog-server/api/assets?uid={target_env}")
+                        print(f"  Headers:")
+                        print(f"    Content-Type: application/json")
+                        print(f"    Authorization: Bearer [REDACTED]")
+                        if hasattr(client, 'target_tenant') and client.target_tenant:
+                            print(f"    X-Tenant: {client.target_tenant}")
+                        else:
+                            print(f"    X-Tenant: {client.tenant}")
+                        print(f"  Expected Response: Asset details with ID field")
+                        print(f"  Mock Response: {json.dumps(asset_response, indent=2, ensure_ascii=False)}")
                 
                 # Show response in verbose mode (only for non-dry-run)
                 if verbose_mode and not dry_run:
@@ -525,7 +529,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                 # Step 2: Extract the asset ID
                 if not asset_response or 'data' not in asset_response:
                     error_msg = f"No 'data' field found in asset response for UID: {target_env}"
-                    print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
+                    if not quiet_mode:
+                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
                     progress_bar.update(1)
@@ -534,7 +539,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                 data_array = asset_response['data']
                 if not data_array or len(data_array) == 0:
                     error_msg = f"Empty 'data' array in asset response for UID: {target_env}"
-                    print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
+                    if not quiet_mode:
+                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
                     progress_bar.update(1)
@@ -543,7 +549,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                 first_asset = data_array[0]
                 if 'id' not in first_asset:
                     error_msg = f"No 'id' field found in first asset for UID: {target_env}"
-                    print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
+                    if not quiet_mode:
+                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
                     progress_bar.update(1)
@@ -558,7 +565,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     profile_data = json.loads(profile_json)
                 except json.JSONDecodeError as e:
                     error_msg = f"Invalid JSON in profile_json for UID {target_env}: {e}"
-                    print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
+                    if not quiet_mode:
+                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                     logger.error(error_msg)
                     failed += 1
                     progress_bar.update(1)
@@ -597,22 +605,22 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                         print("✅ Import successful")
                 else:
                     # Show detailed dry-run information for second API call
-                    print(f"\n🔍 DRY RUN - API CALL #2: Update Profile Configuration")
-                    print(f"  Method: PUT")
-                    print(f"  Endpoint: /catalog-server/api/profile/{asset_id}/config")
-                    print(f"  Headers:")
-                    print(f"    Content-Type: application/json")
-                    print(f"    Authorization: Bearer [REDACTED]")
-                    if hasattr(client, 'target_tenant') and client.target_tenant:
-                        print(f"    X-Tenant: {client.target_tenant}")
+                    if not quiet_mode:
+                        print(f"\n🔍 DRY RUN - API CALL #2: Update Profile Configuration")
+                        print(f"  Method: PUT")
+                        print(f"  Endpoint: /catalog-server/api/profile/{asset_id}/config")
+                        print(f"  Headers:")
+                        print(f"    Content-Type: application/json")
+                        print(f"    Authorization: Bearer [REDACTED]")
+                        if hasattr(client, 'target_tenant') and client.target_tenant:
+                            print(f"    X-Tenant: {client.target_tenant}")
+                        else:
+                            print(f"    X-Tenant: {client.tenant}")
+                        print(f"  Payload:")
+                        print(json.dumps(profile_data, indent=4, ensure_ascii=False))
+                        print(f"  Expected Action: Update profile configuration for asset {asset_id}")
+                        print(f"  Status: Would be executed in live mode")
                     else:
-                        print(f"    X-Tenant: {client.tenant}")
-                    print(f"  Payload:")
-                    print(json.dumps(profile_data, indent=4, ensure_ascii=False))
-                    print(f"  Expected Action: Update profile configuration for asset {asset_id}")
-                    print(f"  Status: Would be executed in live mode")
-                    
-                    if quiet_mode:
                         print(f"🔍 [{i}/{len(import_mappings)}] {target_env}: Would update profile (dry-run)")
                 
                 successful += 1
@@ -621,7 +629,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                 
             except Exception as e:
                 error_msg = f"Failed to process UID {target_env}: {e}"
-                print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
+                if not quiet_mode:
+                    print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
                 logger.error(error_msg)
                 failed += 1
                 progress_bar.update(1)
@@ -647,7 +656,8 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
         
     except Exception as e:
         error_msg = f"Error in asset-profile-import: {e}"
-        print(f"❌ {error_msg}")
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
         logger.error(error_msg)
 
 
@@ -950,7 +960,9 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
                 # Make GET request to get asset ID
                 response = client.make_api_call(
                     endpoint=f'/catalog-server/api/assets?uid={target_uid}',
-                    method='GET'
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True
                 )
                 
                 if verbose_mode:
@@ -986,7 +998,9 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
                 config_response = client.make_api_call(
                     endpoint=f'/catalog-server/api/assets/{asset_id}/config',
                     method='PUT',
-                    json_payload=transformed_config
+                    json_payload=transformed_config,
+                    use_target_auth=True,
+                    use_target_tenant=True
                 )
                 
                 if verbose_mode:
@@ -2153,7 +2167,9 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
             
             asset_response = client.make_api_call(
                 endpoint=f"/catalog-server/api/assets?uid={target_uid}",
-                method='GET'
+                method='GET',
+                use_target_auth=True,
+                use_target_tenant=True
             )
             
             if verbose_mode:
@@ -2207,7 +2223,9 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
                     tag_response = client.make_api_call(
                         endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
                         method='POST',
-                        json_payload={"name": tag}
+                        json_payload={"name": tag},
+                        use_target_auth=True,
+                        use_target_tenant=True
                     )
                     
                     if verbose_mode:
@@ -2360,7 +2378,9 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
                 
                 asset_response = thread_client.make_api_call(
                     endpoint=f"/catalog-server/api/assets?uid={target_uid}",
-                    method='GET'
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True
                 )
                 
                 if verbose_mode:
@@ -2423,7 +2443,9 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
                         tag_response = thread_client.make_api_call(
                             endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
                             method='POST',
-                            json_payload={"name": tag}
+                            json_payload={"name": tag},
+                            use_target_auth=True,
+                            use_target_tenant=True
                         )
                         
                         if verbose_mode:
@@ -2941,7 +2963,9 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                     
                     response = client.make_api_call(
                         endpoint=f'/catalog-server/api/assets?uid={target_uid}',
-                        method='GET'
+                        method='GET',
+                        use_target_auth=True,
+                        use_target_tenant=True
                     )
                     
                     if verbose_mode:
@@ -2976,7 +3000,9 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                     config_response = client.make_api_call(
                         endpoint=f'/catalog-server/api/assets/{asset_id}/config',
                         method='PUT',
-                        json_payload=transformed_config
+                        json_payload=transformed_config,
+                        use_target_auth=True,
+                        use_target_tenant=True
                     )
                     
                     if verbose_mode:
