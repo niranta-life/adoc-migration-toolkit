@@ -1477,7 +1477,7 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                 apply_payload = {
                     "assemblyMap": {},
                     "policyOverride": True,
-                    "sqlViewOverride": False,
+                    "sqlViewOverride": True,
                     "visualViewOverride": False,
                     "uuid": upload_uuid
                 }
