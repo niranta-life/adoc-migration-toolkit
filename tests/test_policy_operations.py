@@ -527,8 +527,8 @@ class TestExecutePolicyImport:
                 file_pattern="*.zip"
             )
         
-        # Verify API calls were made for each file
-        assert mock_client.make_api_call.call_count == 3
+        # Verify API calls were made for each file (2 calls per file: upload-config + apply-config)
+        assert mock_client.make_api_call.call_count == 6
     
     def test_execute_policy_import_absolute_path(self, temp_dir, mock_client, mock_logger, sample_policy_import_response):
         """Test policy import with absolute path."""
@@ -549,6 +549,129 @@ class TestExecutePolicyImport:
         
         # Verify API call was made
         mock_client.make_api_call.assert_called()
+
+    def test_execute_policy_import_two_step_process(self, temp_dir, mock_client, mock_logger):
+        """Test policy import with two-step process (upload-config + apply-config)."""
+        # Create test ZIP file
+        zip_file = temp_dir / "policy-import" / "test-policy.zip"
+        zip_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(zip_file, 'wb') as f:
+            f.write(b"fake_zip_content")
+        
+        # Mock upload-config response
+        upload_response = {
+            "conflictingAssemblies": [],
+            "conflictingPolicies": [
+                {
+                    "ruleId": None,
+                    "ruleName": "test_policy",
+                    "ruleType": "DATA_QUALITY"
+                }
+            ],
+            "conflictingSqlViews": [],
+            "conflictingVisualViews": [],
+            "preChecks": [],
+            "totalAssetUDFVariablesPerAsset": {},
+            "totalBusinessRules": 0,
+            "totalDataCadencePolicyCount": 0,
+            "totalDataDriftPolicyCount": 0,
+            "totalDataQualityPolicyCount": 1,
+            "totalDataSourceCount": 1,
+            "totalPolicyCount": 1,
+            "totalProfileAnomalyPolicyCount": 0,
+            "totalReconciliationPolicyCount": 0,
+            "totalReferenceAssets": 0,
+            "totalSchemaDriftPolicyCount": 0,
+            "totalUDFPackages": 0,
+            "totalUDFTemplates": 0,
+            "uuid": "bba64f45-e0f9-44ac-9f28-968422abaadc"
+        }
+        
+        # Mock apply-config response (success)
+        apply_response = {"status": "success"}
+        
+        # Mock API calls to return different responses for upload and apply
+        mock_client.make_api_call.side_effect = [upload_response, apply_response]
+        
+        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            execute_policy_import(
+                client=mock_client,
+                logger=mock_logger,
+                file_pattern="*.zip",
+                verbose_mode=True
+            )
+        
+        # Verify both API calls were made
+        assert mock_client.make_api_call.call_count == 2
+        
+        # Verify upload-config call
+        first_call = mock_client.make_api_call.call_args_list[0]
+        assert first_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/upload-config"
+        assert first_call[1]['method'] == 'POST'
+        assert 'files' in first_call[1]
+        
+        # Verify apply-config call
+        second_call = mock_client.make_api_call.call_args_list[1]
+        assert second_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/apply-config"
+        assert second_call[1]['method'] == 'POST'
+        assert 'json' in second_call[1]
+        assert second_call[1]['json']['uuid'] == "bba64f45-e0f9-44ac-9f28-968422abaadc"
+        assert second_call[1]['json']['policyOverride'] is True
+
+    def test_execute_policy_import_upload_success_apply_failure(self, temp_dir, mock_client, mock_logger):
+        """Test policy import where upload-config succeeds but apply-config fails."""
+        # Create test ZIP file
+        zip_file = temp_dir / "policy-import" / "test-policy.zip"
+        zip_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(zip_file, 'wb') as f:
+            f.write(b"fake_zip_content")
+        
+        # Mock upload-config response (success)
+        upload_response = {
+            "conflictingAssemblies": [],
+            "conflictingPolicies": [],
+            "conflictingSqlViews": [],
+            "conflictingVisualViews": [],
+            "preChecks": [],
+            "totalAssetUDFVariablesPerAsset": {},
+            "totalBusinessRules": 0,
+            "totalDataCadencePolicyCount": 0,
+            "totalDataDriftPolicyCount": 0,
+            "totalDataQualityPolicyCount": 1,
+            "totalDataSourceCount": 1,
+            "totalPolicyCount": 1,
+            "totalProfileAnomalyPolicyCount": 0,
+            "totalReconciliationPolicyCount": 0,
+            "totalReferenceAssets": 0,
+            "totalSchemaDriftPolicyCount": 0,
+            "totalUDFPackages": 0,
+            "totalUDFTemplates": 0,
+            "uuid": "bba64f45-e0f9-44ac-9f28-968422abaadc"
+        }
+        
+        # Mock apply-config response (failure - None response)
+        apply_response = None
+        
+        # Mock API calls to return different responses for upload and apply
+        mock_client.make_api_call.side_effect = [upload_response, apply_response]
+        
+        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            execute_policy_import(
+                client=mock_client,
+                logger=mock_logger,
+                file_pattern="*.zip"
+            )
+        
+        # Verify both API calls were made
+        assert mock_client.make_api_call.call_count == 2
+        
+        # Verify error was logged
+        mock_logger.error.assert_called()
+        error_call = mock_logger.error.call_args[0][0]
+        assert "Apply config failed" in error_call
+        assert "bba64f45-e0f9-44ac-9f28-968422abaadc" in error_call
 
 
 class TestExecuteRuleTagExport:

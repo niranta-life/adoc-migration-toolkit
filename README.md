@@ -570,11 +570,13 @@ policy-import <file_or_pattern> [--quiet] [--verbose]
 - **Audit Trail**: Track imported policies and their UUIDs for verification
 
 **Import Process:**
-- Uploads ZIP files to `/catalog-server/api/rules/import/policy-definitions/upload-config`
-- Uses target environment authentication
+- **Step 1**: Uploads ZIP files to `/catalog-server/api/rules/import/policy-definitions/upload-config`
+- **Step 2**: Applies configuration using `/catalog-server/api/rules/import/policy-definitions/apply-config`
+- Uses target environment authentication for both steps
 - Validates file integrity and content
 - Reports conflicts and resolution status
-- Provides comprehensive import statistics
+- Tracks UUIDs returned from upload-config calls
+- Provides comprehensive import statistics including upload and apply success/failure counts
 
 **Examples:**
 ```bash
@@ -589,11 +591,12 @@ policy-import /path/to/policy.zip
 ```
 
 **Important Considerations:**
-- Always uses target environment authentication
+- Always uses target environment authentication for both upload and apply steps
 - Supports glob patterns for batch processing
 - Validates file existence and readability
 - Reports detailed conflicts (assemblies, policies, SQL views, visual views)
-- Tracks UUIDs of successfully imported policies
+- Tracks UUIDs of successfully uploaded configurations
+- Provides comprehensive statistics for both upload-config and apply-config operations
 - Provides rollback information for troubleshooting
 
 ### Policy Transformer

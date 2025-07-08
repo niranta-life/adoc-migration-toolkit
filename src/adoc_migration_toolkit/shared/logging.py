@@ -6,8 +6,27 @@ This module contains shared logging functionality used across the toolkit.
 
 import logging
 import os
+import getpass
+import socket
 from datetime import datetime
 from pathlib import Path
+
+class CustomFormatter(logging.Formatter):
+    """Custom formatter that includes username and hostname in log messages."""
+    
+    def __init__(self):
+        super().__init__(
+            '%(asctime)s - %(levelname)s - [%(username)s@%(hostname)s] - [%(filename)s:%(lineno)d] - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        self.username = getpass.getuser()
+        self.hostname = socket.gethostname()
+    
+    def format(self, record):
+        record.username = self.username
+        record.hostname = self.hostname
+        return super().format(record)
+
 
 def setup_logging(verbose: bool = False, log_level: str = "INFO", log_file_path: str = None) -> logging.Logger:
     """Setup professional logging configuration.
@@ -36,11 +55,8 @@ def setup_logging(verbose: bool = False, log_level: str = "INFO", log_file_path:
         # Use the specified log level, default to INFO
         actual_level = level_map.get(log_level.upper(), logging.INFO)
     
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    # Create custom formatter with username and hostname
+    formatter = CustomFormatter()
     
     # Setup handlers
     handlers = []

@@ -13,9 +13,28 @@ import tempfile
 import shutil
 import os
 import csv
+import getpass
+import socket
 from pathlib import Path
 from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
+
+
+class CustomFormatter(logging.Formatter):
+    """Custom formatter that includes username and hostname in log messages."""
+    
+    def __init__(self):
+        super().__init__(
+            '%(asctime)s - %(levelname)s - [%(username)s@%(hostname)s] - [%(filename)s:%(lineno)d] - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        self.username = getpass.getuser()
+        self.hostname = socket.gethostname()
+    
+    def format(self, record):
+        record.username = self.username
+        record.hostname = self.hostname
+        return super().format(record)
 
 
 def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Logger:
@@ -44,11 +63,8 @@ def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Lo
         # Use the specified log level, default to ERROR
         actual_level = level_map.get(log_level.upper(), logging.ERROR)
     
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    # Create custom formatter with username and hostname
+    formatter = CustomFormatter()
     
     # Setup handlers
     handlers = []

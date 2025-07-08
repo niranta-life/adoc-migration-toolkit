@@ -1356,6 +1356,10 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
             'totalUDFTemplates': 0,
             'files_processed': 0,
             'files_failed': 0,
+            'upload_configs_successful': 0,
+            'upload_configs_failed': 0,
+            'apply_configs_successful': 0,
+            'apply_configs_failed': 0,
             'uuids': []
         }
         
@@ -1414,8 +1418,15 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                         print(f"  X-Tenant: {client.tenant} (Source tenant - will be used as target)")
                     print(f"  File: {zip_file}")
                 
-                # Make API call with target authentication
-                response = client.make_api_call(
+                # Step 1: Upload config
+                if verbose_mode:
+                    print(f"\n📤 STEP 1: Upload Config")
+                    print(f"  Endpoint: /catalog-server/api/rules/import/policy-definitions/upload-config")
+                    print(f"  Method: POST")
+                    print(f"  Content-Type: multipart/form-data")
+                    print(f"  File: {zip_file}")
+                
+                upload_response = client.make_api_call(
                     endpoint="/catalog-server/api/rules/import/policy-definitions/upload-config",
                     method='POST',
                     files=files,
@@ -1423,48 +1434,96 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     use_target_tenant=True
                 )
                 
-                if verbose_mode:
-                    print(f"\nResponse:")
-                    print(f"  Status: Success")
-                    print(f"  Content-Type: application/json")
-                    print(f"  Response size: {len(str(response)) if response else 0} bytes")
-                
-                if response:
-                    # Response is already parsed JSON from make_api_call
-                    response_data = response
-                    
-                    # Aggregate statistics
-                    for key in aggregated_stats.keys():
-                        if key in response_data and isinstance(response_data[key], (int, float)):
-                            if key == 'uuids':
-                                if isinstance(response_data[key], list):
-                                    aggregated_stats[key].extend(response_data[key])
-                            else:
-                                aggregated_stats[key] += response_data[key]
-                    
-                    # Add UUID if present
-                    if 'uuid' in response_data:
-                        aggregated_stats['uuids'].append(response_data['uuid'])
-                    
-                    aggregated_stats['files_processed'] += 1
-                    successful_imports += 1
-                    
-                    if not quiet_mode:
-                        print(f"✅ Successfully imported: {zip_file}")
-                        if verbose_mode:
-                            print(f"  UUID: {response_data.get('uuid', 'N/A')}")
-                            print(f"  Total Policies: {response_data.get('totalPolicyCount', 0)}")
-                            print(f"  Data Quality Policies: {response_data.get('totalDataQualityPolicyCount', 0)}")
-                            print(f"  Data Sources: {response_data.get('totalDataSourceCount', 0)}")
-                    else:
-                        print(f"✅ [{i}/{len(zip_files)}] {zip_file}: Successfully imported")
-                else:
-                    error_msg = f"Empty response for {zip_file}"
+                if not upload_response:
+                    error_msg = f"Upload config failed - empty response for {zip_file}"
                     if not quiet_mode:
                         print(f"❌ {error_msg}")
                     logger.error(error_msg)
                     failed_imports += 1
                     aggregated_stats['files_failed'] += 1
+                    aggregated_stats['upload_configs_failed'] += 1
+                    continue
+                
+                # Extract UUID from upload response
+                upload_uuid = upload_response.get('uuid')
+                if not upload_uuid:
+                    error_msg = f"Upload config failed - no UUID returned for {zip_file}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_imports += 1
+                    aggregated_stats['files_failed'] += 1
+                    aggregated_stats['upload_configs_failed'] += 1
+                    continue
+                
+                aggregated_stats['upload_configs_successful'] += 1
+                
+                if verbose_mode:
+                    print(f"  ✅ Upload config successful")
+                    print(f"  UUID: {upload_uuid}")
+                    print(f"  Total Policies: {upload_response.get('totalPolicyCount', 0)}")
+                    print(f"  Data Quality Policies: {upload_response.get('totalDataQualityPolicyCount', 0)}")
+                    print(f"  Data Sources: {upload_response.get('totalDataSourceCount', 0)}")
+                
+                # Step 2: Apply config
+                if verbose_mode:
+                    print(f"\n📥 STEP 2: Apply Config")
+                    print(f"  Endpoint: /catalog-server/api/rules/import/policy-definitions/apply-config")
+                    print(f"  Method: POST")
+                    print(f"  Content-Type: application/json")
+                    print(f"  UUID: {upload_uuid}")
+                
+                # Prepare apply config payload
+                apply_payload = {
+                    "assemblyMap": {},
+                    "policyOverride": True,
+                    "sqlViewOverride": False,
+                    "visualViewOverride": False,
+                    "uuid": upload_uuid
+                }
+                
+                apply_response = client.make_api_call(
+                    endpoint="/catalog-server/api/rules/import/policy-definitions/apply-config",
+                    method='POST',
+                    json=apply_payload,
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+                
+                if apply_response:
+                    aggregated_stats['apply_configs_successful'] += 1
+                    aggregated_stats['files_processed'] += 1
+                    successful_imports += 1
+                    
+                    # Aggregate statistics from upload response
+                    for key in aggregated_stats.keys():
+                        if key in upload_response and isinstance(upload_response[key], (int, float)):
+                            if key == 'uuids':
+                                if isinstance(upload_response[key], list):
+                                    aggregated_stats[key].extend(upload_response[key])
+                            else:
+                                aggregated_stats[key] += upload_response[key]
+                    
+                    # Add UUID to list
+                    aggregated_stats['uuids'].append(upload_uuid)
+                    
+                    if not quiet_mode:
+                        print(f"✅ Successfully imported: {zip_file}")
+                        if verbose_mode:
+                            print(f"  UUID: {upload_uuid}")
+                            print(f"  Total Policies: {upload_response.get('totalPolicyCount', 0)}")
+                            print(f"  Data Quality Policies: {upload_response.get('totalDataQualityPolicyCount', 0)}")
+                            print(f"  Data Sources: {upload_response.get('totalDataSourceCount', 0)}")
+                    else:
+                        print(f"✅ [{i}/{len(zip_files)}] {zip_file}: Successfully imported")
+                else:
+                    error_msg = f"Apply config failed for {zip_file} (UUID: {upload_uuid})"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_imports += 1
+                    aggregated_stats['files_failed'] += 1
+                    aggregated_stats['apply_configs_failed'] += 1
                     
             except Exception as e:
                 error_msg = f"Failed to import {zip_file}: {e}"
@@ -1481,6 +1540,10 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
         print(f"Files processed: {successful_imports}")
         print(f"Files failed: {failed_imports}")
         print(f"Total files: {len(zip_files)}")
+        print(f"Upload configs successful: {aggregated_stats['upload_configs_successful']}")
+        print(f"Upload configs failed: {aggregated_stats['upload_configs_failed']}")
+        print(f"Apply configs successful: {aggregated_stats['apply_configs_successful']}")
+        print(f"Apply configs failed: {aggregated_stats['apply_configs_failed']}")
         
         if successful_imports > 0:
             print(f"\n📊 AGGREGATED STATISTICS")
