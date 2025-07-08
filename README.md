@@ -86,7 +86,7 @@ chmod +x bin/sjson
 2. Edit `config/config.env` with your environment details:
    ```bash
    # Acceldata Environment Configuration
-   AD_HOST=https://your-acceldata-host.com
+   AD_HOST=https://${tenant}.your-acceldata-host.com
    
    # Source Environment
    AD_SOURCE_ACCESS_KEY=your_source_access_key
@@ -109,9 +109,10 @@ The `config.env` file contains all the necessary credentials and connection info
 - **Purpose**: The base URL of your Acceldata environment
 - **Format**: Full HTTPS URL (e.g., `https://your-instance.acceldata.app`)
 - **Required**: Yes
-- **Example**: `https://se-demo.acceldata.app`
+- **Example**: `https://${tenant}.acceldata.app`
 - **Notes**: 
   - Must include the protocol (https://)
+  - ${tenant} is replaced with AD_SOURCE_TENANT or AD_TARGET_TENANT depending on whether it's export or import. 
   - Should not include trailing slashes
   - Must be accessible from your local machine
   - Used for both source and target environments
