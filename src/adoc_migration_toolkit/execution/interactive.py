@@ -7,7 +7,6 @@ including help, autocomplete, and command history management.
 
 import os
 import sys
-import readline
 import json
 import getpass
 import signal
@@ -22,6 +21,13 @@ from .policy_operations import execute_policy_list_export, execute_policy_list_e
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
 from adoc_migration_toolkit.shared import globals
+
+# Import cross-platform readline wrapper
+from ..shared.readline_wrapper import (
+    set_history_file, set_completer, parse_and_bind, read_history_file,
+    write_history_file, clear_history, add_history, get_current_history_length,
+    get_history_item, get_line_buffer, input_with_history
+)
 
 
 def log_session_event(logger, event_type: str, user_info: dict = None):
@@ -634,8 +640,6 @@ def show_command_help(command_name: str):
 
 def setup_autocomplete():
     """Setup command autocomplete functionality."""
-    import readline
-    
     # Define all available commands and their completions
     commands = [
         'segments-export', 'segments-import',
@@ -680,7 +684,7 @@ def setup_autocomplete():
         """Custom completer function for readline."""
         try:
             # Get the current line
-            line = readline.get_line_buffer()
+            line = get_line_buffer()
             words = line.split()
             
             # If we're at the beginning or after a space, complete commands
@@ -725,10 +729,10 @@ def setup_autocomplete():
             return None
     
     # Set the completer
-    readline.set_completer(completer)
+    set_completer(completer)
     
     # Enable tab completion
-    readline.parse_and_bind('tab: complete')
+    parse_and_bind('tab: complete')
 
 
 def get_user_input(prompt: str) -> str:
@@ -736,7 +740,7 @@ def get_user_input(prompt: str) -> str:
     try:
         if hasattr(sys.stdin, 'flush'):
             sys.stdin.flush()
-        command = input(prompt).strip()
+        command = input_with_history(prompt).strip()
         return command
     except (EOFError, KeyboardInterrupt):
         raise
@@ -749,7 +753,7 @@ def cleanup_command_history():
     """Clean up command history to prevent cursor position issues."""
     try:
         # Clear the current line buffer to reset cursor position
-        readline.clear_history()
+        clear_history()
         
         # Reload history from file and filter out exit commands
         history_file = os.path.expanduser("~/.adoc_migration_toolkit_history")
@@ -771,7 +775,7 @@ def cleanup_command_history():
                     f.write(line + '\n')
             
             # Reload the cleaned history
-            readline.read_history_file(history_file)
+            read_history_file(history_file)
             
     except Exception:
         # If cleanup fails, just continue
@@ -785,7 +789,7 @@ def show_command_history():
         clean_current_session_history()
         
         # Get current history length
-        history_length = readline.get_current_history_length()
+        history_length = get_current_history_length()
         
         if history_length == 0:
             print("\n📋 No command history available.")
@@ -797,7 +801,7 @@ def show_command_history():
         
         for i in range(start_index, history_length):
             try:
-                command = readline.get_history_item(i + 1)  # readline uses 1-based indexing
+                command = get_history_item(i + 1)  # readline uses 1-based indexing
                 if command and command.strip():
                     commands.append(command.strip())
             except Exception:
@@ -828,7 +832,7 @@ def clean_current_session_history():
     """Clean the current session's in-memory history by removing utility commands."""
     try:
         # Get current history length
-        history_length = readline.get_current_history_length()
+        history_length = get_current_history_length()
         
         if history_length == 0:
             return
@@ -838,7 +842,7 @@ def clean_current_session_history():
         
         for i in range(history_length):
             try:
-                command = readline.get_history_item(i + 1)  # readline uses 1-based indexing
+                command = get_history_item(i + 1)  # readline uses 1-based indexing
                 if command and command.strip():
                     # Only keep commands that are not utility commands
                     if command.strip().lower() not in ['exit', 'quit', 'q', 'history', 'help']:
@@ -847,12 +851,12 @@ def clean_current_session_history():
                 continue
         
         # Clear current history and reload clean version
-        readline.clear_history()
+        clear_history()
         
         # Add back only the clean commands
         for command in clean_history:
             try:
-                readline.add_history(command)
+                add_history(command)
             except Exception:
                 continue
                 
@@ -872,7 +876,7 @@ def get_command_from_history(command_number: int) -> str:
     """
     try:
         # Get current history length
-        history_length = readline.get_current_history_length()
+        history_length = get_current_history_length()
         
         if history_length == 0:
             return None
@@ -883,7 +887,7 @@ def get_command_from_history(command_number: int) -> str:
         
         for i in range(start_index, history_length):
             try:
-                command = readline.get_history_item(i + 1)  # readline uses 1-based indexing
+                command = get_history_item(i + 1)  # readline uses 1-based indexing
                 if command and command.strip():
                     commands.append(command.strip())
             except Exception:
@@ -949,26 +953,26 @@ def run_interactive(args):
         # Setup command history
         history_file = os.path.expanduser("~/.adoc_migration_toolkit_history")
         try:
-            readline.read_history_file(history_file)
+            read_history_file(history_file)
         except FileNotFoundError:
             pass  # History file doesn't exist yet
         
         # Set history file for future sessions
-        readline.set_history_length(1000)  # Keep last 1000 commands
+        set_history_file(history_file)
         
         # Configure readline for better cursor handling
         try:
             # Set input mode for better cursor behavior
-            readline.parse_and_bind('set input-meta on')
-            readline.parse_and_bind('set output-meta on')
-            readline.parse_and_bind('set convert-meta off')
-            readline.parse_and_bind('set horizontal-scroll-mode on')
-            readline.parse_and_bind('set completion-query-items 0')
-            readline.parse_and_bind('set page-completions off')
-            readline.parse_and_bind('set skip-completed-text on')
-            readline.parse_and_bind('set completion-ignore-case on')
-            readline.parse_and_bind('set show-all-if-ambiguous on')
-            readline.parse_and_bind('set show-all-if-unmodified on')
+            parse_and_bind('set input-meta on')
+            parse_and_bind('set output-meta on')
+            parse_and_bind('set convert-meta off')
+            parse_and_bind('set horizontal-scroll-mode on')
+            parse_and_bind('set completion-query-items 0')
+            parse_and_bind('set page-completions off')
+            parse_and_bind('set skip-completed-text on')
+            parse_and_bind('set completion-ignore-case on')
+            parse_and_bind('set show-all-if-ambiguous on')
+            parse_and_bind('set show-all-if-unmodified on')
         except Exception as e:
             logger.warning(f"Could not configure readline settings: {e}")
         
@@ -1030,7 +1034,7 @@ def run_interactive(args):
                     and any(command.lower().startswith(cmd) for cmd in valid_commands)
                 ):
                     try:
-                        readline.add_history(command)
+                        add_history(command)
                     except Exception:
                         pass  # Ignore history errors
                 
@@ -1284,7 +1288,7 @@ def run_interactive(args):
         
         # Save command history
         try:
-            readline.write_history_file(history_file)
+            write_history_file(history_file)
         except Exception as e:
             logger.warning(f"Could not save command history: {e}")
         
