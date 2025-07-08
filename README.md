@@ -1411,162 +1411,107 @@ For issues and questions:
 Here's what the interactive interface looks like when you start the toolkit:
 
 ```bash
-(adoc-export-import) nitinmotgi@MBA-K609Q0JDGC adoc-export-import % bin/adoc-migration-toolkit 
-
-================================================================================
-ADOC INTERACTIVE MIGRATION TOOLKIT
-================================================================================
-📁 Output Directory: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo
-📁 Current Directory: /Users/nitinmotgi/Work/adoc-export-import
-📋 Config File: config/config.env
-🌍 Source Environment: https://se-demo.acceldata.app
-🌍 Source Tenant: se-demo
-================================================================================
-✅ Tab completion configured successfully
-
 ADOC > help
 
 ================================================================================
 ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
 ================================================================================
 
-📁 Current Output Directory: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo
+📁 Current Output Directory: /Users/nitinmotgi/Work/adoc-migration-toolkit/data/se-demo-2
 💡 Use 'set-output-dir <directory>' to change the output directory
 ================================================================================
 
 📊 SEGMENTS COMMANDS:
   segments-export [<csv_file>] [--output-file <file>] [--quiet]
-    Description: Export segments from source environment to CSV file
-    Arguments:
-      csv_file: Path to CSV file with source-env and target-env mappings (optional)
-      --output-file: Specify custom output file (optional)
-      --quiet: Suppress console output, show only summary
-    Examples:
-      segments-export
-      segments-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/segmented_spark_uids.csv
-      segments-export data/uids.csv --output-file my_segments.csv --quiet
-    Behavior:
-      • If no CSV file specified, uses default from output directory
-      • Default input: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/segmented_spark_uids.csv
-      • Default output: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/segments_output.csv
-      • Exports segments configuration for assets with isSegmented=true
-      • For engineType=SPARK: Required because segmented Spark configurations
-        are not directly imported with standard import capability
-      • For engineType=JDBC_SQL: Already available in standard import,
-        so no additional configuration needed
-      • Only processes assets that have segments defined
-      • Skips assets without segments (logged as info)
-
+    Export segments from source environment to CSV file
   segments-import <csv_file> [--dry-run] [--quiet] [--verbose]
-    Description: Import segments to target environment from CSV file
-    Arguments:
-      csv_file: Path to CSV file with target-env and segments_json
-      --dry-run: Preview changes without making API calls
-      --quiet: Suppress console output (default)
-      --verbose: Show detailed output including headers
-    Examples:
-      segments-import /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/segments_output.csv
-      segments-import segments.csv --dry-run --verbose
-    Behavior:
-      • Reads the CSV file generated from segments-export command
-      • Targets UIDs for which segments are present and engine is SPARK
-      • Imports segments configuration to target environment
-      • Creates new segments (removes existing IDs)
-      • Supports both SPARK and JDBC_SQL engine types
-      • Validates CSV format and JSON content
-      • Processes only assets that have valid segments configuration
+    Import segments to target environment from CSV file
 
 🔧 ASSET PROFILE COMMANDS:
   asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]
-    Description: Export asset profiles from source environment to CSV file
-    Arguments:
-      csv_file: Path to CSV file with source-env and target-env mappings (optional)
-      --output-file: Specify custom output file (optional)
-      --quiet: Suppress console output, show only summary (default)
-      --verbose: Show detailed output including headers and responses
-      --parallel: Use parallel processing for faster export (max 5 threads)
-    Examples:
-      asset-profile-export
-      asset-profile-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
-      asset-profile-export uids.csv --output-file profiles.csv --verbose
-      asset-profile-export --parallel
-    Behavior:
-      • If no CSV file specified, uses default from output directory
-      • Default input: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv
-      • Default output: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-import/asset-profiles-import-ready.csv
-      • Reads source-env and target-env mappings from CSV file
-      • Makes API calls to get asset profiles from source environment
-      • Writes profile JSON data to output CSV file
-      • Shows minimal output by default, use --verbose for detailed information
-      • Parallel mode: Uses up to 5 threads to process assets simultaneously
-      • Parallel mode: Each thread has its own progress bar
-      • Parallel mode: Significantly faster for large asset sets
-
+    Export asset profiles from source environment to CSV file
   asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose]
-    Description: Import asset profiles to target environment from CSV file
-    Arguments:
-      csv_file: Path to CSV file with target-env and profile_json (optional)
-      --dry-run: Preview changes without making API calls
-      --quiet: Suppress console output (default)
-      --verbose: Show detailed output including headers and responses
-    Examples:
-      asset-profile-import
-      asset-profile-import /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-import/asset-profiles-import-ready.csv
-      asset-profile-import profiles.csv --dry-run --verbose
-    Behavior:
-      • If no CSV file specified, uses default from output directory
-      • Default input: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-import/asset-profiles-import-ready.csv
-      • Reads target-env and profile_json from CSV file
-      • Makes API calls to update asset profiles in target environment
-      • Supports dry-run mode for previewing changes
+    Import asset profiles to target environment from CSV file
 
 🔍 ASSET CONFIGURATION COMMANDS:
   asset-config-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]
-    Description: Export asset configurations from source environment to CSV file
-    Arguments:
-      csv_file: Path to CSV file with 4 columns: source_uid, source_id, target_uid, tags (optional, defaults to asset-export/asset-all-export.csv)
-      --output-file: Specify custom output file (optional)
-      --quiet: Suppress console output, show only summary
-      --verbose: Show detailed output including headers and responses
-      --parallel: Use parallel processing for faster export (max 5 threads, quiet mode default)
-    Examples:
-      asset-config-export
-      asset-config-export /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset-all-export.csv
-      asset-config-export uids.csv --output-file configs.csv --verbose
-      asset-config-export --parallel
-      asset-config-export --parallel --verbose
-    Behavior:
-      • Reads from asset-export/asset-all-export.csv by default if no CSV file specified
-      • Reads CSV with 4 columns: source_uid, source_id, target_uid, tags
-      • Uses source_id to call '/catalog-server/api/assets/<source_id>/config'
-      • Writes compressed JSON response to CSV with target_uid
-      • Shows status for each asset in quiet mode
-      • Shows HTTP headers and response objects in verbose mode
-      • Output format: target_uid, config_json (compressed)
-      • Output file: asset-export/asset-config-export.csv
-      • Parallel mode: Uses up to 5 threads, work divided equally between threads
-      • Parallel mode: Quiet mode is default (shows tqdm progress bars)
-      • Parallel mode: Use --verbose to see URL, headers, and response for each call
-      • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)
-      • Default mode: Silent (no progress bars)
+    Export asset configurations from source environment to CSV file
+  asset-config-import [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]
+    Import asset configurations to target environment from CSV file
+  asset-list-export [--quiet] [--verbose] [--parallel]
+    Export all assets from source environment to CSV file
+  asset-tag-import [csv_file] [--quiet] [--verbose] [--parallel]
+    Import tags for assets from CSV file
 
-  asset-config-import [<csv_file>] [--quiet] [--verbose] [--parallel]
+📋 POLICY COMMANDS:
+  policy-list-export [--quiet] [--verbose] [--parallel]
+    Export all policies from source environment to CSV file
+  policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]
+    Export policy definitions by different categories from source environment to ZIP files
+  policy-import <file_or_pattern> [--quiet] [--verbose]
+    Import policy definitions from ZIP files to target environment
+  rule-tag-export [--quiet] [--verbose] [--parallel]
+    Export rule tags for all policies from policies-all-export.csv
+  policy-xfr [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]
+    Format policy export files by replacing substrings in JSON files and ZIP archives
+
+🔧 VCS COMMANDS:
+  vcs-config [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]
+    Configure enterprise VCS settings (Git/Mercurial/Subversion, HTTPS/SSH, proxy)
+  vcs-init [<base directory>]
+    Initialize a VCS repository (Git or Mercurial) in the output directory or specified directory
+  vcs-pull
+    Pull updates from the configured repository with authentication
+  vcs-push
+    Push changes to the remote repository with authentication
+
+🛠️ UTILITY COMMANDS:
+  set-output-dir <directory>
+    Set global output directory for all export commands
+  help
+    Show this help information
+  help <command>
+    Show detailed help for a specific command
+  history
+    Show the last 25 commands with numbers
+  exit, quit, q
+    Exit the interactive client
+
+💡 TIPS:
+  • Use TAB key for command autocomplete
+  • Use ↑/↓ arrow keys to navigate command history
+  • Type 'help <command>' for detailed help on any command
+  • Use --dry-run to preview changes before making them
+  • Use --verbose to see detailed API request/response information
+  • Set output directory once with set-output-dir to avoid specifying --output-file repeatedly
+
+ADOC > help asset-config-import
+
+================================================================================
+ADOC INTERACTIVE MIGRATION TOOLKIT - DETAILED HELP FOR: ASSET-CONFIG-IMPORT
+================================================================================
+
+📁 Current Output Directory: /Users/nitinmotgi/Work/adoc-migration-toolkit/data/se-demo-2
+================================================================================
+
+asset-config-import [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]
     Description: Import asset configurations to target environment from CSV file
     Arguments:
-      csv_file: Path to CSV file with target_uid and config_json columns (optional, defaults to asset-import/asset-config-import-ready.csv)
+      csv_file: Path to CSV file with target_uid and config_json columns (optional)
+      --dry-run: Preview requests and payloads without making API calls
       --quiet: Show progress bars (default for parallel mode)
       --verbose: Show detailed output including HTTP requests and responses
       --parallel: Use parallel processing for faster import (max 5 threads)
     Examples:
       asset-config-import
       asset-config-import /path/to/asset-config-import-ready.csv
-      asset-config-import --quiet --parallel
+      asset-config-import --dry-run --quiet --parallel
       asset-config-import --verbose
     Behavior:
       • Reads from asset-import/asset-config-import-ready.csv by default if no CSV file specified
       • Reads CSV with 2 columns: target_uid, config_json
       • Gets asset ID using GET /catalog-server/api/assets?uid=<target_uid>
-      • Updates config using POST /catalog-server/api/assets/<id>/config
+      • Updates config using PUT /catalog-server/api/assets/<id>/config
       • Shows progress bar in quiet mode
       • Shows HTTP details in verbose mode
       • Parallel mode: Uses up to 5 threads, work divided equally between threads
@@ -1575,332 +1520,7 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
       • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)
       • Default mode: Silent (no progress bars)
 
-  asset-list-export [--quiet] [--verbose] [--parallel]
-    Description: Export all assets from source environment to CSV file
-    Arguments:
-      --quiet: Suppress console output, show only summary
-      --verbose: Show detailed output including headers and responses
-      --parallel: Use parallel processing for faster export (max 5 threads)
-    Examples:
-      asset-list-export
-      asset-list-export --quiet
-      asset-list-export --verbose
-      asset-list-export --parallel
-    Behavior:
-      • Uses '/catalog-server/api/assets/discover' endpoint with pagination
-      • First call gets total count with size=0&page=0
-      • Retrieves all pages with size=500 (default)
-      • Output file: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset-all-export.csv
-      • CSV columns: uid, id
-      • Sorts output by uid first, then by id
-      • Shows page-by-page progress in quiet mode
-      • Shows detailed request/response in verbose mode
-      • Provides comprehensive statistics upon completion
-
-  policy-list-export [--quiet] [--verbose] [--parallel]
-    Description: Export all policies from source environment to CSV file
-    Arguments:
-      --quiet: Suppress console output, show only summary
-      --verbose: Show detailed output including headers and responses
-      --parallel: Use parallel processing for faster export (max 5 threads)
-    Examples:
-      policy-list-export
-      policy-list-export --quiet
-      policy-list-export --verbose
-      policy-list-export --parallel
-    Behavior:
-      • Uses '/catalog-server/api/rules' endpoint with pagination
-      • First call gets total count with page=0&size=0
-      • Retrieves all pages with size=1000 (default)
-      • Output file: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/policies-all-export.csv
-      • CSV columns: id, type, engineType
-      • Sorts output by id
-      • Shows page-by-page progress in quiet mode
-      • Shows detailed request/response in verbose mode
-      • Provides comprehensive statistics upon completion
-      • Parallel mode: Uses up to 5 threads with minimum 10 policies per thread
-      • Parallel mode: Each thread has its own progress bar
-      • Parallel mode: Automatic retry (3 attempts) on failures
-      • Parallel mode: Temporary files merged into final output
-
-  policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]
-    Description: Export policy definitions by different categories from source environment to ZIP files
-    Arguments:
-      --type: Export type (rule-types, engine-types, assemblies, source-types)
-      --filter: Optional filter value within the export type
-      --quiet: Suppress console output, show only summary
-      --verbose: Show detailed output including headers and responses
-      --batch-size: Number of policies to export in each batch (default: 50)
-      --parallel: Use parallel processing for faster export (max 5 threads)
-    Examples:
-      policy-export
-      policy-export --type rule-types
-      policy-export --type engine-types --filter JDBC_URL
-      policy-export --type assemblies --filter production-db
-      policy-export --type source-types --filter PostgreSQL
-      policy-export --type rule-types --batch-size 100 --quiet
-      policy-export --type rule-types --parallel
-    Behavior:
-      • Reads policies from /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/policies-all-export.csv (generated by policy-list-export)
-      • Groups policies by the specified export type
-      • Optionally filters to a specific value within that type
-      • Exports each group in batches using '/catalog-server/api/rules/export/policy-definitions'
-      • Output files: <export_type>[-<filter>]-<timestamp>-<range>.zip in /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export
-      • Default batch size: 50 policies per ZIP file
-      • Filename examples:
-        - rule_types-07-04-2025-17-21-0-99.zip
-        - engine_types_jdbc_url-07-04-2025-17-21-0-99.zip
-        - assemblies_production_db-07-04-2025-17-21-0-99.zip
-      • Shows batch-by-batch progress in quiet mode
-      • Shows detailed request/response in verbose mode
-      • Provides comprehensive statistics upon completion
-      • Parallel mode: Uses up to 5 threads to process different policy types simultaneously
-      • Parallel mode: Each thread has its own progress bar showing batch completion
-      • Parallel mode: Significantly faster for large exports with multiple policy types
-
-  rule-tag-export [--quiet] [--verbose] [--parallel]
-    Description: Export rule tags for all policies from policies-all-export.csv
-    Arguments:
-      --quiet: Suppress console output, show only summary with progress bar
-      --verbose: Show detailed output including headers and responses
-      --parallel: Use parallel processing for faster export (max 5 threads)
-    Examples:
-      rule-tag-export
-      rule-tag-export --quiet
-      rule-tag-export --verbose
-      rule-tag-export --parallel
-    Behavior:
-      • Automatically runs policy-list-export if policies-all-export.csv doesn't exist
-      • Reads rule IDs from /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/policies-all-export.csv (first column)
-      • Makes API calls to '/catalog-server/api/rules/<id>/tags' for each rule
-      • Extracts tag names from the response
-      • Outputs to /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export/rule-tags-export.csv with rule ID and comma-separated tags
-      • Shows progress bar in quiet mode
-      • Shows detailed API calls in verbose mode
-      • Provides comprehensive statistics upon completion
-      • Parallel mode: Uses up to 5 threads to process rules simultaneously
-      • Parallel mode: Each thread has its own progress bar
-      • Parallel mode: Significantly faster for large rule sets
-
-  policy-import <file_or_pattern> [--quiet] [--verbose]
-    Description: Import policy definitions from ZIP files to target environment
-    Arguments:
-      file_or_pattern: ZIP file path or glob pattern (e.g., *.zip)
-      --quiet: Suppress console output, show only summary
-      --verbose: Show detailed output including headers and responses
-    Examples:
-      policy-import *.zip
-      policy-import data-quality-*.zip
-      policy-import /path/to/specific-file.zip
-      policy-import *.zip --verbose
-    Behavior:
-      • Uploads ZIP files to '/catalog-server/api/rules/import/policy-definitions/upload-config'
-      • Uses target environment authentication (target access key, secret key, and tenant)
-      • By default, looks for files in output-dir/policy-import directory
-      • Supports absolute paths to override default directory
-      • Supports glob patterns for multiple files
-      • Validates that files exist and are readable
-      • Aggregates statistics across all imported files
-      • Shows detailed import results and conflicts
-      • Provides comprehensive summary with aggregated statistics
-      • Tracks UUIDs of imported policy definitions
-      • Reports conflicts (assemblies, policies, SQL views, visual views)
-
-  policy-xfr [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]
-    Description: Format policy export files by replacing substrings in JSON files and ZIP archives
-    Arguments:
-      --source-env-string: Substring to search for (source environment) [REQUIRED]
-      --target-env-string: Substring to replace with (target environment) [REQUIRED]
-    Options:
-      --input: Input directory (auto-detected from policy-export if not specified)
-      --output-dir: Output directory (defaults to organized subdirectories)
-      --quiet: Suppress console output, show only summary
-      --verbose: Show detailed output including processing details
-    Examples:
-      policy-xfr --source-env-string "PROD_DB" --target-env-string "DEV_DB"
-      policy-xfr --input data/samples --source-env-string "old" --target-env-string "new"
-      policy-xfr --source-env-string "PROD_DB" --target-env-string "DEV_DB" --verbose
-    Behavior:
-      • Processes JSON files and ZIP archives in the input directory
-      • Replaces all occurrences of source string with target string
-      • Maintains file structure and count
-      • Auto-detects input directory from /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-export if not specified
-      • Creates organized output directory structure
-      • Extracts data quality policy assets to CSV files
-      • Generates /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/asset_uids.csv and /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/segmented_spark_uids.csv
-      • Shows detailed processing statistics upon completion
-
-🛠️ UTILITY COMMANDS:
-  set-output-dir <directory>
-    Description: Set global output directory for all export commands
-    Arguments:
-      directory: Path to the output directory
-    Examples:
-      set-output-dir /path/to/my/output
-      set-output-dir data/custom_output
-    Features:
-      • Sets the output directory for all export commands
-      • Creates the directory if it doesn't exist
-      • Validates write permissions
-      • Saves configuration to ~/.adoc_migration_config.json
-      • Persists across multiple interactive sessions
-      • Can be changed anytime with another set-output-dir command
-
-🔧 VERSION CONTROL COMMANDS:
-  vcs-config [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]
-    Description: Configure VCS repository settings and authentication
-    Arguments:
-      --vcs-type: VCS type (default: git)
-      --remote-url: Remote repository URL
-      --username: Username for authentication
-      --token: Authentication token
-      --ssh-key-path: Path to SSH private key
-      --ssh-passphrase: SSH key passphrase
-      --proxy-url: Proxy server URL
-      --proxy-username: Proxy username
-      --proxy-password: Proxy password
-    Examples:
-      vcs-config  # Interactive mode
-      vcs-config --vcs-type git --remote-url https://github.com/user/repo.git
-      vcs-config --vcs-type git --remote-url git@github.com:user/repo.git --ssh-key-path ~/.ssh/id_rsa
-      vcs-config --vcs-type git --remote-url https://enterprise.gitlab.com/repo.git --username user --token <token>
-    Features:
-      • Interactive configuration mode with guided setup
-      • Support for HTTPS with username/token authentication
-      • Support for SSH with key-based authentication
-      • Proxy configuration for enterprise environments
-      • Secure storage of authentication credentials
-      • Validation of repository settings
-      • Configuration persistence across sessions
-
-  vcs-init [<base directory>]
-    Description: Initialize a new Git repository in the output directory
-    Arguments:
-      base directory: Optional directory path (defaults to current output directory)
-    Examples:
-      vcs-init
-      vcs-init /path/to/repository
-    Features:
-      • Creates Git repository in specified directory
-      • Sets up initial commit with current files
-      • Configures main branch as default
-      • Creates .gitignore with appropriate exclusions
-      • Sets up Git user configuration
-      • Validates repository initialization
-      • Provides detailed status reporting
-
-  vcs-pull
-    Description: Pull latest changes from the remote repository
-    Examples:
-      vcs-pull
-    Features:
-      • Fetches and merges latest changes from remote
-      • Handles merge conflicts automatically where possible
-      • Validates authentication before pulling
-      • Provides detailed status of pull operations
-      • Error recovery and guidance for issues
-      • Requires VCS configuration from 'vcs-config' command
-
-  vcs-push
-    Description: Push local changes to the remote repository
-    Examples:
-      vcs-push
-    Features:
-      • Pushes local changes to remote repository
-      • Pre-push validation of repository state
-      • Conflict detection and resolution guidance
-      • Authentication verification before pushing
-      • Detailed push operation status reporting
-      • Requires VCS configuration from 'vcs-config' command
-      • Requires a repository initialized with 'vcs-init' command
-
-🚀 GUIDED MIGRATION COMMANDS:
-  guided-migration <name>
-    Description: Start a new guided migration session
-    Arguments:
-      name: Unique name for the migration session
-    Examples:
-      guided-migration prod-to-dev
-      guided-migration test-migration
-    Features:
-      • Step-by-step guidance through the complete migration process
-      • State management - can pause and resume at any time
-      • Validation of prerequisites at each step
-      • Detailed help and instructions for each step
-      • Automatic file path management
-
-  resume-migration <name>
-    Description: Resume an existing guided migration session
-    Arguments:
-      name: Name of the existing migration session
-    Examples:
-      resume-migration prod-to-dev
-    Features:
-      • Continues from where you left off
-      • Shows current progress and completed steps
-      • Validates prerequisites before continuing
-
-  delete-migration <name>
-    Description: Delete a migration state file
-    Arguments:
-      name: Name of the migration session to delete
-    Examples:
-      delete-migration prod-to-dev
-    Features:
-      • Confirms deletion to prevent accidental loss
-      • Shows migration details before deletion
-
-  list-migrations
-    Description: List all available migration sessions
-    Examples:
-      list-migrations
-    Features:
-      • Shows all migration names and their status
-      • Displays creation date and current step
-      • Shows completion progress
-
-  help
-    Description: Show this help information
-    Example: help
-
-  history
-    Description: Show the last 25 commands with numbers
-    Example: history
-    Features:
-      • Displays the last 25 commands with numbered entries
-      • Latest commands appear first (highest numbers)
-      • Long commands are truncated for display
-      • Enter a number to execute that command
-      • Works alongside ↑/↓ arrow key navigation
-
-  exit, quit, q
-    Description: Exit the interactive client
-    Examples: exit, quit, q
-
-🔧 ENVIRONMENT BEHAVIOR:
-  • segments-export: Always exports from source environment
-  • segments-import: Always imports to target environment
-  • asset-profile-export: Always exports from source environment
-  • asset-profile-import: Always imports to target environment
-  • asset-config-export: Always exports from source environment
-  • asset-list-export: Always exports from source environment
-  • policy-list-export: Always exports from source environment
-  • policy-export: Always exports from source environment
-  • policy-import: Always imports to target environment
-
-💡 TIPS:
-  • Use TAB key for command autocomplete
-  • Use ↑/↓ arrow keys to navigate command history
-  • Type part of an endpoint and press TAB to see suggestions
-  • Use --dry-run to preview changes before making them
-  • Use --verbose to see detailed API request/response information
-  • Check log files for detailed error information
-  • Set output directory once with set-output-dir to avoid specifying --output-file repeatedly
-
-📁 FILE LOCATIONS:
-  • Input CSV files: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/asset-export/ and /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/policy-import/
-  • Output CSV files: /Users/nitinmotgi/Work/adoc-export-import/data/se-demo/ (organized by category)
-  • Log files: adoc-migration-toolkit-YYYYMMDD.log
+================================================================================
 ```
 
 This example shows:
