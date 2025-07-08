@@ -1366,10 +1366,16 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
         successful_imports = 0
         failed_imports = 0
         
-        # Process each ZIP file
+        # PHASE 1: Upload all ZIP files and collect UUIDs
+        if not quiet_mode:
+            print(f"\n📤 PHASE 1: Uploading all ZIP files")
+            print("="*80)
+        
+        upload_results = []  # List to store (zip_file, upload_response, upload_uuid) tuples
+        
         for i, zip_file in enumerate(zip_files, 1):
             if not quiet_mode:
-                print(f"Processing file {i}/{len(zip_files)}: {zip_file}")
+                print(f"Uploading file {i}/{len(zip_files)}: {zip_file}")
             
             try:
                 # Validate file exists and is readable
@@ -1418,9 +1424,9 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                         print(f"  X-Tenant: {client.tenant} (Source tenant - will be used as target)")
                     print(f"  File: {zip_file}")
                 
-                # Step 1: Upload config
+                # Upload config
                 if verbose_mode:
-                    print(f"\n📤 STEP 1: Upload Config")
+                    print(f"\n📤 Upload Config")
                     print(f"  Endpoint: /catalog-server/api/rules/import/policy-definitions/upload-config")
                     print(f"  Method: POST")
                     print(f"  Content-Type: multipart/form-data")
@@ -1456,6 +1462,8 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     aggregated_stats['upload_configs_failed'] += 1
                     continue
                 
+                # Store successful upload result
+                upload_results.append((zip_file, upload_response, upload_uuid))
                 aggregated_stats['upload_configs_successful'] += 1
                 
                 if verbose_mode:
@@ -1464,10 +1472,29 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     print(f"  Total Policies: {upload_response.get('totalPolicyCount', 0)}")
                     print(f"  Data Quality Policies: {upload_response.get('totalDataQualityPolicyCount', 0)}")
                     print(f"  Data Sources: {upload_response.get('totalDataSourceCount', 0)}")
-                
-                # Step 2: Apply config
+                else:
+                    print(f"✅ [{i}/{len(zip_files)}] {zip_file}: Upload successful (UUID: {upload_uuid})")
+                    
+            except Exception as e:
+                error_msg = f"Failed to upload {zip_file}: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_imports += 1
+                aggregated_stats['files_failed'] += 1
+        
+        # PHASE 2: Apply config for each uploaded UUID
+        if not quiet_mode:
+            print(f"\n📥 PHASE 2: Applying config for {len(upload_results)} uploaded files")
+            print("="*80)
+        
+        for i, (zip_file, upload_response, upload_uuid) in enumerate(upload_results, 1):
+            if not quiet_mode:
+                print(f"Applying config {i}/{len(upload_results)}: {zip_file} (UUID: {upload_uuid})")
+            
+            try:
                 if verbose_mode:
-                    print(f"\n📥 STEP 2: Apply Config")
+                    print(f"\n📥 Apply Config")
                     print(f"  Endpoint: /catalog-server/api/rules/import/policy-definitions/apply-config")
                     print(f"  Method: POST")
                     print(f"  Content-Type: application/json")
@@ -1508,14 +1535,14 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     aggregated_stats['uuids'].append(upload_uuid)
                     
                     if not quiet_mode:
-                        print(f"✅ Successfully imported: {zip_file}")
+                        print(f"✅ Successfully applied config: {zip_file}")
                         if verbose_mode:
                             print(f"  UUID: {upload_uuid}")
                             print(f"  Total Policies: {upload_response.get('totalPolicyCount', 0)}")
                             print(f"  Data Quality Policies: {upload_response.get('totalDataQualityPolicyCount', 0)}")
                             print(f"  Data Sources: {upload_response.get('totalDataSourceCount', 0)}")
                     else:
-                        print(f"✅ [{i}/{len(zip_files)}] {zip_file}: Successfully imported")
+                        print(f"✅ [{i}/{len(upload_results)}] {zip_file}: Apply successful")
                 else:
                     error_msg = f"Apply config failed for {zip_file} (UUID: {upload_uuid})"
                     if not quiet_mode:
@@ -1526,7 +1553,7 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     aggregated_stats['apply_configs_failed'] += 1
                     
             except Exception as e:
-                error_msg = f"Failed to import {zip_file}: {e}"
+                error_msg = f"Failed to apply config for {zip_file}: {e}"
                 if not quiet_mode:
                     print(f"❌ {error_msg}")
                 logger.error(error_msg)
