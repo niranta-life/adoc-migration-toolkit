@@ -9,6 +9,9 @@ import os
 import sys
 import readline
 import json
+import getpass
+import signal
+from datetime import datetime
 from pathlib import Path
 from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
@@ -19,6 +22,57 @@ from .policy_operations import execute_policy_list_export, execute_policy_list_e
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
 from adoc_migration_toolkit.shared import globals
+
+
+def log_session_event(logger, event_type: str, user_info: dict = None):
+    """Log session start or exit events.
+    
+    Args:
+        logger: Logger instance
+        event_type: 'start' or 'exit'
+        user_info: Dictionary containing user information
+    """
+    try:
+        if not user_info:
+            user_info = {}
+        
+        username = user_info.get('username', getpass.getuser())
+        hostname = user_info.get('hostname', os.uname().nodename if hasattr(os, 'uname') else 'unknown')
+        session_id = user_info.get('session_id', datetime.now().strftime('%Y%m%d_%H%M%S'))
+        
+        if event_type == 'start':
+            logger.info(f"INTERACTIVE SESSION STARTED - User: {username}, Host: {hostname}, Session: {session_id}")
+        elif event_type == 'exit':
+            logger.info(f"INTERACTIVE SESSION EXITED - User: {username}, Host: {hostname}, Session: {session_id}")
+    except Exception as e:
+        # Don't let logging errors break the session
+        try:
+            logger.warning(f"Failed to log session event: {e}")
+        except:
+            pass
+
+
+def get_user_session_info():
+    """Get user and session information for logging.
+    
+    Returns:
+        dict: User and session information
+    """
+    try:
+        return {
+            'username': getpass.getuser(),
+            'hostname': os.uname().nodename if hasattr(os, 'uname') else 'unknown',
+            'session_id': datetime.now().strftime('%Y%m%d_%H%M%S'),
+            'pid': os.getpid()
+        }
+    except Exception:
+        return {
+            'username': 'unknown',
+            'hostname': 'unknown',
+            'session_id': datetime.now().strftime('%Y%m%d_%H%M%S'),
+            'pid': os.getpid()
+        }
+
 
 def show_interactive_help():
     """Display concise help information for all available interactive commands."""
@@ -104,478 +158,6 @@ def show_interactive_help():
     print("  • Use --dry-run to preview changes before making them")
     print("  • Use --verbose to see detailed API request/response information")
     print("  • Set output directory once with set-output-dir to avoid specifying --output-file repeatedly")
-
-
-def show_command_help(command_name: str):
-    """Display detailed help information for a specific command."""
-    # ANSI escape codes for formatting
-    BOLD = '\033[1m'
-    RESET = '\033[0m'
-    
-    # Get current output directory for dynamic paths
-    current_output_dir = globals.GLOBAL_OUTPUT_DIR
-    
-    print(f"\n" + "="*80)
-    print(f"ADOC INTERACTIVE MIGRATION TOOLKIT - DETAILED HELP FOR: {command_name.upper()}")
-    print("="*80)
-    
-    # Show current output directory status
-    if current_output_dir:
-        print(f"\n📁 Current Output Directory: {current_output_dir}")
-    else:
-        print(f"\n📁 Current Output Directory: Not set (will use default: adoc-migration-toolkit-YYYYMMDDHHMM)")
-    print("="*80)
-    
-    # Command-specific help content
-    if command_name == 'segments-export':
-        print(f"\n{BOLD}segments-export{RESET} [<csv_file>] [--output-file <file>] [--quiet]")
-        print("    Description: Export segments from source environment to CSV file")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file with source-env and target-env mappings (optional)")
-        print("      --output-file: Specify custom output file (optional)")
-        print("      --quiet: Suppress console output, show only summary")
-        print("    Examples:")
-        print("      segments-export")
-        print("      segments-export <output-dir>/policy-export/segmented_spark_uids.csv")
-        print("      segments-export data/uids.csv --output-file my_segments.csv --quiet")
-        print("    Behavior:")
-        print("      • If no CSV file specified, uses default from output directory")
-        print("      • Default input: <output-dir>/policy-export/segmented_spark_uids.csv")
-        print("      • Default output: <output-dir>/policy-import/segments_output.csv")
-        print("      • Exports segments configuration for assets with isSegmented=true")
-        print("      • For engineType=SPARK: Required because segmented Spark configurations")
-        print("        are not directly imported with standard import capability")
-        print("      • For engineType=JDBC_SQL: Already available in standard import,")
-        print("        so no additional configuration needed")
-        print("      • Only processes assets that have segments defined")
-        print("      • Skips assets without segments (logged as info)")
-    
-    elif command_name == 'segments-import':
-        print(f"\n{BOLD}segments-import{RESET} <csv_file> [--dry-run] [--quiet] [--verbose]")
-        print("    Description: Import segments to target environment from CSV file")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file with target-env and segments_json")
-        print("      --dry-run: Preview changes without making API calls")
-        print("      --quiet: Suppress console output (default)")
-        print("      --verbose: Show detailed output including headers")
-        print("    Examples:")
-        print("      segments-import <output-dir>/policy-import/segments_output.csv")
-        print("      segments-import segments.csv --dry-run --verbose")
-        print("    Behavior:")
-        print("      • Reads the CSV file generated from segments-export command")
-        print("      • Targets UIDs for which segments are present and engine is SPARK")
-        print("      • Imports segments configuration to target environment")
-        print("      • Creates new segments (removes existing IDs)")
-        print("      • Supports both SPARK and JDBC_SQL engine types")
-        print("      • Validates CSV format and JSON content")
-        print("      • Processes only assets that have valid segments configuration")
-    
-    elif command_name == 'asset-profile-export':
-        print(f"\n{BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
-        print("    Description: Export asset profiles from source environment to CSV file")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file with source-env and target-env mappings (optional)")
-        print("      --output-file: Specify custom output file (optional)")
-        print("      --quiet: Suppress console output, show only summary (default)")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("      --parallel: Use parallel processing for faster export (max 5 threads)")
-        print("    Examples:")
-        print("      asset-profile-export")
-        print("      asset-profile-export <output-dir>/asset-export/asset_uids.csv")
-        print("      asset-profile-export uids.csv --output-file profiles.csv --verbose")
-        print("      asset-profile-export --parallel")
-        print("    Behavior:")
-        print("      • If no CSV file specified, uses default from output directory")
-        print("      • Default input: <output-dir>/asset-export/asset_uids.csv")
-        print("      • Default output: <output-dir>/asset-import/asset-profiles-import-ready.csv")
-        print("      • Reads source-env and target-env mappings from CSV file")
-        print("      • Makes API calls to get asset profiles from source environment")
-        print("      • Writes profile JSON data to output CSV file")
-        print("      • Shows minimal output by default, use --verbose for detailed information")
-        print("      • Parallel mode: Uses up to 5 threads to process assets simultaneously")
-        print("      • Parallel mode: Each thread has its own progress bar")
-        print("      • Parallel mode: Significantly faster for large asset sets")
-    
-    elif command_name == 'asset-profile-import':
-        print(f"\n{BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose]")
-        print("    Description: Import asset profiles to target environment from CSV file")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file with target-env and profile_json (optional)")
-        print("      --dry-run: Preview changes without making API calls")
-        print("      --quiet: Suppress console output (default)")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("    Examples:")
-        print("      asset-profile-import")
-        print("      asset-profile-import <output-dir>/asset-import/asset-profiles-import-ready.csv")
-        print("      asset-profile-import profiles.csv --dry-run --verbose")
-        print("    Behavior:")
-        print("      • If no CSV file specified, uses default from output directory")
-        print("      • Default input: <output-dir>/asset-import/asset-profiles-import-ready.csv")
-        print("      • Reads target-env and profile_json from CSV file")
-        print("      • Makes API calls to update asset profiles in target environment")
-        print("      • Supports dry-run mode for previewing changes")
-    
-    elif command_name == 'asset-config-export':
-        print(f"\n{BOLD}asset-config-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
-        print("    Description: Export asset configurations from source environment to CSV file")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file with 4 columns: source_uid, source_id, target_uid, tags (optional)")
-        print("      --output-file: Specify custom output file (optional)")
-        print("      --quiet: Suppress console output, show only summary")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("      --parallel: Use parallel processing for faster export (max 5 threads, quiet mode default)")
-        print("    Examples:")
-        print("      asset-config-export")
-        print("      asset-config-export <output-dir>/asset-export/asset-all-export.csv")
-        print("      asset-config-export uids.csv --output-file configs.csv --verbose")
-        print("      asset-config-export --parallel")
-        print("      asset-config-export --parallel --verbose")
-        print("    Behavior:")
-        print("      • Reads from asset-export/asset-all-export.csv by default if no CSV file specified")
-        print("      • Reads CSV with 4 columns: source_uid, source_id, target_uid, tags")
-        print("      • Uses source_id to call '/catalog-server/api/assets/<source_id>/config'")
-        print("      • Writes compressed JSON response to CSV with target_uid")
-        print("      • Shows status for each asset in quiet mode")
-        print("      • Shows HTTP headers and response objects in verbose mode")
-        print("      • Output format: target_uid, config_json (compressed)")
-        print("      • Parallel mode: Uses up to 5 threads, work divided equally between threads")
-        print("      • Parallel mode: Quiet mode is default (shows tqdm progress bars)")
-        print("      • Parallel mode: Use --verbose to see URL, headers, and response for each call")
-        print("      • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)")
-        print("      • Default mode: Silent (no progress bars)")
-    
-    elif command_name == 'asset-config-import':
-        print(f"\n{BOLD}asset-config-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]")
-        print("    Description: Import asset configurations to target environment from CSV file")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file with target_uid and config_json columns (optional)")
-        print("      --dry-run: Preview requests and payloads without making API calls")
-        print("      --quiet: Show progress bars (default for parallel mode)")
-        print("      --verbose: Show detailed output including HTTP requests and responses")
-        print("      --parallel: Use parallel processing for faster import (max 5 threads)")
-        print("    Examples:")
-        print("      asset-config-import")
-        print("      asset-config-import /path/to/asset-config-import-ready.csv")
-        print("      asset-config-import --dry-run --quiet --parallel")
-        print("      asset-config-import --verbose")
-        print("    Behavior:")
-        print("      • Reads from asset-import/asset-config-import-ready.csv by default if no CSV file specified")
-        print("      • Reads CSV with 2 columns: target_uid, config_json")
-        print("      • Gets asset ID using GET /catalog-server/api/assets?uid=<target_uid>")
-        print("      • Updates config using PUT /catalog-server/api/assets/<id>/config")
-        print("      • Shows progress bar in quiet mode")
-        print("      • Shows HTTP details in verbose mode")
-        print("      • Parallel mode: Uses up to 5 threads, work divided equally between threads")
-        print("      • Parallel mode: Quiet mode is default (shows tqdm progress bars)")
-        print("      • Parallel mode: Use --verbose to see HTTP details for each call")
-        print("      • Thread names: Rocket, Lightning, Unicorn, Dragon, Shark (with green progress bars)")
-        print("      • Default mode: Silent (no progress bars)")
-    
-    elif command_name == 'asset-list-export':
-        print(f"\n{BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel]")
-        print("    Description: Export all assets from source environment to CSV file")
-        print("    Arguments:")
-        print("      --quiet: Suppress console output, show only summary")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("      --parallel: Use parallel processing for faster export (max 5 threads)")
-        print("    Examples:")
-        print("      asset-list-export")
-        print("      asset-list-export --quiet")
-        print("      asset-list-export --verbose")
-        print("      asset-list-export --parallel")
-        print("    Behavior:")
-        print("      • Uses '/catalog-server/api/assets/discover' endpoint with pagination")
-        print("      • First call gets total count with size=0&page=0&profiled_assets=true&parents=true")
-        print("      • Retrieves all pages with size=500 and profiled_assets=true&parents=true")
-        print("      • Output file: <output-dir>/asset-export/asset-all-export.csv")
-        print("      • CSV columns: source_uid, source_id, target_uid, tags")
-        print("      • Extracts asset.uid, asset.id, and asset.tags[].name from response")
-        print("      • Concatenates tags with colon (:) separator in tags column")
-        print("      • Sorts output by source_uid first, then by source_id")
-        print("      • Shows page-by-page progress in quiet mode")
-        print("      • Shows detailed request/response in verbose mode")
-        print("      • Provides comprehensive statistics upon completion")
-        print("      • Parallel mode: Divides pages among threads, combines results, deletes temp files")
-    
-    elif command_name == 'asset-tag-import':
-        print(f"\n{BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
-        print("    Description: Import tags for assets from CSV file")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file (defaults to asset-all-import-ready.csv)")
-        print("    Options:")
-        print("      --quiet, -q: Suppress console output, show only summary")
-        print("      --verbose, -v: Show detailed output including API calls")
-        print("      --parallel, -p: Use parallel processing for faster import")
-        print("    Examples:")
-        print("      asset-tag-import")
-        print("      asset-tag-import --quiet")
-        print("      asset-tag-import --verbose")
-        print("      asset-tag-import --parallel")
-        print("      asset-tag-import /path/to/asset-data.csv --verbose --parallel")
-        print("    Behavior:")
-        print("      • Reads asset data from asset-all-import-ready.csv (or specified file)")
-        print("      • Processes each asset to get asset ID from target_uid")
-        print("      • Imports tags for each asset using POST /catalog-server/api/assets/<id>/tag")
-        print("      • Tags are colon-separated in the CSV file")
-        print("      • Uses target environment authentication")
-        print("      • Shows progress bar in quiet mode")
-        print("      • Shows detailed API calls in verbose mode")
-        print("      • Parallel mode: Uses up to 5 threads for faster processing")
-        print("      • Provides comprehensive statistics upon completion")
-    
-    elif command_name == 'policy-list-export':
-        print(f"\n{BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel]")
-        print("    Description: Export all policies from source environment to CSV file")
-        print("    Arguments:")
-        print("      --quiet: Suppress console output, show only summary")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("      --parallel: Use parallel processing for faster export (max 5 threads)")
-        print("    Examples:")
-        print("      policy-list-export")
-        print("      policy-list-export --quiet")
-        print("      policy-list-export --verbose")
-        print("      policy-list-export --parallel")
-        print("      policy-list-export --parallel --quiet")
-        print("    Behavior:")
-        print("      • Uses '/catalog-server/api/rules' endpoint with pagination")
-        print("      • First call gets total count with page=0&size=0")
-        print("      • Retrieves all pages with size=1000 (default)")
-        print("      • Output file: <output-dir>/policy-export/policies-all-export.csv")
-        print("      • CSV columns: id, type, engineType, tableAssetIds, assemblyIds, assemblyNames, sourceTypes")
-        print("      • Sorts output by id")
-        print("      • Shows page-by-page progress in quiet mode")
-        print("      • Shows detailed request/response in verbose mode")
-        print("      • Provides comprehensive statistics upon completion")
-        print("      • Parallel mode: Uses up to 5 threads with minimum 10 policies per thread")
-        print("      • Parallel mode: Each thread has its own progress bar")
-        print("      • Parallel mode: Automatic retry (3 attempts) on failures")
-        print("      • Parallel mode: Temporary files merged into final output")
-    
-    elif command_name == 'policy-export':
-        print(f"\n{BOLD}policy-export{RESET} [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]")
-        print("    Description: Export policy definitions by different categories from source environment to ZIP files")
-        print("    Arguments:")
-        print("      --type: Export type (rule-types, engine-types, assemblies, source-types)")
-        print("      --filter: Optional filter value within the export type")
-        print("      --quiet: Suppress console output, show only summary")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("      --batch-size: Number of policies to export in each batch (default: 50)")
-        print("      --parallel: Use parallel processing for faster export (max 5 threads)")
-        print("    Examples:")
-        print("      policy-export")
-        print("      policy-export --type rule-types")
-        print("      policy-export --type engine-types --filter JDBC_URL")
-        print("      policy-export --type assemblies --filter production-db")
-        print("      policy-export --type source-types --filter PostgreSQL")
-        print("      policy-export --type rule-types --batch-size 100 --quiet")
-        print("      policy-export --type rule-types --parallel")
-        print("    Behavior:")
-        print("      • Reads policies from <output-dir>/policy-export/policies-all-export.csv (generated by policy-list-export)")
-        print("      • Groups policies by the specified export type")
-        print("      • Optionally filters to a specific value within that type")
-        print("      • Exports each group in batches using '/catalog-server/api/rules/export/policy-definitions'")
-        print("      • Output files: <export_type>[-<filter>]-<timestamp>-<range>.zip in <output-dir>/policy-export")
-        print("      • Default batch size: 50 policies per ZIP file")
-        print("      • Filename examples:")
-        print("        - rule_types-07-04-2025-17-21-0-99.zip")
-        print("        - engine_types_jdbc_url-07-04-2025-17-21-0-99.zip")
-        print("        - assemblies_production_db-07-04-2025-17-21-0-99.zip")
-        print("      • Shows batch-by-batch progress in quiet mode")
-        print("      • Shows detailed request/response in verbose mode")
-        print("      • Provides comprehensive statistics upon completion")
-        print("      • Parallel mode: Uses up to 5 threads to process different policy types simultaneously")
-        print("      • Parallel mode: Each thread has its own progress bar showing batch completion")
-        print("      • Parallel mode: Significantly faster for large exports with multiple policy types")
-    
-    elif command_name == 'policy-import':
-        print(f"\n{BOLD}policy-import{RESET} <file_or_pattern> [--quiet] [--verbose]")
-        print("    Description: Import policy definitions from ZIP files to target environment")
-        print("    Arguments:")
-        print("      file_or_pattern: ZIP file path or glob pattern (e.g., *.zip)")
-        print("      --quiet: Suppress console output, show only summary")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("    Examples:")
-        print("      policy-import *.zip")
-        print("      policy-import /path/to/specific-file.zip")
-        print("      policy-import *.zip --verbose")
-        print("    Behavior:")
-        print("      • Uploads ZIP files to '/catalog-server/api/rules/import/policy-definitions/upload-config'")
-        print("      • Uses target environment authentication (target access key, secret key, and tenant)")
-        print("      • By default, looks for files in <output-dir>/policy-import directory")
-        print("      • Supports absolute paths to override default directory")
-        print("      • Supports glob patterns for multiple files")
-        print("      • Validates that files exist and are readable")
-        print("      • Aggregates statistics across all imported files")
-        print("      • Shows detailed import results and conflicts")
-        print("      • Provides comprehensive summary with aggregated statistics")
-        print("      • Tracks UUIDs of imported policy definitions")
-        print("      • Reports conflicts (assemblies, policies, SQL views, visual views)")
-    
-    elif command_name == 'rule-tag-export':
-        print(f"\n{BOLD}rule-tag-export{RESET} [--quiet] [--verbose] [--parallel]")
-        print("    Description: Export rule tags for all policies from policies-all-export.csv")
-        print("    Arguments:")
-        print("      --quiet: Suppress console output, show only summary with progress bar")
-        print("      --verbose: Show detailed output including headers and responses")
-        print("      --parallel: Use parallel processing for faster export (max 5 threads)")
-        print("    Examples:")
-        print("      rule-tag-export")
-        print("      rule-tag-export --quiet")
-        print("      rule-tag-export --verbose")
-        print("      rule-tag-export --parallel")
-        print("    Behavior:")
-        print("      • Automatically runs policy-list-export if policies-all-export.csv doesn't exist")
-        print("      • Reads rule IDs from <output-dir>/policy-export/policies-all-export.csv (first column)")
-        print("      • Makes API calls to '/catalog-server/api/rules/<id>/tags' for each rule")
-        print("      • Extracts tag names from the response")
-        print("      • Outputs to <output-dir>/policy-export/rule-tags-export.csv with rule ID and comma-separated tags")
-        print("      • Shows progress bar in quiet mode")
-        print("      • Shows detailed API calls in verbose mode")
-        print("      • Provides comprehensive statistics upon completion")
-        print("      • Parallel mode: Uses up to 5 threads to process rules simultaneously")
-        print("      • Parallel mode: Each thread has its own progress bar")
-        print("      • Parallel mode: Significantly faster for large rule sets")
-    
-    elif command_name == 'policy-xfr':
-        print(f"\n{BOLD}policy-xfr{RESET} [--input <input_dir>] --source-env-string <source> --target-env-string <target> [options]")
-        print("    Description: Format policy export files by replacing substrings in JSON files and ZIP archives")
-        print("    Arguments:")
-        print("      --source-env-string: Substring to search for (source environment) [REQUIRED]")
-        print("      --target-env-string: Substring to replace with (target environment) [REQUIRED]")
-        print("    Options:")
-        print("      --input: Input directory (auto-detected from policy-export if not specified)")
-        print("      --output-dir: Output directory (defaults to organized subdirectories)")
-        print("      --quiet: Suppress console output, show only summary")
-        print("      --verbose: Show detailed output including processing details")
-        print("    Examples:")
-        print("      policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\"")
-        print("      policy-xfr --input data/samples --source-env-string \"old\" --target-env-string \"new\"")
-        print("      policy-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\" --verbose")
-        print("    Behavior:")
-        print("      • Processes JSON files and ZIP archives in the input directory")
-        print("      • Replaces all occurrences of source string with target string")
-        print("      • Maintains file structure and count")
-        print("      • Auto-detects input directory from <output-dir>/policy-export if not specified")
-        print("      • Creates organized output directory structure")
-        print("      • Extracts data quality policy assets to CSV files")
-        print("      • Generates <output-dir>/asset-export/asset_uids.csv and <output-dir>/policy-import/segmented_spark_uids.csv")
-        print("      • Processes asset-all-export.csv -> asset-all-import-ready.csv")
-        print("      • Processes asset-config-export.csv -> asset-config-import-ready.csv")
-        print("      • Shows detailed processing statistics upon completion")
-    
-    elif command_name == 'vcs-config':
-        print(f"\n{BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
-        print("    Description: Configure enterprise VCS settings (Git/Mercurial/Subversion, HTTPS/SSH, proxy)")
-        print("    Arguments:")
-        print("      --vcs-type: VCS type (git, hg, svn)")
-        print("      --remote-url: Remote repository URL")
-        print("      --username: Username for HTTPS authentication")
-        print("      --token: Token/password for HTTPS authentication")
-        print("    Options:")
-        print("      --ssh-key-path: Path to SSH private key")
-        print("      --ssh-passphrase: SSH key passphrase")
-        print("      --proxy-url: HTTP/HTTPS proxy URL")
-        print("      --proxy-username: Proxy username")
-        print("      --proxy-password: Proxy password")
-        print("    Examples:")
-        print("      vcs-config  # Interactive mode")
-        print("      vcs-config --vcs-type git --remote-url https://github.com/user/repo.git")
-        print("      vcs-config --vcs-type git --remote-url git@github.com:user/repo.git --ssh-key-path ~/.ssh/id_rsa")
-        print("      vcs-config --vcs-type git --remote-url https://enterprise.gitlab.com/repo.git --username user --token <token>")
-        print("    Behavior:")
-        print("      • Interactive configuration mode when no arguments provided")
-        print("      • Supports Git, Mercurial, and Subversion")
-        print("      • HTTPS authentication with username/token")
-        print("      • SSH authentication with key and passphrase")
-        print("      • HTTP/HTTPS proxy support for enterprise networks")
-        print("      • Secure credential storage in system keyring")
-        print("      • Configuration stored in ~/.adoc_vcs_config.json")
-        print("      • Validates URL format and authentication method")
-        print("      • Shows configuration summary and next steps")
-    
-    elif command_name == 'vcs-init':
-        print(f"\n{BOLD}vcs-init{RESET} [<base directory>]")
-        print("    Description: Initialize a VCS repository (Git or Mercurial) in the output directory or specified directory.")
-        print("    Arguments:")
-        print("      base directory: Directory to initialize the repository in (optional, defaults to output directory)")
-        print("    Behavior:")
-        print("      • Initializes a Git or Mercurial repository in the target directory")
-        print("      • Creates a .gitignore or .hgignore with patterns: *.zip, config.env, *.log, ~/.adoc_vcs_config.json")
-        print("      • Uses the output directory if no directory is specified")
-        print("      • Shows next steps for adding, committing, and pushing files")
-    
-    elif command_name == 'vcs-pull':
-        print(f"\n{BOLD}vcs-pull{RESET}")
-        print("    Description: Pull updates from the configured repository with authentication.")
-        print("    Behavior:")
-        print("      • Uses the output directory as the target for pulling files")
-        print("      • Requires VCS configuration from 'vcs-config' command")
-        print("      • Supports both Git and Mercurial repositories")
-        print("      • Handles HTTPS authentication with username/token")
-        print("      • Handles SSH authentication with key and passphrase")
-        print("      • Supports HTTP/HTTPS proxy configuration")
-        print("      • Automatically configures local repository settings")
-        print("      • Shows detailed progress and change information")
-    
-    elif command_name == 'vcs-push':
-        print(f"\n{BOLD}vcs-push{RESET}")
-        print("    Description: Push changes to the remote repository with authentication.")
-        print("    Behavior:")
-        print("      • Uses the output directory as the source for pushing files")
-        print("      • Requires VCS configuration from 'vcs-config' command")
-        print("      • Requires a repository initialized with 'vcs-init' command")
-        print("      • Supports both Git and Mercurial repositories")
-        print("      • Handles HTTPS authentication with username/token")
-        print("      • Handles SSH authentication with key and passphrase")
-        print("      • Supports HTTP/HTTPS proxy configuration")
-        print("      • Automatically commits uncommitted changes before pushing")
-        print("      • Sets up remote tracking and upstream branches")
-        print("      • Shows detailed progress and push results")
-    
-    elif command_name == 'set-output-dir':
-        print(f"\n{BOLD}set-output-dir{RESET} <directory>")
-        print("    Description: Set global output directory for all export commands")
-        print("    Arguments:")
-        print("      directory: Path to the output directory")
-        print("    Examples:")
-        print("      set-output-dir /path/to/my/output")
-        print("      set-output-dir data/custom_output")
-        print("    Features:")
-        print("      • Sets the output directory for all export commands")
-        print("      • Creates the directory if it doesn't exist")
-        print("      • Validates write permissions")
-        print("      • Saves configuration to ~/.adoc_migration_config.json")
-        print("      • Persists across multiple interactive sessions")
-        print("      • Can be changed anytime with another set-output-dir command")
-    
-    elif command_name == 'help':
-        print(f"\n{BOLD}help{RESET}")
-        print("    Description: Show this help information")
-        print("    Example: help")
-    
-    elif command_name == 'history':
-        print(f"\n{BOLD}history{RESET}")
-        print("    Description: Show the last 25 commands with numbers")
-        print("    Example: history")
-        print("    Features:")
-        print("      • Displays the last 25 commands with numbered entries")
-        print("      • Latest commands appear first (highest numbers)")
-        print("      • Long commands are truncated for display")
-        print("      • Enter a number to execute that command")
-        print("      • Works alongside ↑/↓ arrow key navigation")
-    
-    elif command_name in ['exit', 'quit', 'q']:
-        print(f"\n{BOLD}exit, quit, q{RESET}")
-        print("    Description: Exit the interactive client")
-        print("    Examples: exit, quit, q")
-    
-    else:
-        print(f"\n❌ Unknown command: {command_name}")
-        print("💡 Use 'help' to see all available commands")
-        print("💡 Use 'help <command>' for detailed help on a specific command")
-        return
-    
-    print("\n" + "="*80)
 
 
 def show_command_help(command_name: str):
@@ -1320,20 +902,31 @@ def get_command_from_history(command_number: int) -> str:
 def run_interactive(args):
     """Run the interactive REST API client."""
     try:
-        # Setup logging
-        logger = setup_logging(args.verbose, args.log_level)
+        # Create API client first to get configuration
+        client = create_api_client(env_file=args.env_file)
+        
+        # Setup logging with log file path from client configuration
+        log_file_path = client.get_log_file_path()
+        logger = setup_logging(args.verbose, args.log_level, log_file_path)
+        
+        # Get user session info for logging
+        user_info = get_user_session_info()
+        
+        # Log session start
+        log_session_event(logger, 'start', user_info)
         
         # Validate arguments
         from ..cli.validators import validate_rest_api_arguments
         validate_rest_api_arguments(args)
         
-        # Create API client
-        client = create_api_client(env_file=args.env_file, logger=logger)
-        
         # Test connection
         if not client.test_connection():
             logger.error("Failed to connect to API")
+            log_session_event(logger, 'exit', user_info)
             return 1
+        
+        # Update client with logger
+        client.logger = logger
         
         # Load global output directory from configuration
         globals.GLOBAL_OUTPUT_DIR = load_global_output_directory()
@@ -1396,6 +989,7 @@ def run_interactive(args):
                 # Don't add exit commands to history
                 if command.lower() in ['exit', 'quit', 'q']:
                     print("Goodbye!")
+                    log_session_event(logger, 'exit', user_info)
                     break
                 
                 # Check if it's a command number from history (before adding to history)
@@ -1680,6 +1274,7 @@ def run_interactive(args):
                 
             except KeyboardInterrupt:
                 print("\n\nGoodbye!")
+                log_session_event(logger, 'exit', user_info)
                 break
             except (ValueError, FileNotFoundError, PermissionError) as e:
                 print(f"❌ Error: {e}")
@@ -1695,14 +1290,27 @@ def run_interactive(args):
         
         # Close client
         client.close()
+        log_session_event(logger, 'exit', user_info)
         return 0
         
     except (ValueError, FileNotFoundError, PermissionError) as e:
         print(f"❌ Configuration error: {e}")
+        try:
+            log_session_event(logger, 'exit', user_info)
+        except:
+            pass
         return 1
     except KeyboardInterrupt:
         print("\n⚠️  Client interrupted by user.")
+        try:
+            log_session_event(logger, 'exit', user_info)
+        except:
+            pass
         return 1
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
+        try:
+            log_session_event(logger, 'exit', user_info)
+        except:
+            pass
         return 1 

@@ -86,6 +86,8 @@ class AcceldataAPIClient:
         """
         self.logger = logger or logging.getLogger(__name__)
         self.tenant_type = tenant_type
+        self.log_file_path = None  # Will be set from environment file if available
+        
         # Load configuration from environment file if provided
         if env_file:
             self._load_env_config(env_file, tenant_type=tenant_type)
@@ -94,6 +96,8 @@ class AcceldataAPIClient:
             self.access_key = access_key or os.getenv('AD_SOURCE_ACCESS_KEY')
             self.secret_key = secret_key or os.getenv('AD_SOURCE_SECRET_KEY')
             self.tenant = tenant or os.getenv('AD_SOURCE_TENANT')
+            # Check for log file path in environment variables
+            self.log_file_path = os.getenv('AD_LOG_FILE_PATH')
             # If host contains ${tenant}, substitute with correct tenant
             if self.host and "${tenant}" in self.host:
                 sub_tenant = self.tenant
@@ -155,6 +159,8 @@ class AcceldataAPIClient:
         self.target_access_key = config.get('AD_TARGET_ACCESS_KEY')
         self.target_secret_key = config.get('AD_TARGET_SECRET_KEY')
         self.target_tenant = config.get('AD_TARGET_TENANT')
+        # Extract log file path if available
+        self.log_file_path = config.get('AD_LOG_FILE_PATH')
         # Substitute ${tenant} in host
         if self.host and "${tenant}" in self.host:
             if tenant_type == "target" and self.target_tenant:
@@ -273,6 +279,15 @@ class AcceldataAPIClient:
             self.logger.error(f"API connection test failed: {e}")
             return False
     
+    def get_log_file_path(self) -> Optional[str]:
+        """
+        Get the log file path from configuration.
+        
+        Returns:
+            Log file path if configured, None otherwise
+        """
+        return self.log_file_path
+
     def close(self) -> None:
         """
         Close the HTTP session and clean up resources.

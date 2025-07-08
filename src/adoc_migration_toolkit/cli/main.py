@@ -75,8 +75,8 @@ def cli():
 @click.option(
     '--log-level', '-l',
     type=click.Choice(['ERROR', 'WARNING', 'INFO', 'DEBUG'], case_sensitive=False),
-    default='ERROR',
-    help='Set logging level (default: ERROR)'
+    default='INFO',
+    help='Set logging level (default: INFO)'
 )
 @click.option(
     '--verbose', '-v',
