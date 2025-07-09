@@ -452,7 +452,6 @@ class AcceldataAPIClient:
             self.logger.error(f"Request timed out for {method} {endpoint}")
             raise
         except RequestException as e:
-            self.logger.info(e)
             self._log_error_details(e, method, endpoint)
             
             # Add specific handling for file upload errors
