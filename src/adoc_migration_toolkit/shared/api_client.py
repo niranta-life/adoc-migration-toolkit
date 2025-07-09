@@ -448,18 +448,18 @@ class AcceldataAPIClient:
                 
                 return self._process_response(response, endpoint, method, return_binary)
             
-        except Timeout:
-            self.logger.error(f"Request timed out for {method} {endpoint}")
-            raise
-        except RequestException as e:
-            self._log_error_details(e, method, endpoint)
-            
-            # Add specific handling for file upload errors
-            if files and "500" in str(e):
-                self.logger.error(f"Server error (500) during file upload to {endpoint}")
-                self.logger.error("This is likely a server-side issue with the file format or server configuration")
-            
-            raise
+            except Timeout:
+                self.logger.error(f"Request timed out for {method} {endpoint}")
+                raise
+            except RequestException as e:
+                self._log_error_details(e, method, endpoint)
+                
+                # Add specific handling for file upload errors
+                if files and "500" in str(e):
+                    self.logger.error(f"Server error (500) during file upload to {endpoint}")
+                    self.logger.error("This is likely a server-side issue with the file format or server configuration")
+                
+                raise
     
     def _get_auth_credentials(self, use_target_auth: bool) -> tuple[str, str]:
         """
