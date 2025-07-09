@@ -16,7 +16,7 @@ from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
-from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import, execute_valid_target_uids
+from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import
 from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
@@ -124,11 +124,10 @@ def show_interactive_help():
     print("    Export all assets from source or target environment to CSV file")
     print(f"  {BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
     print("    Import tags for assets from CSV file")
-    print(f"  {BOLD}valid-target-uids{RESET} [<csv_file>] [--quiet] [--verbose] [--parallel]")
-    print("    Validate target UIDs against target environment")
+    
     
     print(f"\n{BOLD}📋 POLICY COMMANDS:{RESET}")
-    print(f"  {BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel]")
+    print(f"  {BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel] [--existing-target-assets]")
     print("    Export all policies from source environment to CSV file")
     print(f"  {BOLD}policy-export{RESET} [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]")
     print("    Export policy definitions by different categories from source environment to ZIP files")
@@ -301,20 +300,20 @@ def show_command_help(command_name: str):
         print(f"\n{BOLD}asset-config-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
         print("    Description: Export asset configurations from source environment to CSV file")
         print("    Arguments:")
-        print("      csv_file: Path to CSV file with 4 columns: source_uid, source_id, target_uid, tags (optional)")
+        print("      csv_file: Path to CSV file with 5 columns: source_id, source_uid, target_id, target_uid, tags (optional)")
         print("      --output-file: Specify custom output file (optional)")
         print("      --quiet: Suppress console output, show only summary")
         print("      --verbose: Show detailed output including headers and responses")
         print("      --parallel: Use parallel processing for faster export (max 5 threads, quiet mode default)")
         print("    Examples:")
         print("      asset-config-export")
-        print("      asset-config-export <output-dir>/asset-export/asset-all-export.csv")
+        print("      asset-config-export <output-dir>/asset-import/asset-merged-all.csv")
         print("      asset-config-export uids.csv --output-file configs.csv --verbose")
         print("      asset-config-export --parallel")
         print("      asset-config-export --parallel --verbose")
         print("    Behavior:")
-        print("      • Reads from asset-export/asset-all-export.csv by default if no CSV file specified")
-        print("      • Reads CSV with 4 columns: source_uid, source_id, target_uid, tags")
+        print("      • Reads from asset-import/asset-merged-all.csv by default if no CSV file specified")
+        print("      • Reads CSV with 5 columns: source_id, source_uid, target_id, target_uid, tags")
         print("      • Uses source_id to call '/catalog-server/api/assets/<source_id>/config'")
         print("      • Writes compressed JSON response to CSV with target_uid")
         print("      • Shows status for each asset in quiet mode")
@@ -392,7 +391,7 @@ def show_command_help(command_name: str):
         print(f"\n{BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
         print("    Description: Import tags for assets from CSV file")
         print("    Arguments:")
-        print("      csv_file: Path to CSV file (defaults to asset-all-import-ready.csv)")
+        print("      csv_file: Path to CSV file (defaults to asset-merged-all.csv)")
         print("    Options:")
         print("      --quiet, -q: Suppress console output, show only summary")
         print("      --verbose, -v: Show detailed output including API calls")
@@ -404,63 +403,34 @@ def show_command_help(command_name: str):
         print("      asset-tag-import --parallel")
         print("      asset-tag-import /path/to/asset-data.csv --verbose --parallel")
         print("    Behavior:")
-        print("      • Reads asset data from asset-all-import-ready.csv (or specified file)")
+        print("      • Reads asset data from asset-merged-all.csv (or specified file)")
         print("      • Processes each asset to get asset ID from target_uid")
         print("      • Imports tags for each asset using POST /catalog-server/api/assets/<id>/tag")
-        print("      • Tags are colon-separated in the CSV file")
+        print("      • Tags are colon-separated in the CSV file (5th column)")
         print("      • Uses target environment authentication")
         print("      • Shows progress bar in quiet mode")
         print("      • Shows detailed API calls in verbose mode")
         print("      • Parallel mode: Uses up to 5 threads for faster processing")
         print("      • Provides comprehensive statistics upon completion")
     
-    elif command_name == 'valid-target-uids':
-        print(f"\n{BOLD}valid-target-uids{RESET} [<csv_file>] [--quiet] [--verbose] [--parallel]")
-        print("    Description: Validate target UIDs against target environment")
-        print("    Arguments:")
-        print("      csv_file: Path to CSV file with source-env and target-env columns (optional)")
-        print("    Options:")
-        print("      --quiet: Suppress console output, show only progress bar and summary")
-        print("      --verbose: Show detailed output including HTTP requests and responses")
-        print("      --parallel: Use parallel processing for faster validation (max 5 threads)")
-        print("    Examples:")
-        print("      valid-target-uids")
-        print("      valid-target-uids <output-dir>/asset-export/asset_uids.csv")
-        print("      valid-target-uids my_uids.csv --quiet")
-        print("      valid-target-uids --verbose")
-        print("      valid-target-uids --parallel")
-        print("    Behavior:")
-        print("      • If no CSV file specified, uses default from output directory")
-        print("      • Default input: <output-dir>/asset-export/asset_uids.csv")
-        print("      • Reads source-env and target-env columns from CSV file")
-        print("      • Uses target-env UIDs to validate against target environment")
-        print("      • Makes GET requests to '/catalog-server/api/assets?uid=<target_uid>'")
-        print("      • Uses target environment authentication (target access key, secret key, and tenant)")
-        print("      • Checks if assets exist in target environment")
-        print("      • Shows progress bar in quiet mode")
-        print("      • Shows detailed HTTP requests/responses in verbose mode")
-        print("      • Provides comprehensive statistics upon completion")
-        print("      • Lists all missing UIDs with row numbers and source UIDs")
-        print("      • Parallel mode: Uses up to 5 threads with minimum 10 UIDs per thread")
-        print("      • Parallel mode: Each thread has its own progress bar")
-        print("      • Parallel mode: Significantly faster for large UID sets")
-        print("      • Thread names: Validator Thread, Checker Thread, Scanner Thread, Probe Thread, Test Thread")
-        print("      • 🚨 CRITICAL: Missing UIDs will cause policy import failures!")
-        print("      • 🚨 CRITICAL: Run this validation before importing policies!")
+
     
     elif command_name == 'policy-list-export':
-        print(f"\n{BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel]")
+        print(f"\n{BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel] [--existing-target-assets]")
         print("    Description: Export all policies from source environment to CSV file")
         print("    Arguments:")
         print("      --quiet: Suppress console output, show only summary")
         print("      --verbose: Show detailed output including headers and responses")
         print("      --parallel: Use parallel processing for faster export (max 5 threads)")
+        print("      --existing-target-assets: Only include policies for assets that exist in target environment")
         print("    Examples:")
         print("      policy-list-export")
         print("      policy-list-export --quiet")
         print("      policy-list-export --verbose")
         print("      policy-list-export --parallel")
         print("      policy-list-export --parallel --quiet")
+        print("      policy-list-export --existing-target-assets")
+        print("      policy-list-export --existing-target-assets --verbose")
         print("    Behavior:")
         print("      • Uses '/catalog-server/api/rules' endpoint with pagination")
         print("      • First call gets total count with page=0&size=0")
@@ -471,6 +441,9 @@ def show_command_help(command_name: str):
         print("      • Shows page-by-page progress in quiet mode")
         print("      • Shows detailed request/response in verbose mode")
         print("      • Provides comprehensive statistics upon completion")
+        print("      • --existing-target-assets: Reads asset-merged-all.csv from asset-import/ directory")
+        print("      • --existing-target-assets: Only includes policies where tableAssetId matches source_id in merged file")
+        print("      • --existing-target-assets: Optimized with in-memory asset ID lookup")
         print("      • Parallel mode: Uses up to 5 threads with minimum 10 policies per thread")
         print("      • Parallel mode: Each thread has its own progress bar")
         print("      • Parallel mode: Automatic retry (3 attempts) on failures")
@@ -535,8 +508,6 @@ def show_command_help(command_name: str):
         print("      • Provides comprehensive summary with aggregated statistics")
         print("      • Tracks UUIDs of imported policy definitions")
         print("      • Reports conflicts (assemblies, policies, SQL views, visual views)")
-        print("      • ⚠️  IMPORTANT: Run 'valid-target-uids' first to check for missing assets!")
-        print("      • ⚠️  IMPORTANT: Missing asset UIDs will cause import failures!")
     
     elif command_name == 'rule-tag-export':
         print(f"\n{BOLD}rule-tag-export{RESET} [--quiet] [--verbose] [--parallel]")
@@ -615,8 +586,6 @@ def show_command_help(command_name: str):
         print("      • Processes asset-all-export.csv -> asset-all-import-ready.csv")
         print("      • Processes asset-config-export.csv -> asset-config-import-ready.csv")
         print("      • Shows detailed processing statistics upon completion")
-        print("      • ⚠️  IMPORTANT: After running this command, validate UIDs with 'valid-target-uids'!")
-        print("      • ⚠️  IMPORTANT: Generated UIDs must exist in target environment for policy imports!")
     
     elif command_name == 'vcs-config':
         print(f"\n{BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
@@ -836,7 +805,7 @@ def setup_autocomplete():
     commands = [
         'segments-export', 'segments-import',
         'asset-profile-export', 'asset-profile-import',
-        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-import', 'valid-target-uids',
+        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-import',
         'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
         'vcs-config', 'vcs-init', 'vcs-pull', 'vcs-push',
         'GET', 'PUT',  # REST API commands
@@ -852,10 +821,10 @@ def setup_autocomplete():
         'asset-profile-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-profile-import': ['--dry-run', '--quiet', '--verbose'],
         'asset-tag-import': ['--quiet', '--verbose', '--parallel'],
-        'valid-target-uids': ['--quiet', '--verbose', '--parallel'],
+    
         'policy-export': ['--type', '--filter', '--quiet', '--verbose', '--batch-size', '--parallel'],
         'policy-import': ['--quiet', '--verbose'],
-        'policy-list-export': ['--quiet', '--verbose', '--parallel'],
+        'policy-list-export': ['--quiet', '--verbose', '--parallel', '--existing-target-assets'],
         'policy-xfr': ['--input', '--source-env-string', '--target-env-string', '--quiet', '--verbose'],
         'transform-and-merge': ['--string-transform', '--quiet', '--verbose'],
         'rule-tag-export': ['--quiet', '--verbose', '--parallel'],
@@ -1215,7 +1184,7 @@ def run_interactive(args):
                 valid_commands = [
                     'segments-export', 'segments-import',
                     'asset-profile-export', 'asset-profile-import',
-                    'asset-config-export', 'asset-list-export', 'asset-tag-import', 'valid-target-uids',
+                    'asset-config-export', 'asset-list-export', 'asset-tag-import',
                     'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
                     'vcs-config',
                     'vcs-init',
@@ -1345,7 +1314,7 @@ def run_interactive(args):
                     # Use default CSV file if not specified
                     if not csv_file:
                         if globals.GLOBAL_OUTPUT_DIR:
-                            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-all-import-ready.csv")
+                            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
                         else:
                             # Try to find the latest toolkit directory
                             current_dir = Path.cwd()
@@ -1353,30 +1322,23 @@ def run_interactive(args):
                             if toolkit_dirs:
                                 toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
                                 latest_toolkit_dir = toolkit_dirs[0]
-                                csv_file = str(latest_toolkit_dir / "asset-import" / "asset-all-import-ready.csv")
+                                csv_file = str(latest_toolkit_dir / "asset-import" / "asset-merged-all.csv")
                             else:
-                                csv_file = "asset-all-import-ready.csv"
+                                csv_file = "asset-merged-all.csv"
                     
                     execute_asset_tag_import(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode)
                     continue
                 
-                # Check if it's a valid-target-uids command
-                if command.lower().startswith('valid-target-uids'):
-                    from .command_parsing import parse_valid_target_uids_command
-                    from .asset_operations import execute_valid_target_uids
-                    csv_file, quiet_mode, verbose_mode, parallel_mode = parse_valid_target_uids_command(command)
-                    # Execute the command (csv_file can be None for default file)
-                    execute_valid_target_uids(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode)
-                    continue
+
                 
                 # Check if it's a policy-list-export command
                 if command.lower().startswith('policy-list-export'):
                     from .command_parsing import parse_policy_list_export_command
-                    quiet_mode, verbose_mode, parallel_mode = parse_policy_list_export_command(command)
+                    quiet_mode, verbose_mode, parallel_mode, existing_target_assets_mode = parse_policy_list_export_command(command)
                     if parallel_mode:
-                        execute_policy_list_export_parallel(client, logger, quiet_mode, verbose_mode)
+                        execute_policy_list_export_parallel(client, logger, quiet_mode, verbose_mode, existing_target_assets_mode)
                     else:
-                        execute_policy_list_export(client, logger, quiet_mode, verbose_mode)
+                        execute_policy_list_export(client, logger, quiet_mode, verbose_mode, existing_target_assets_mode)
                     continue
                 
                 # Check if it's a policy-export command

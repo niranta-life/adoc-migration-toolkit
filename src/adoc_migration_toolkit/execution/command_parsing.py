@@ -314,20 +314,20 @@ def parse_asset_config_export_command(command: str) -> tuple:
     if not csv_file:
         from ..shared import globals
         if globals.GLOBAL_OUTPUT_DIR:
-            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-export.csv")
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
         else:
-            csv_file = "asset-export/asset-all-export.csv"
+            csv_file = "asset-import/asset-merged-all.csv"
         
         # Check if the default file exists
         import os
         if not os.path.exists(csv_file):
             error_msg = f"Default CSV file not found: {csv_file}"
             if globals.GLOBAL_OUTPUT_DIR:
-                error_msg += f"\n💡 Please run 'asset-list-export' first to generate the asset-all-export.csv file"
-                error_msg += f"\n   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-export/asset-all-export.csv"
+                error_msg += f"\n💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file"
+                error_msg += f"\n   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv"
             else:
-                error_msg += f"\n💡 Please run 'asset-list-export' first to generate the asset-all-export.csv file"
-                error_msg += f"\n   Expected location: asset-export/asset-all-export.csv"
+                error_msg += f"\n💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file"
+                error_msg += f"\n   Expected location: asset-import/asset-merged-all.csv"
             raise FileNotFoundError(error_msg)
     
     # Generate default output file if not provided
@@ -396,35 +396,25 @@ def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.
     
     Args:
-        command: Command string like "policy-list-export [--quiet] [--verbose] [--parallel]"
+        command: Command string like "policy-list-export [--quiet] [--verbose] [--parallel] [--existing-target-assets]"
         
     Returns:
-        Tuple of (quiet_mode, verbose_mode, parallel_mode)
+        Tuple of (quiet_mode, verbose_mode, parallel_mode, existing_target_assets_mode)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'policy-list-export':
-        return False, False, False
+        return False, False, False, False
     
-    quiet_mode = False
-    verbose_mode = False
-    parallel_mode = False
+    quiet_mode = '--quiet' in parts
+    verbose_mode = '--verbose' in parts
+    parallel_mode = '--parallel' in parts
+    existing_target_assets_mode = '--existing-target-assets' in parts
     
-    # Check for flags
-    if '--quiet' in parts:
-        quiet_mode = True
-        verbose_mode = False  # Quiet overrides verbose
-        parts.remove('--quiet')
+    # If both quiet and verbose, quiet takes precedence
+    if quiet_mode and verbose_mode:
+        verbose_mode = False
     
-    if '--verbose' in parts:
-        verbose_mode = True
-        quiet_mode = False  # Verbose overrides quiet
-        parts.remove('--verbose')
-    
-    if '--parallel' in parts:
-        parallel_mode = True
-        parts.remove('--parallel')
-    
-    return quiet_mode, verbose_mode, parallel_mode
+    return quiet_mode, verbose_mode, parallel_mode, existing_target_assets_mode
 
 def parse_policy_export_command(command: str) -> tuple:
     """Parse a policy-export command string into components.
@@ -765,7 +755,7 @@ def parse_asset_tag_import_command(command: str) -> tuple:
             print("="*60)
             print("Usage: asset-tag-import [csv_file] [options]")
             print("\nArguments:")
-            print("  csv_file: Path to CSV file (defaults to asset-all-import-ready.csv)")
+            print("  csv_file: Path to CSV file (defaults to asset-merged-all.csv)")
             print("\nOptions:")
             print("  --quiet, -q: Suppress console output, show only summary")
             print("  --verbose, -v: Show detailed output including API calls")
@@ -858,53 +848,7 @@ def parse_asset_config_import_command(command: str) -> tuple:
     
     return csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode 
 
-def parse_valid_target_uids_command(command: str) -> tuple:
-    """Parse valid-target-uids command in interactive mode.
-    
-    Args:
-        command (str): The command string
-        
-    Returns:
-        tuple: (csv_file_path, quiet_mode, verbose_mode, parallel_mode)
-    """
-    try:
-        args_str = command[len('valid-target-uids'):].strip()
-        csv_file_path = None
-        quiet_mode = False
-        verbose_mode = False
-        parallel_mode = False
-        
-        args = args_str.split()
-        i = 0
-        
-        while i < len(args):
-            arg = args[i]
-            
-            if arg == '--quiet':
-                quiet_mode = True
-                i += 1
-            elif arg == '--verbose':
-                verbose_mode = True
-                i += 1
-            elif arg == '--parallel':
-                parallel_mode = True
-                i += 1
-            elif not arg.startswith('--'):
-                # This is the CSV file path (positional argument)
-                csv_file_path = arg
-                i += 1
-            else:
-                # Unknown argument
-                print(f"❌ Unknown argument: {arg}")
-                print("💡 Use 'valid-target-uids --help' for usage information")
-                return None, None, None, None
-        
-        return csv_file_path, quiet_mode, verbose_mode, parallel_mode
-        
-    except Exception as e:
-        print(f"❌ Error parsing valid-target-uids command: {e}")
-        print("💡 Use 'valid-target-uids --help' for usage information")
-        return None, None, None, None
+
 
 
 def parse_set_log_level_command(command: str) -> str:

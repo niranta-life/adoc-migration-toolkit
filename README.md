@@ -1448,7 +1448,7 @@ ADOC INTERACTIVE MIGRATION TOOLKIT - COMMAND HELP
   asset-list-export [--quiet] [--verbose] [--parallel]
     Export all assets from source environment to CSV file
   asset-tag-import [csv_file] [--quiet] [--verbose] [--parallel]
-    Import tags for assets from CSV file
+    Import tags for assets from asset-merged-all.csv file
 
 📋 POLICY COMMANDS:
   policy-list-export [--quiet] [--verbose] [--parallel]

@@ -22,7 +22,7 @@ from .utils import create_progress_bar
 from ..shared.file_utils import get_output_file_path
 from ..shared import globals
 
-def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, existing_target_assets_mode: bool = False):
     """Execute the policy-list-export command.
     
     Args:
@@ -30,6 +30,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        existing_target_assets_mode: Whether to filter policies to only include those with assets in merged file
     """
     try:
         # Determine output file path using the policy-export category
@@ -37,11 +38,63 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         if not quiet_mode:
             print(f"\nExporting all rules from ADOC environment")
+            if existing_target_assets_mode:
+                print(f"📋 EXISTING TARGET ASSETS MODE - Only including policies for assets in merged file")
             print(f"Output will be written to: {output_file}")
 
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
+        
+        # If existing target assets mode is enabled, read the merged file first
+        existing_asset_ids = set()  # Use set for faster lookups
+        if existing_target_assets_mode:
+            # Determine the merged file path
+            if globals.GLOBAL_OUTPUT_DIR:
+                merged_file = globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv"
+            else:
+                # Look for the most recent adoc-migration-toolkit directory
+                current_dir = Path.cwd()
+                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                
+                if not toolkit_dirs:
+                    error_msg = "No adoc-migration-toolkit directory found. Please run 'transform-and-merge' first to generate the merged file."
+                    print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    return
+                
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                merged_file = latest_toolkit_dir / "asset-import" / "asset-merged-all.csv"
+            
+            if not merged_file.exists():
+                error_msg = f"Merged file not found: {merged_file}"
+                print(f"❌ {error_msg}")
+                print("💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file")
+                logger.error(error_msg)
+                return
+            
+            if not quiet_mode:
+                print(f"📄 Reading existing target assets from: {merged_file}")
+            
+            # Read the merged file to get existing asset IDs
+            with open(merged_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    source_id = row.get('source_id')
+                    if source_id:
+                        existing_asset_ids.add(source_id)
+            
+            if not existing_asset_ids:
+                error_msg = "No asset IDs found in merged file"
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            if not quiet_mode:
+                print(f"📊 Found {len(existing_asset_ids)} existing target assets")
+                if verbose_mode:
+                    print(f"📋 Sample asset IDs: {list(existing_asset_ids)[:5]}")
         
         # Step 1: Get total count of policies
         if not quiet_mode:
@@ -153,6 +206,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         successful_asset_calls = 0
         failed_asset_calls = 0
         failed_rules = []  # Track rules that failed to retrieve assemblies
+        excluded_policies = 0  # Track policies excluded due to missing assets
         
         # Create progress bar using tqdm utility
         progress_bar = create_progress_bar(
@@ -173,6 +227,31 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 table_asset_id = asset.get('tableAssetId')
                 if table_asset_id:
                     table_asset_ids.append(table_asset_id)
+            
+            # Check if policy should be processed based on existing target assets
+            should_process_policy = True
+            if existing_target_assets_mode and table_asset_ids:
+                # Check if any of the policy's tableAssetIds exist in the existing asset IDs
+                policy_has_existing_assets = False
+                matching_assets = []
+                for table_asset_id in table_asset_ids:
+                    if str(table_asset_id) in existing_asset_ids:
+                        policy_has_existing_assets = True
+                        matching_assets.append(str(table_asset_id))
+                
+                should_process_policy = policy_has_existing_assets
+                
+                if verbose_mode:
+                    if policy_has_existing_assets:
+                        print(f"✅ Processing policy {policy.get('id')}: Found matching assets {matching_assets}")
+                    else:
+                        print(f"❌ Skipping policy {policy.get('id')}: No matching assets in target environment (assets: {table_asset_ids})")
+                
+                if not policy_has_existing_assets:
+                    excluded_policies += 1
+                    # Update progress bar and continue to next policy
+                    progress_bar.update(1)
+                    continue
             
             # Get asset details for this policy's tableAssetIds
             asset_details = {}
@@ -319,6 +398,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 assembly_names_str = ','.join(sorted(assembly_names))
                 source_types_str = ','.join(sorted(source_types))
                 
+                # Write the policy to CSV (no additional filtering since policies are already filtered)
                 writer.writerow([
                     policy_id, 
                     policy_type, 
@@ -365,6 +445,8 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
             print("="*80)
             print(f"Output file: {output_file}")
             print(f"Total rules exported: {len(processed_policies)}")
+            if existing_target_assets_mode:
+                print(f"Policies excluded (no matching assets): {excluded_policies}")
             print(f"Successful pages: {successful_pages}")
             print(f"Failed pages: {failed_pages}")
             print(f"Total pages processed: {total_pages}")
@@ -484,7 +566,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         logger.error(error_msg)
 
 
-def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, existing_target_assets_mode: bool = False):
     """Execute the policy-list-export command with parallel processing.
     
     Args:
@@ -492,6 +574,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        existing_target_assets_mode: Whether to filter policies to only include those with assets in merged file
     """
     try:
         # Determine output file path using the policy-export category
@@ -499,10 +582,62 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
         
         if not quiet_mode:
             print(f"\nExporting all rules from ADOC environment (Parallel Mode)")
+            if existing_target_assets_mode:
+                print(f"📋 EXISTING TARGET ASSETS MODE - Only including policies for assets in merged file")
             print(f"Output will be written to: {output_file}")
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
+        
+        # If existing target assets mode is enabled, read the merged file first
+        existing_asset_ids = set()  # Use set for faster lookups
+        if existing_target_assets_mode:
+            # Determine the merged file path
+            if globals.GLOBAL_OUTPUT_DIR:
+                merged_file = globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv"
+            else:
+                # Look for the most recent adoc-migration-toolkit directory
+                current_dir = Path.cwd()
+                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                
+                if not toolkit_dirs:
+                    error_msg = "No adoc-migration-toolkit directory found. Please run 'transform-and-merge' first to generate the merged file."
+                    print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    return
+                
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                merged_file = latest_toolkit_dir / "asset-import" / "asset-merged-all.csv"
+            
+            if not merged_file.exists():
+                error_msg = f"Merged file not found: {merged_file}"
+                print(f"❌ {error_msg}")
+                print("💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file")
+                logger.error(error_msg)
+                return
+            
+            if not quiet_mode:
+                print(f"📄 Reading existing target assets from: {merged_file}")
+            
+            # Read the merged file to get existing asset IDs
+            with open(merged_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    source_id = row.get('source_id')
+                    if source_id:
+                        existing_asset_ids.add(source_id)
+            
+            if not existing_asset_ids:
+                error_msg = "No asset IDs found in merged file"
+                print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                return
+            
+            if not quiet_mode:
+                print(f"📊 Found {len(existing_asset_ids)} existing target assets")
+                if verbose_mode:
+                    print(f"📋 Sample asset IDs: {list(existing_asset_ids)[:5]}")
         
         # Step 1: Get total count of policies
         if not quiet_mode:
@@ -606,6 +741,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             total_asset_calls = 0
             successful_asset_calls = 0
             failed_asset_calls = 0
+            excluded_policies = 0  # Track policies excluded due to missing assets
             
             # Process each policy in this thread's range
             for policy in thread_policies:
@@ -616,6 +752,31 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     table_asset_id = asset.get('tableAssetId')
                     if table_asset_id:
                         table_asset_ids.append(table_asset_id)
+                
+                # Check if policy should be processed based on existing target assets
+                should_process_policy = True
+                if existing_target_assets_mode and table_asset_ids:
+                    # Check if any of the policy's tableAssetIds exist in the existing asset IDs
+                    policy_has_existing_assets = False
+                    matching_assets = []
+                    for table_asset_id in table_asset_ids:
+                        if str(table_asset_id) in existing_asset_ids:
+                            policy_has_existing_assets = True
+                            matching_assets.append(str(table_asset_id))
+                    
+                    should_process_policy = policy_has_existing_assets
+                    
+                    if verbose_mode:
+                        if policy_has_existing_assets:
+                            print(f"✅ Thread {thread_id}: Processing policy {policy.get('id')}: Found matching assets {matching_assets}")
+                        else:
+                            print(f"❌ Thread {thread_id}: Skipping policy {policy.get('id')}: No matching assets in target environment (assets: {table_asset_ids})")
+                    
+                    if not policy_has_existing_assets:
+                        excluded_policies += 1
+                        # Update progress bar and continue to next policy
+                        progress_bar.update(1)
+                        continue
                 
                 # Get asset details for this policy's tableAssetIds
                 asset_details = {}
@@ -717,6 +878,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             return {
                 'thread_id': thread_id,
                 'processed': len(processed_policies),
+                'excluded': excluded_policies,
                 'total_asset_calls': total_asset_calls,
                 'successful_asset_calls': successful_asset_calls,
                 'failed_asset_calls': failed_asset_calls,
@@ -808,20 +970,25 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             print(f"Output file: {output_file}")
             
             total_processed = 0
+            total_excluded = 0
             total_asset_calls = 0
             total_successful_asset_calls = 0
             total_failed_asset_calls = 0
             
             for result in thread_results:
                 total_processed += result['processed']
+                total_excluded += result.get('excluded', 0)
                 total_asset_calls += result['total_asset_calls']
                 total_successful_asset_calls += result['successful_asset_calls']
                 total_failed_asset_calls += result['failed_asset_calls']
                 
-                print(f"Thread {result['thread_id']}: {result['processed']} policies, "
+                excluded_info = f", {result.get('excluded', 0)} excluded" if existing_target_assets_mode else ""
+                print(f"Thread {result['thread_id']}: {result['processed']} policies{excluded_info}, "
                       f"{result['successful_asset_calls']}/{result['total_asset_calls']} asset calls successful")
             
             print(f"\nTotal rules exported: {total_processed}")
+            if existing_target_assets_mode:
+                print(f"Policies excluded (no matching assets): {total_excluded}")
             print(f"Total asset API calls made: {total_asset_calls}")
             print(f"Successful asset calls: {total_successful_asset_calls}")
             print(f"Failed asset calls: {total_failed_asset_calls}")
@@ -1078,19 +1245,30 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                 full_endpoint = f"{endpoint}?{query_string}"
                 
                 if verbose_mode:
-                    print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: {full_endpoint}")
-                    print(f"  Method: GET")
-                    print(f"  Content-Type: application/zip")
-                    print(f"  Authorization: Bearer [REDACTED]")
+                    print(f"\n" + "="*80)
+                    print(f"🔍 DETAILED REQUEST INFORMATION")
+                    print("="*80)
+                    print(f"Policy Type: {policy_type}")
+                    print(f"Batch Number: {batch_num + 1}/{type_total_batches}")
+                    print(f"Batch Range: {start_idx}-{end_idx-1}")
+                    print(f"Policy IDs in Batch: {len(batch_ids)}")
+                    print(f"Output File: {batch_filename}")
+                    print(f"Full Endpoint: {full_endpoint}")
+                    print(f"Method: GET")
+                    print(f"Expected Content-Type: application/zip")
+                    print(f"Authorization: Bearer [REDACTED]")
                     if hasattr(client, 'tenant') and client.tenant:
-                        print(f"  X-Tenant: {client.tenant}")
-                    print(f"  Query Parameters:")
+                        print(f"X-Tenant: {client.tenant}")
+                    print(f"\nQuery Parameters:")
                     for k, v in query_params.items():
                         if k == 'ids':
-                            print(f"    {k}: {len(batch_ids)} IDs (first few: {', '.join(batch_ids[:3])}{'...' if len(batch_ids) > 3 else ''})")
+                            print(f"  {k}: {len(batch_ids)} IDs")
+                            print(f"    First 5 IDs: {', '.join(batch_ids[:5])}")
+                            if len(batch_ids) > 5:
+                                print(f"    Last 5 IDs: {', '.join(batch_ids[-5:])}")
                         else:
-                            print(f"    {k}: {v}")
+                            print(f"  {k}: {v}")
+                    print("="*80)
                 
                 try:
                     # Make API call to get ZIP file
@@ -1101,10 +1279,21 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                     )
                     
                     if verbose_mode:
-                        print(f"\nResponse:")
-                        print(f"  Status: Success")
-                        print(f"  Content-Type: application/zip")
-                        print(f"  File size: {len(response) if response else 0} bytes")
+                        print(f"\n" + "="*80)
+                        print(f"📥 DETAILED RESPONSE INFORMATION")
+                        print("="*80)
+                        print(f"Status: Success")
+                        print(f"Content-Type: application/zip")
+                        print(f"Response Size: {len(response) if response else 0} bytes")
+                        if response:
+                            print(f"File Size (KB): {len(response) / 1024:.2f} KB")
+                            print(f"File Size (MB): {len(response) / (1024 * 1024):.2f} MB")
+                        print(f"Response Type: {type(response).__name__}")
+                        print(f"Response is Binary: {isinstance(response, bytes)}")
+                        if response:
+                            print(f"First 100 bytes (hex): {response[:100].hex()}")
+                            print(f"Last 100 bytes (hex): {response[-100:].hex()}")
+                        print("="*80)
                     
                     # Write ZIP file to output directory
                     if response:
@@ -1124,7 +1313,17 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                     else:
                         error_msg = f"Empty response for {policy_type} batch {batch_num + 1}"
                         if verbose_mode:
-                            print(f"\n❌ {error_msg}")
+                            print(f"\n" + "="*80)
+                            print(f"❌ ERROR RESPONSE INFORMATION")
+                            print("="*80)
+                            print(f"Error Type: Empty Response")
+                            print(f"Policy Type: {policy_type}")
+                            print(f"Batch Number: {batch_num + 1}")
+                            print(f"Expected Content: ZIP file")
+                            print(f"Actual Response: None/Empty")
+                            print(f"Response Size: 0 bytes")
+                            print(f"Response Type: {type(response).__name__}")
+                            print("="*80)
                         logger.error(error_msg)
                         
                         # Mark this batch as failed
@@ -1143,7 +1342,22 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                 except Exception as e:
                     error_msg = f"Failed to export {policy_type} batch {batch_num + 1}: {e}"
                     if verbose_mode:
-                        print(f"\n❌ {error_msg}")
+                        print(f"\n" + "="*80)
+                        print(f"❌ EXCEPTION RESPONSE INFORMATION")
+                        print("="*80)
+                        print(f"Error Type: Exception")
+                        print(f"Policy Type: {policy_type}")
+                        print(f"Batch Number: {batch_num + 1}")
+                        print(f"Exception Type: {type(e).__name__}")
+                        print(f"Exception Message: {str(e)}")
+                        print(f"Full Endpoint Attempted: {full_endpoint}")
+                        print(f"Query Parameters:")
+                        for k, v in query_params.items():
+                            if k == 'ids':
+                                print(f"  {k}: {len(batch_ids)} IDs")
+                            else:
+                                print(f"  {k}: {v}")
+                        print("="*80)
                     logger.error(error_msg)
                     
                     # Mark this batch as failed
