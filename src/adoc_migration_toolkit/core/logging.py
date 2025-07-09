@@ -37,7 +37,7 @@ class CustomFormatter(logging.Formatter):
         return super().format(record)
 
 
-def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Logger:
+def setup_logging(verbose: bool = False, log_level: str = "DEBUG") -> logging.Logger:
     """Setup professional logging configuration.
     
     Args:
@@ -61,7 +61,7 @@ def setup_logging(verbose: bool = False, log_level: str = "ERROR") -> logging.Lo
         actual_level = logging.DEBUG
     else:
         # Use the specified log level, default to ERROR
-        actual_level = level_map.get(log_level.upper(), logging.ERROR)
+        actual_level = level_map.get(log_level.upper(), logging.DEBUG)
     
     # Create custom formatter with username and hostname
     formatter = CustomFormatter()

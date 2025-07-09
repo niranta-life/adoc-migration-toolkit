@@ -13,6 +13,13 @@ from typing import Optional
 # Global variable to store the output directory
 GLOBAL_OUTPUT_DIR: Optional[Path] = None
 
+# Global HTTP config for timeout, retry, and proxy
+HTTP_CONFIG = {
+    'timeout': 10,   # seconds
+    'retry': 3,     # number of retries
+    'proxy': None   # proxy URL or None
+}
+
 
 def load_global_output_directory() -> Path:
     """Load the global output directory from configuration file."""

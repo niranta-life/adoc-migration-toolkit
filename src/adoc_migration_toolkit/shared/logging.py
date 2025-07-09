@@ -10,6 +10,9 @@ import getpass
 import socket
 from datetime import datetime
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
+import stat
+import platform
 
 class CustomFormatter(logging.Formatter):
     """Custom formatter that includes username and hostname in log messages."""
@@ -26,6 +29,23 @@ class CustomFormatter(logging.Formatter):
         record.username = self.username
         record.hostname = self.hostname
         return super().format(record)
+
+class ReadOnlyRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that sets rotated files to read-only."""
+    def doRollover(self):
+        super().doRollover()
+        # Find the most recent rotated file
+        if self.backupCount > 0:
+            rotated_file = f"{self.baseFilename}.1"
+            if os.path.exists(rotated_file):
+                try:
+                    if os.name == 'nt' or platform.system().lower().startswith('win'):
+                        os.chmod(rotated_file, stat.S_IREAD)
+                    else:
+                        os.chmod(rotated_file, 0o444)
+                except Exception as e:
+                    # Log error if unable to set permissions
+                    logging.getLogger(__name__).warning(f"Could not set rotated log file to read-only: {e}")
 
 
 def setup_logging(verbose: bool = False, log_level: str = "INFO", log_file_path: str = None) -> logging.Logger:
@@ -79,10 +99,12 @@ def setup_logging(verbose: bool = False, log_level: str = "INFO", log_file_path:
     if log_path.parent != Path('.'):
         log_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # File handler with date-based rotation
-    file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')  # Append mode
+    # Use ReadOnlyRotatingFileHandler for log rotation and permissions
+    file_handler = ReadOnlyRotatingFileHandler(
+        log_file, maxBytes=1_048_576, backupCount=5, encoding='utf-8', mode='a'
+    )
     file_handler.setFormatter(formatter)
-    handlers.append(file_handler)
+    handlers = [file_handler]
     
     # Console handler - REMOVED to prevent breaking progress bars
     # console_handler = logging.StreamHandler(sys.stdout)
@@ -99,4 +121,47 @@ def setup_logging(verbose: bool = False, log_level: str = "INFO", log_file_path:
     logger = logging.getLogger(__name__)
     logger.info(f"Logging initialized. Log file: {log_file}")
     logger.info(f"Log level set to: {log_level.upper()}")
-    return logger 
+    return logger
+
+
+def change_log_level(new_level: str) -> bool:
+    """Dynamically change the log level for all loggers in the application.
+    
+    Args:
+        new_level (str): New log level (ERROR, WARNING, INFO, DEBUG)
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Map string log levels to logging constants
+        level_map = {
+            "ERROR": logging.ERROR,
+            "WARNING": logging.WARNING,
+            "INFO": logging.INFO,
+            "DEBUG": logging.DEBUG
+        }
+        
+        if new_level.upper() not in level_map:
+            return False
+        
+        new_log_level = level_map[new_level.upper()]
+        
+        # Change the root logger level
+        logging.getLogger().setLevel(new_log_level)
+        
+        # Change the level for all existing loggers
+        for logger_name in logging.root.manager.loggerDict:
+            logger = logging.getLogger(logger_name)
+            logger.setLevel(new_log_level)
+        
+        # Log the change
+        logger = logging.getLogger(__name__)
+        logger.info(f"Log level changed to: {new_level.upper()}")
+        
+        return True
+        
+    except Exception as e:
+        # If logging fails, print to console
+        print(f"❌ Failed to change log level: {e}")
+        return False 

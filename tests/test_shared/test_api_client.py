@@ -157,11 +157,11 @@ class TestAcceldataAPIClient:
         )
         
         headers = client.session.headers
-        assert headers['accept'] == 'application/json'
+        assert headers['Accept'] == 'application/json'
         assert headers['accessKey'] == 'test_access'
         assert headers['secretKey'] == 'test_secret'
         assert headers['X-Tenant'] == 'test_tenant'
-        assert 'user-agent' in headers
+        assert 'User-Agent' in headers
         assert headers['x-domain-ids'] == ''
 
     def test_get_asset_by_uid_success(self):
@@ -314,11 +314,12 @@ class TestAcceldataAPIClient:
             mock_get.assert_called_once_with(
                 "https://test.acceldata.app/api/test",
                 headers={
-                    'accept': 'application/json',
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
                     'accessKey': 'test_access',
                     'secretKey': 'test_secret',
                     'X-Tenant': 'test_tenant',
-                    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
                     'x-domain-ids': ''
                 },
                 timeout=10
@@ -341,11 +342,12 @@ class TestAcceldataAPIClient:
             mock_post.assert_called_once_with(
                 "https://test.acceldata.app/api/test",
                 headers={
-                    'accept': 'application/json',
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
                     'accessKey': 'test_access',
                     'secretKey': 'test_secret',
                     'X-Tenant': 'test_tenant',
-                    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
                     'x-domain-ids': ''
                 },
                 json={"foo": "bar"},
@@ -369,11 +371,12 @@ class TestAcceldataAPIClient:
             mock_put.assert_called_once_with(
                 "https://test.acceldata.app/api/test",
                 headers={
-                    'accept': 'application/json',
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
                     'accessKey': 'test_access',
                     'secretKey': 'test_secret',
                     'X-Tenant': 'test_tenant',
-                    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
                     'x-domain-ids': ''
                 },
                 json={"foo": "bar"},

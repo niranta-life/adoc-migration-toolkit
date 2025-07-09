@@ -36,6 +36,9 @@ from typing import Dict, Any, Optional, Union
 from pathlib import Path
 import requests
 from requests.exceptions import RequestException, Timeout, ConnectionError
+from adoc_migration_toolkit.shared.globals import HTTP_CONFIG
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 class AcceldataAPIClient:
@@ -112,6 +115,7 @@ class AcceldataAPIClient:
         # Setup session with default headers
         self.session = requests.Session()
         self._setup_default_headers()
+        self._apply_http_config()
         self.logger.info(f"API Client initialized for host: {self.host}, tenant: {self.tenant}")
     
     def _validate_configuration(self) -> None:
@@ -327,6 +331,29 @@ class AcceldataAPIClient:
             # No template, use the host as is
             return self.host.rstrip('/')
 
+    def _apply_http_config(self):
+        """Apply global HTTP_CONFIG for timeout, retry, and proxy."""
+        # Retry logic
+        retry_count = HTTP_CONFIG.get('retry', 3)
+        retry_strategy = Retry(
+            total=retry_count,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS", "POST", "PUT"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        # Proxy
+        proxy_url = HTTP_CONFIG.get('proxy')
+        if proxy_url:
+            self.session.proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+        else:
+            self.session.proxies = {}
+
     def make_api_call(self, endpoint: str, method: str = 'GET', json_payload: Optional[Dict[str, Any]] = None, 
                      use_target_auth: bool = False, use_target_tenant: bool = False, return_binary: bool = False,
                      files: Optional[Dict[str, Any]] = None, timeout: Optional[int] = None) -> Any:
@@ -364,8 +391,8 @@ class AcceldataAPIClient:
         if not endpoint or not endpoint.strip():
             raise ValueError("Endpoint cannot be empty")
         
-        # Set default timeout
-        timeout = timeout or self.DEFAULT_TIMEOUT
+        # Set default timeout from HTTP_CONFIG if not provided
+        timeout = timeout or HTTP_CONFIG.get('timeout', self.DEFAULT_TIMEOUT)
         
         # Determine authentication and tenant configuration
         access_key, secret_key = self._get_auth_credentials(use_target_auth)
@@ -453,11 +480,12 @@ class AcceldataAPIClient:
             Dictionary containing request headers
         """
         return {
-            'accept': 'application/json',
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
             'accessKey': access_key,
             'secretKey': secret_key,
             'X-Tenant': tenant,
-            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
             'x-domain-ids': ''
         }
     

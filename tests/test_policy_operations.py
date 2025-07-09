@@ -615,9 +615,9 @@ class TestExecutePolicyImport:
         second_call = mock_client.make_api_call.call_args_list[1]
         assert second_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/apply-config"
         assert second_call[1]['method'] == 'POST'
-        assert 'json' in second_call[1]
-        assert second_call[1]['json']['uuid'] == "bba64f45-e0f9-44ac-9f28-968422abaadc"
-        assert second_call[1]['json']['policyOverride'] is True
+        assert 'json_payload' in second_call[1]
+        assert second_call[1]['json_payload']['uuid'] == "bba64f45-e0f9-44ac-9f28-968422abaadc"
+        assert second_call[1]['json_payload']['policyOverride'] is True
 
     def test_execute_policy_import_upload_success_apply_failure(self, temp_dir, mock_client, mock_logger):
         """Test policy import where upload-config succeeds but apply-config fails."""

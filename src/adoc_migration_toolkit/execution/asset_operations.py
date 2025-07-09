@@ -3156,3 +3156,489 @@ def transform_config_json_to_asset_configuration(config_data: dict, asset_id: in
     }
     
     return asset_config
+
+
+def execute_valid_target_uids(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, parallel_mode: bool = False):
+    """Execute the valid-target-uids command.
+    
+    Args:
+        csv_file: Path to the CSV file containing target UIDs (optional)
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        parallel_mode: Whether to use parallel processing
+    """
+    try:
+        # Determine CSV file path
+        if not csv_file:
+            # Use default asset_uids.csv from asset-export directory
+            if globals.GLOBAL_OUTPUT_DIR:
+                csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset_uids.csv")
+            else:
+                # Look for the most recent adoc-migration-toolkit-YYYYMMDDHHMM directory
+                current_dir = Path.cwd()
+                toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+                
+                if not toolkit_dirs:
+                    error_msg = "No asset_uids.csv file found and no adoc-migration-toolkit directory found."
+                    print(f"❌ {error_msg}")
+                    print("💡 Please provide a CSV file path or run 'policy-xfr' first to generate asset_uids.csv")
+                    logger.error(error_msg)
+                    return
+                
+                # Sort by creation time and use the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                csv_file = str(latest_toolkit_dir / "asset-export" / "asset_uids.csv")
+        
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {csv_file}"
+            print(f"❌ {error_msg}")
+            print("💡 Please provide a valid CSV file path or run 'policy-xfr' first to generate asset_uids.csv")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"\nValidating target UIDs against target environment")
+            print(f"Input file: {csv_file}")
+            print("="*80)
+            
+            # Show target environment information
+            print(f"\n🌍 TARGET ENVIRONMENT INFORMATION:")
+            target_host = client._build_host_url(use_target_tenant=True)
+            print(f"  Host: {target_host}")
+            if hasattr(client, 'target_tenant') and client.target_tenant:
+                print(f"  Target Tenant: {client.target_tenant}")
+            else:
+                print(f"  Source Tenant: {client.tenant} (will be used as target)")
+            print(f"  Authentication: Target access key and secret key")
+            print("="*80)
+        
+        # Read target UIDs from CSV file
+        target_uids = []
+        try:
+            with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader)  # Skip header
+                
+                for row_num, row in enumerate(reader, 2):  # Start from 2 for row numbers
+                    if len(row) >= 2:
+                        source_uid = row[0].strip()
+                        target_uid = row[1].strip()
+                        
+                        if target_uid:  # Only process non-empty target UIDs
+                            target_uids.append({
+                                'row_num': row_num,
+                                'source_uid': source_uid,
+                                'target_uid': target_uid
+                            })
+                        else:
+                            logger.warning(f"Row {row_num}: Empty target UID for source '{source_uid}'")
+                    else:
+                        logger.warning(f"Row {row_num}: Invalid row format, expected at least 2 columns")
+        
+        except Exception as e:
+            error_msg = f"Error reading CSV file {csv_file}: {e}"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not target_uids:
+            print("❌ No valid target UIDs found in CSV file")
+            logger.warning("No valid target UIDs found in CSV file")
+            return
+        
+        if not quiet_mode:
+            print(f"Found {len(target_uids)} target UIDs to validate")
+            if verbose_mode:
+                print("🔊 VERBOSE MODE - Detailed output including headers and responses")
+            if parallel_mode:
+                print("🚀 PARALLEL MODE - Using multiple threads for faster processing")
+            print("="*80)
+        
+        if parallel_mode:
+            execute_valid_target_uids_parallel(target_uids, client, logger, quiet_mode, verbose_mode)
+        else:
+            execute_valid_target_uids_sequential(target_uids, client, logger, quiet_mode, verbose_mode)
+        
+    except Exception as e:
+        error_msg = f"Error in valid-target-uids: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+
+
+def execute_valid_target_uids_sequential(target_uids: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute target UID validation in sequential mode.
+    
+    Args:
+        target_uids: List of target UID dictionaries
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    total_uids = len(target_uids)
+    existing_uids = 0
+    missing_uids = 0
+    failed_checks = 0
+    missing_uid_list = []
+    
+    # Create progress bar
+    progress_bar = create_progress_bar(
+        total=total_uids,
+        desc="Validating target UIDs",
+        unit="uids",
+        disable=quiet_mode
+    )
+    
+    for uid_data in target_uids:
+        try:
+            target_uid = uid_data['target_uid']
+            source_uid = uid_data['source_uid']
+            row_num = uid_data['row_num']
+            
+            if verbose_mode:
+                print(f"\nValidating UID: {target_uid}")
+                print(f"Source UID: {source_uid}")
+                print(f"Row: {row_num}")
+                print("-" * 60)
+            
+            # Make API call to check if asset exists
+            if verbose_mode:
+                print(f"GET Request:")
+                print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
+                print(f"  Method: GET")
+                print(f"  Content-Type: application/json")
+                print(f"  Authorization: Bearer [REDACTED]")
+                if hasattr(client, 'target_tenant') and client.target_tenant:
+                    print(f"  X-Tenant: {client.target_tenant}")
+            
+            response = client.make_api_call(
+                endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                method='GET',
+                use_target_auth=True,
+                use_target_tenant=True
+            )
+            
+            if verbose_mode:
+                print(f"Response:")
+                print(json.dumps(response, indent=2, ensure_ascii=False))
+            
+            # Check if asset exists
+            assets_list = []
+            if response and 'data' in response:
+                if isinstance(response['data'], list):
+                    assets_list = response['data']
+                elif isinstance(response['data'], dict) and 'assets' in response['data']:
+                    assets_list = response['data']['assets']
+            
+            # Check if any asset in the response has the exact target_uid
+            asset_found = False
+            if assets_list and len(assets_list) > 0:
+                for asset in assets_list:
+                    if isinstance(asset, dict) and 'uid' in asset:
+                        if asset['uid'] == target_uid:
+                            asset_found = True
+                            break
+            
+            if asset_found:
+                # Asset exists with exact UID match
+                existing_uids += 1
+                if verbose_mode:
+                    print(f"✅ Asset exists: {target_uid}")
+            else:
+                # Asset does not exist with exact UID match
+                missing_uids += 1
+                missing_uid_list.append({
+                    'row_num': row_num,
+                    'source_uid': source_uid,
+                    'target_uid': target_uid
+                })
+                if verbose_mode:
+                    print(f"❌ Asset not found: {target_uid}")
+                    if assets_list and len(assets_list) > 0:
+                        print(f"   Note: API returned {len(assets_list)} assets, but none match the exact UID")
+                        if len(assets_list) <= 3:  # Show first few UIDs for debugging
+                            for i, asset in enumerate(assets_list[:3]):
+                                if isinstance(asset, dict) and 'uid' in asset:
+                                    print(f"   Asset {i+1} UID: {asset['uid']}")
+            
+            progress_bar.update(1)
+            
+        except Exception as e:
+            error_msg = f"Error validating UID {uid_data.get('target_uid', 'unknown')}: {e}"
+            if verbose_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            failed_checks += 1
+            progress_bar.update(1)
+    
+    progress_bar.close()
+    
+    # Print results
+    print_results(existing_uids, missing_uids, failed_checks, missing_uid_list, quiet_mode)
+
+
+def execute_valid_target_uids_parallel(target_uids: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+    """Execute target UID validation in parallel mode.
+    
+    Args:
+        target_uids: List of target UID dictionaries
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    # Calculate thread configuration
+    max_threads = 5
+    min_uids_per_thread = 10
+    
+    if len(target_uids) < min_uids_per_thread:
+        num_threads = 1
+        uids_per_thread = len(target_uids)
+    else:
+        num_threads = min(max_threads, (len(target_uids) + min_uids_per_thread - 1) // min_uids_per_thread)
+        uids_per_thread = (len(target_uids) + num_threads - 1) // num_threads
+    
+    if not quiet_mode:
+        print(f"Using {num_threads} threads to validate {len(target_uids)} UIDs")
+        print(f"UIDs per thread: {uids_per_thread}")
+        print("="*80)
+    
+    # Process UIDs in parallel
+    thread_results = []
+    
+    # Funny thread names for progress indicators
+    thread_names = [
+        "Validator Thread   ",
+        "Checker Thread     ", 
+        "Scanner Thread     ",
+        "Probe Thread       ",
+        "Test Thread        "
+    ]
+    
+    def process_uid_chunk(thread_id, start_index, end_index):
+        """Process a chunk of UIDs for a specific thread."""
+        # Create a thread-local client instance
+        thread_client = type(client)(
+            host=client.host,
+            access_key=client.access_key,
+            secret_key=client.secret_key,
+            tenant=getattr(client, 'tenant', None),
+            target_access_key=getattr(client, 'target_access_key', None),
+            target_secret_key=getattr(client, 'target_secret_key', None),
+            target_tenant=getattr(client, 'target_tenant', None)
+        )
+        
+        # Get UIDs for this thread
+        thread_uids = target_uids[start_index:end_index]
+        
+        # Create progress bar for this thread
+        progress_bar = create_progress_bar(
+            total=len(thread_uids),
+            desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+            unit="uids",
+            disable=quiet_mode,
+            position=thread_id,
+            leave=False
+        )
+        
+        existing_uids = 0
+        missing_uids = 0
+        failed_checks = 0
+        missing_uid_list = []
+        
+        # Process each UID in this thread's range
+        for uid_data in thread_uids:
+            try:
+                target_uid = uid_data['target_uid']
+                source_uid = uid_data['source_uid']
+                row_num = uid_data['row_num']
+                
+                if verbose_mode:
+                    thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                    print(f"\n{thread_name} - Validating UID: {target_uid}")
+                    print(f"Source UID: {source_uid}")
+                    print(f"Row: {row_num}")
+                    print("-" * 60)
+                
+                # Make API call to check if asset exists
+                if verbose_mode:
+                    print(f"GET Request:")
+                    print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(thread_client, 'target_tenant') and thread_client.target_tenant:
+                        print(f"  X-Tenant: {thread_client.target_tenant}")
+                
+                response = thread_client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+                
+                if verbose_mode:
+                    print(f"Response:")
+                    print(json.dumps(response, indent=2, ensure_ascii=False))
+                
+                # Check if asset exists
+                assets_list = []
+                if response and 'data' in response:
+                    if isinstance(response['data'], list):
+                        assets_list = response['data']
+                    elif isinstance(response['data'], dict) and 'assets' in response['data']:
+                        assets_list = response['data']['assets']
+                
+                # Check if any asset in the response has the exact target_uid
+                asset_found = False
+                if assets_list and len(assets_list) > 0:
+                    for asset in assets_list:
+                        if isinstance(asset, dict) and 'uid' in asset:
+                            if asset['uid'] == target_uid:
+                                asset_found = True
+                                break
+                
+                if asset_found:
+                    # Asset exists with exact UID match
+                    existing_uids += 1
+                    if verbose_mode:
+                        print(f"✅ Asset exists: {target_uid}")
+                else:
+                    # Asset does not exist with exact UID match
+                    missing_uids += 1
+                    missing_uid_list.append({
+                        'row_num': row_num,
+                        'source_uid': source_uid,
+                        'target_uid': target_uid
+                    })
+                    if verbose_mode:
+                        print(f"❌ Asset not found: {target_uid}")
+                        if assets_list and len(assets_list) > 0:
+                            print(f"   Note: API returned {len(assets_list)} assets, but none match the exact UID")
+                            if len(assets_list) <= 3:  # Show first few UIDs for debugging
+                                for i, asset in enumerate(assets_list[:3]):
+                                    if isinstance(asset, dict) and 'uid' in asset:
+                                        print(f"   Asset {i+1} UID: {asset['uid']}")
+            
+                progress_bar.update(1)
+                
+            except Exception as e:
+                error_msg = f"Error validating UID {uid_data.get('target_uid', 'unknown')}: {e}"
+                if verbose_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+                failed_checks += 1
+                progress_bar.update(1)
+        
+        progress_bar.close()
+        
+        return {
+            'existing_uids': existing_uids,
+            'missing_uids': missing_uids,
+            'failed_checks': failed_checks,
+            'missing_uid_list': missing_uid_list
+        }
+    
+    # Create and start threads
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        
+        for thread_id in range(num_threads):
+            start_index = thread_id * uids_per_thread
+            end_index = min(start_index + uids_per_thread, len(target_uids))
+            
+            if start_index < len(target_uids):
+                future = executor.submit(process_uid_chunk, thread_id, start_index, end_index)
+                futures.append(future)
+        
+        # Collect results
+        total_existing = 0
+        total_missing = 0
+        total_failed = 0
+        all_missing_list = []
+        
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                total_existing += result['existing_uids']
+                total_missing += result['missing_uids']
+                total_failed += result['failed_checks']
+                all_missing_list.extend(result['missing_uid_list'])
+            except Exception as e:
+                logger.error(f"Thread execution error: {e}")
+                total_failed += 1
+    
+    # Print results
+    print_results(total_existing, total_missing, total_failed, all_missing_list, quiet_mode)
+
+
+def print_results(existing_uids: int, missing_uids: int, failed_checks: int, missing_uid_list: List[Dict], quiet_mode: bool = False):
+    """Print validation results.
+    
+    Args:
+        existing_uids: Number of UIDs that exist
+        missing_uids: Number of UIDs that don't exist
+        failed_checks: Number of failed API calls
+        missing_uid_list: List of missing UID details
+        quiet_mode: Whether to suppress console output
+    """
+    if not quiet_mode:
+        print("\n" + "="*80)
+        print("TARGET UID VALIDATION SUMMARY")
+        print("="*80)
+        print(f"Total UIDs checked: {existing_uids + missing_uids + failed_checks}")
+        print(f"Existing UIDs: {existing_uids}")
+        print(f"Missing UIDs: {missing_uids}")
+        print(f"Failed checks: {failed_checks}")
+        
+        if missing_uids > 0:
+            print(f"\n❌ MISSING UIDs ({missing_uids} total):")
+            print("-" * 50)
+            # Sort by row number for consistent output
+            missing_uid_list.sort(key=lambda x: x['row_num'])
+            
+            for uid_data in missing_uid_list:
+                print(f"  Row {uid_data['row_num']}: {uid_data['target_uid']} (source: {uid_data['source_uid']})")
+            
+            # Add critical warning about policy import failures
+            print(f"\n🚨 CRITICAL WARNING: POLICY IMPORT WILL FAIL!")
+            print("=" * 60)
+            print(f"⚠️  The {missing_uids} missing UIDs above are referenced in your exported policies.")
+            print(f"⚠️  When you try to import these policies, the import will FAIL because")
+            print(f"⚠️  the target environment cannot find these assets.")
+            print(f"\n💡 RECOMMENDED ACTIONS:")
+            print(f"   1. Create the missing assets in the target environment first")
+            print(f"   2. Or update the asset UIDs in your CSV file to match existing assets")
+            print(f"   3. Or remove policies that reference these missing assets")
+            print(f"   4. Re-run 'valid-target-uids' to verify all UIDs exist before importing")
+            print("=" * 60)
+        else:
+            print(f"\n✅ All target UIDs exist in the target environment!")
+        
+        print("="*80)
+        
+        if failed_checks > 0:
+            print("⚠️  Some checks failed. Check log file for details.")
+        elif missing_uids > 0:
+            print("🚨 POLICY IMPORT WARNING: Missing UIDs will cause policy import failures!")
+        else:
+            print("✅ Validation completed successfully!")
+    else:
+        # Quiet mode - just show essential info
+        print(f"✅ Validation complete: {existing_uids} exist, {missing_uids} missing, {failed_checks} failed")
+        
+        if missing_uids > 0:
+            print(f"\nMissing UIDs:")
+            missing_uid_list.sort(key=lambda x: x['row_num'])
+            for uid_data in missing_uid_list:
+                print(f"  {uid_data['target_uid']}")
+            
+            # Add warning even in quiet mode
+            print(f"\n🚨 WARNING: {missing_uids} missing UIDs will cause policy import failures!")
+            print(f"💡 Run without --quiet for detailed recommendations.")

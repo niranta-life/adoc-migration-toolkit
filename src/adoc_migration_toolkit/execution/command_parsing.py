@@ -8,14 +8,14 @@ def parse_api_command(command: str) -> tuple:
     """Parse an API command string into components.
     
     Args:
-        command: Command string like "GET /endpoint" or "PUT /endpoint {'key': 'value'}"
+        command: Command string like "GET /endpoint" or "PUT /endpoint {'key': 'value'}" or "GET /endpoint --target"
         
     Returns:
-        Tuple of (method, endpoint, json_payload)
+        Tuple of (method, endpoint, json_payload, use_target_auth, use_target_tenant)
     """
     parts = command.strip().split()
     if not parts:
-        return None, None, None
+        return None, None, None, False, False
     
     method = parts[0].upper()
     if method not in ['GET', 'PUT']:
@@ -26,6 +26,14 @@ def parse_api_command(command: str) -> tuple:
     
     endpoint = parts[1]
     json_payload = None
+    use_target_auth = False
+    use_target_tenant = False
+    
+    # Check for --target flag
+    if '--target' in parts:
+        use_target_auth = True
+        use_target_tenant = True
+        parts.remove('--target')
     
     # For PUT requests, look for JSON payload
     if method == 'PUT' and len(parts) > 2:
@@ -36,7 +44,7 @@ def parse_api_command(command: str) -> tuple:
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON payload: {e}")
     
-    return method, endpoint, json_payload
+    return method, endpoint, json_payload, use_target_auth, use_target_tenant
 
 def parse_segments_export_command(command: str) -> tuple:
     """Parse a segments-export command string into components.
@@ -831,3 +839,148 @@ def parse_asset_config_import_command(command: str) -> tuple:
                 return None, False, False, False, False
     
     return csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode 
+
+def parse_valid_target_uids_command(command: str) -> tuple:
+    """Parse valid-target-uids command in interactive mode.
+    
+    Args:
+        command (str): The command string
+        
+    Returns:
+        tuple: (csv_file_path, quiet_mode, verbose_mode, parallel_mode)
+    """
+    try:
+        args_str = command[len('valid-target-uids'):].strip()
+        csv_file_path = None
+        quiet_mode = False
+        verbose_mode = False
+        parallel_mode = False
+        
+        args = args_str.split()
+        i = 0
+        
+        while i < len(args):
+            arg = args[i]
+            
+            if arg == '--quiet':
+                quiet_mode = True
+                i += 1
+            elif arg == '--verbose':
+                verbose_mode = True
+                i += 1
+            elif arg == '--parallel':
+                parallel_mode = True
+                i += 1
+            elif not arg.startswith('--'):
+                # This is the CSV file path (positional argument)
+                csv_file_path = arg
+                i += 1
+            else:
+                # Unknown argument
+                print(f"❌ Unknown argument: {arg}")
+                print("💡 Use 'valid-target-uids --help' for usage information")
+                return None, None, None, None
+        
+        return csv_file_path, quiet_mode, verbose_mode, parallel_mode
+        
+    except Exception as e:
+        print(f"❌ Error parsing valid-target-uids command: {e}")
+        print("💡 Use 'valid-target-uids --help' for usage information")
+        return None, None, None, None
+
+
+def parse_set_log_level_command(command: str) -> str:
+    """Parse set-log-level command in interactive mode.
+    
+    Args:
+        command (str): The command string like "set-log-level DEBUG"
+        
+    Returns:
+        str: The log level (ERROR, WARNING, INFO, DEBUG) or None if invalid
+    """
+    try:
+        parts = command.strip().split()
+        if len(parts) < 2:
+            print("❌ Log level is required")
+            print("💡 Usage: set-log-level <level>")
+            print("💡 Valid levels: ERROR, WARNING, INFO, DEBUG")
+            return None
+        
+        if len(parts) > 2:
+            print("❌ Too many arguments")
+            print("💡 Usage: set-log-level <level>")
+            print("💡 Valid levels: ERROR, WARNING, INFO, DEBUG")
+            return None
+        
+        log_level = parts[1].upper()
+        valid_levels = ['ERROR', 'WARNING', 'INFO', 'DEBUG']
+        
+        if log_level not in valid_levels:
+            print(f"❌ Invalid log level: {log_level}")
+            print(f"💡 Valid levels: {', '.join(valid_levels)}")
+            return None
+        
+        return log_level
+        
+    except Exception as e:
+        print(f"❌ Error parsing set-log-level command: {e}")
+        print("💡 Usage: set-log-level <level>")
+        return None 
+
+def parse_set_http_config_command(command: str) -> dict:
+    """Parse set-http-config command for interactive mode.
+    Args:
+        command (str): The command string like 'set-http-config --timeout 20 --retry 5 --proxy http://proxy:8080'
+    Returns:
+        dict: Dictionary with keys 'timeout', 'retry', 'proxy' (values or None if not set)
+    """
+    import shlex
+    args = shlex.split(command)
+    config = {'timeout': None, 'retry': None, 'proxy': None}
+    i = 1  # skip 'set-http-config'
+    while i < len(args):
+        if args[i] == '--timeout' and i + 1 < len(args):
+            try:
+                config['timeout'] = int(args[i + 1])
+            except Exception:
+                print("❌ Invalid value for --timeout (must be integer)")
+                return None
+            i += 2
+        elif args[i] == '--retry' and i + 1 < len(args):
+            try:
+                config['retry'] = int(args[i + 1])
+            except Exception:
+                print("❌ Invalid value for --retry (must be integer)")
+                return None
+            i += 2
+        elif args[i] == '--proxy' and i + 1 < len(args):
+            config['proxy'] = args[i + 1]
+            i += 2
+        else:
+            print(f"❌ Unknown or incomplete argument: {args[i]}")
+            print("💡 Usage: set-http-config [--timeout x] [--retry x] [--proxy url]")
+            return None
+    return config 
+
+def parse_show_config_command(command: str) -> bool:
+    """Parse show-config command in interactive mode.
+    
+    Args:
+        command (str): The command string like "show-config"
+        
+    Returns:
+        bool: True if command is valid, False otherwise
+    """
+    try:
+        parts = command.strip().split()
+        if len(parts) != 1:
+            print("❌ show-config command doesn't accept any arguments")
+            print("💡 Usage: show-config")
+            return False
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error parsing show-config command: {e}")
+        print("💡 Usage: show-config")
+        return False 

@@ -99,6 +99,7 @@ class PolicyExportFormatter:
         # Initialize data quality policy extraction tracking
         self.extracted_assets: Set[str] = set()
         self.all_asset_uids: Set[str] = set()  # Track all UIDs without filtering
+        self.deep_scan_count: int = 0  # Track how many times deep scan is called
         
         self.logger.info("PolicyExportFormatter initialized successfully")
         self.logger.info(f"Input directory: {self.input_dir}")
@@ -170,31 +171,96 @@ class PolicyExportFormatter:
                 self.logger.info(f"  Segmented JDBC_SQL policies: {file_stats['segmented_jdbc_policies']}")
                 self.logger.info(f"  Non-segmented policies: {file_stats['non_segmented_policies']}")
                 
+            # Log asset extraction results
+            self.logger.info(f"Asset extraction results:")
+            self.logger.info(f"  Total unique assets found so far: {len(self.all_asset_uids)}")
+            if len(self.all_asset_uids) > 0:
+                # Show first few assets found
+                sample_assets = list(self.all_asset_uids)[:5]
+                for i, asset in enumerate(sample_assets, 1):
+                    self.logger.info(f"  Asset {i}: {asset}")
+                if len(self.all_asset_uids) > 5:
+                    self.logger.info(f"  ... and {len(self.all_asset_uids) - 5} more")
+            
+            # Also log at the end of each file processing to see incremental progress
+            self.logger.info(f"=== End of file processing - Total assets: {len(self.all_asset_uids)} ===")
+                
         except Exception as e:
             self.logger.error(f"Error extracting data quality assets: {e}")
             self.stats["errors"].append(f"Data quality extraction error: {e}")
     
     def _extract_all_assets_from_policy(self, policy: Dict[str, Any]) -> None:
-        """Extract all asset UIDs from a policy without any filtering constraints.
+        """Extract all asset UIDs from a policy by deeply scanning all JSON fields.
         
         Args:
             policy: The policy definition dictionary
         """
         try:
-            # Extract backing assets from all policies regardless of type
-            backing_assets = policy.get("backingAssets", [])
-            
-            for asset in backing_assets:
-                if isinstance(asset, dict):
-                    uid = asset.get("uid")
-                    
-                    if uid is not None:
-                        self.all_asset_uids.add(uid)
-                        self.logger.debug(f"Added to all assets: {uid}")
+            # Deep scan the entire policy object to find uid and parentAssetUid fields
+            self._deep_scan_for_asset_uids(policy)
                         
         except Exception as e:
             self.logger.error(f"Error extracting all assets from policy: {e}")
             self.stats["errors"].append(f"All assets extraction error: {e}")
+    
+    def _deep_scan_for_asset_uids(self, obj: Any, path: str = "") -> None:
+        """Recursively scan any object to find uid and parentAssetUid fields.
+        
+        Args:
+            obj: The object to scan (dict, list, or primitive)
+            path: Current path in the object for debugging
+        """
+        try:
+            self.deep_scan_count += 1
+            if self.deep_scan_count % 1000 == 0:  # Log every 1000th scan
+                self.logger.debug(f"Deep scan count: {self.deep_scan_count}, current path: {path}")
+            if isinstance(obj, dict):
+                # Check for uid and parentAssetUid fields in this dict
+                for key, value in obj.items():
+                    current_path = f"{path}.{key}" if path else key
+                    
+                    # Check if this key is uid or parentAssetUid
+                    if key in ['uid', 'parentAssetUid'] and isinstance(value, str) and value.strip():
+                        uid = value.strip()
+                        self.all_asset_uids.add(uid)
+                        self.logger.debug(f"Found asset UID at {current_path}: {uid}")
+                    
+                    # Also check for asset-related fields that might contain UIDs
+                    if key in ['assetUid', 'asset_uid', 'assetUid', 'backingAssetUid', 'backingAssetId'] and isinstance(value, str) and value.strip():
+                        uid = value.strip()
+                        self.all_asset_uids.add(uid)
+                        self.logger.debug(f"Found asset UID at {current_path}: {uid}")
+                    
+                    # Check for asset objects that might contain UIDs
+                    if key in ['asset', 'assets', 'backingAsset', 'backingAssets'] and isinstance(value, (dict, list)):
+                        # This is likely an asset object or list, scan it more carefully
+                        self.logger.debug(f"Found asset object at {current_path}, scanning for UIDs")
+                        self._deep_scan_for_asset_uids(value, current_path)
+                    
+                    # Check for any field that contains "uid" in its name (case-insensitive)
+                    if 'uid' in key.lower() and isinstance(value, str) and value.strip():
+                        uid = value.strip()
+                        self.all_asset_uids.add(uid)
+                        self.logger.debug(f"Found asset UID at {current_path}: {uid}")
+                        # Also log at info level for important finds
+                        self.logger.info(f"Found asset UID at {current_path}: {uid}")
+                        # Log the current total count after adding this UID
+                        self.logger.info(f"Total assets after adding {uid}: {len(self.all_asset_uids)}")
+                    
+                    # Recursively scan the value
+                    self._deep_scan_for_asset_uids(value, current_path)
+                    
+            elif isinstance(obj, list):
+                # Scan each item in the list
+                for i, item in enumerate(obj):
+                    current_path = f"{path}[{i}]"
+                    self._deep_scan_for_asset_uids(item, current_path)
+                    
+            # For primitive types (str, int, bool, etc.), no further scanning needed
+            
+        except Exception as e:
+            self.logger.error(f"Error in deep scan at path {path}: {e}")
+            self.stats["errors"].append(f"Deep scan error at {path}: {e}")
     
     def _extract_from_policy(self, policy: Dict[str, Any]) -> None:
         """Extract assets from a single policy definition.
@@ -292,14 +358,33 @@ class PolicyExportFormatter:
                 # Sort by uid for consistent output
                 sorted_assets = sorted(self.all_asset_uids)
                 
+                # Track transformations for logging
+                transformation_count = 0
+                no_change_count = 0
+                
                 for uid in sorted_assets:
                     # Apply string transformations to create target-env
                     target_env = uid
+                    original_uid = uid
+                    transformations_applied = []
+                    
                     for source, target in self.string_transforms.items():
-                        target_env = target_env.replace(source, target)
+                        if source in target_env:
+                            target_env = target_env.replace(source, target)
+                            transformations_applied.append(f"'{source}' -> '{target}'")
+                    
+                    if transformations_applied:
+                        transformation_count += 1
+                        self.logger.debug(f"Transformed '{original_uid}' -> '{target_env}' (applied: {', '.join(transformations_applied)})")
+                    else:
+                        # No transformation applied
+                        no_change_count += 1
+                        self.logger.debug(f"No transformation applied to '{uid}'")
+                    
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.all_asset_uids)} unique assets to {csv_file}")
+            self.logger.info(f"String transformations applied: {transformation_count}, No changes: {no_change_count}")
             
         except Exception as e:
             error_msg = f"Failed to write CSV file {csv_file}: {e}"
@@ -613,6 +698,10 @@ class PolicyExportFormatter:
                 
                 self.logger.info(f"Found {len(json_files)} JSON files in ZIP: {zip_file_path}")
                 
+                # Log all JSON files found for debugging
+                for i, json_file in enumerate(json_files, 1):
+                    self.logger.info(f"  JSON file {i}: {json_file.name}")
+                
                 # Process each JSON file
                 successful = 0
                 failed = 0
@@ -663,11 +752,42 @@ class PolicyExportFormatter:
                 with open(json_file_path, 'r', encoding='latin-1') as file:
                     data = json.load(file)
             
-            # Check if this is a data quality policy definitions file
+            # Process ALL JSON files for asset extraction, not just data_quality_policy_definitions
             file_name = json_file_path.name
-            if file_name.startswith("data_quality_policy_definitions"):
-                self.logger.info(f"Processing data quality policy definitions file in ZIP: {file_name}")
-                self.extract_data_quality_assets(data)
+            self.logger.info(f"Processing JSON file in ZIP for asset extraction: {file_name}")
+            
+            # Extract assets from ALL JSON files (policies, configurations, etc.)
+            self.logger.info(f"  Extracting assets from: {file_name}")
+            
+            # Log the type of file being processed for better debugging
+            if "data_quality_policy_definitions" in file_name:
+                self.logger.info(f"  File type: Data Quality Policy Definitions")
+            elif "data_drift_policy_definitions" in file_name:
+                self.logger.info(f"  File type: Data Drift Policy Definitions")
+            elif "schema_drift_policy_definitions" in file_name:
+                self.logger.info(f"  File type: Schema Drift Policy Definitions")
+            elif "reconciliation_policy_definitions" in file_name:
+                self.logger.info(f"  File type: Reconciliation Policy Definitions")
+            elif "profile_anomaly_policy_definition" in file_name:
+                self.logger.info(f"  File type: Profile Anomaly Policy Definition")
+            elif "data_cadence_policy_definitions" in file_name:
+                self.logger.info(f"  File type: Data Cadence Policy Definitions")
+            elif "business_rules" in file_name:
+                self.logger.info(f"  File type: Business Rules")
+            elif "asset_udf_variables" in file_name:
+                self.logger.info(f"  File type: Asset UDF Variables")
+            elif "data_sources" in file_name:
+                self.logger.info(f"  File type: Data Sources")
+            elif "notification_settings" in file_name:
+                self.logger.info(f"  File type: Notification Settings")
+            elif "package_udf_definitions" in file_name:
+                self.logger.info(f"  File type: Package UDF Definitions")
+            elif "reference_asset" in file_name:
+                self.logger.info(f"  File type: Reference Asset")
+            else:
+                self.logger.info(f"  File type: Other/Unknown")
+            
+            self.extract_data_quality_assets(data)
             
             # Process the data (existing functionality)
             modified_data = self.replace_in_value(data)
@@ -817,7 +937,9 @@ class PolicyExportFormatter:
                 "total_policies_processed": self.stats["total_policies_processed"],
                 "segmented_spark_policies": self.stats["segmented_spark_policies"],
                 "segmented_jdbc_policies": self.stats["segmented_jdbc_policies"],
-                "non_segmented_policies": self.stats["non_segmented_policies"]
+                "non_segmented_policies": self.stats["non_segmented_policies"],
+                # Deep scan statistics
+                "deep_scan_count": self.deep_scan_count
             }
             
             self.logger.info(f"Processing complete: {successful} successful, {failed} failed")
@@ -844,7 +966,9 @@ class PolicyExportFormatter:
                 "total_policies_processed": self.stats["total_policies_processed"],
                 "segmented_spark_policies": self.stats["segmented_spark_policies"],
                 "segmented_jdbc_policies": self.stats["segmented_jdbc_policies"],
-                "non_segmented_policies": self.stats["non_segmented_policies"]
+                "non_segmented_policies": self.stats["non_segmented_policies"],
+                # Deep scan statistics
+                "deep_scan_count": self.deep_scan_count
             }
 
 
@@ -1055,6 +1179,8 @@ def execute_formatter(input_dir: str, string_transforms: dict, output_dir: str,
                 print(f"Assets extracted:    {stats['extracted_assets']}")
             if stats.get('all_assets', 0) > 0:
                 print(f"All assets found:    {stats['all_assets']}")
+            if stats.get('deep_scan_count', 0) > 0:
+                print(f"Deep scan operations: {stats['deep_scan_count']}")
             if stats.get('csv_processed', False):
                 print(f"CSV file processed:  asset-all-export.csv -> asset-all-import-ready.csv")
             if stats.get('config_csv_processed', False):

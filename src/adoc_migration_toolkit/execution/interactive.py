@@ -5,18 +5,18 @@ This module contains execution functions for interactive mode operations
 including help, autocomplete, and command history management.
 """
 
-import os
 import sys
 import json
 import getpass
 import signal
+import logging
 from datetime import datetime
 from pathlib import Path
 from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
-from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import
+from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import, execute_valid_target_uids
 from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
@@ -28,6 +28,8 @@ from ..shared.readline_wrapper import (
     write_history_file, clear_history, add_history, get_current_history_length,
     get_history_item, get_line_buffer, input_with_history
 )
+
+import os
 
 
 def log_session_event(logger, event_type: str, user_info: dict = None):
@@ -122,6 +124,8 @@ def show_interactive_help():
     print("    Export all assets from source environment to CSV file")
     print(f"  {BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
     print("    Import tags for assets from CSV file")
+    print(f"  {BOLD}valid-target-uids{RESET} [<csv_file>] [--quiet] [--verbose] [--parallel]")
+    print("    Validate target UIDs against target environment")
     
     print(f"\n{BOLD}📋 POLICY COMMANDS:{RESET}")
     print(f"  {BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel]")
@@ -145,9 +149,25 @@ def show_interactive_help():
     print(f"  {BOLD}vcs-push{RESET}")
     print("    Push changes to the remote repository with authentication")
     
+    print(f"\n{BOLD}🌐 REST API COMMANDS:{RESET}")
+    print(f"  {BOLD}GET{RESET} <endpoint> [--target]")
+    print("    Make GET request to API endpoint (use --target for target environment)")
+    print(f"  {BOLD}PUT{RESET} <endpoint> <json_payload> [--target]")
+    print("    Make PUT request to API endpoint with JSON payload (use --target for target environment)")
+    print("    Examples:")
+    print("      GET /catalog-server/api/assets?uid=123")
+    print("      GET /catalog-server/api/assets?uid=snowflake_krish_test.DEMO_DB.CS_DEMO.Customer_Sample --target")
+    print("      PUT /catalog-server/api/assets {\"key\": \"value\"}")
+    
     print(f"\n{BOLD}🛠️ UTILITY COMMANDS:{RESET}")
     print(f"  {BOLD}set-output-dir{RESET} <directory>")
     print("    Set global output directory for all export commands")
+    print(f"  {BOLD}set-log-level{RESET} <level>")
+    print("    Change log level dynamically (ERROR, WARNING, INFO, DEBUG)")
+    print(f"  {BOLD}set-http-config{RESET} [--timeout x] [--retry x] [--proxy url]")
+    print("    Configure HTTP timeout, retry, and proxy settings")
+    print(f"  {BOLD}show-config{RESET}")
+    print("    Display current configuration (HTTP, logging, environment, output)")
     print(f"  {BOLD}help{RESET}")
     print("    Show this help information")
     print(f"  {BOLD}help <command>{RESET}")
@@ -383,6 +403,40 @@ def show_command_help(command_name: str):
         print("      • Parallel mode: Uses up to 5 threads for faster processing")
         print("      • Provides comprehensive statistics upon completion")
     
+    elif command_name == 'valid-target-uids':
+        print(f"\n{BOLD}valid-target-uids{RESET} [<csv_file>] [--quiet] [--verbose] [--parallel]")
+        print("    Description: Validate target UIDs against target environment")
+        print("    Arguments:")
+        print("      csv_file: Path to CSV file with source-env and target-env columns (optional)")
+        print("    Options:")
+        print("      --quiet: Suppress console output, show only progress bar and summary")
+        print("      --verbose: Show detailed output including HTTP requests and responses")
+        print("      --parallel: Use parallel processing for faster validation (max 5 threads)")
+        print("    Examples:")
+        print("      valid-target-uids")
+        print("      valid-target-uids <output-dir>/asset-export/asset_uids.csv")
+        print("      valid-target-uids my_uids.csv --quiet")
+        print("      valid-target-uids --verbose")
+        print("      valid-target-uids --parallel")
+        print("    Behavior:")
+        print("      • If no CSV file specified, uses default from output directory")
+        print("      • Default input: <output-dir>/asset-export/asset_uids.csv")
+        print("      • Reads source-env and target-env columns from CSV file")
+        print("      • Uses target-env UIDs to validate against target environment")
+        print("      • Makes GET requests to '/catalog-server/api/assets?uid=<target_uid>'")
+        print("      • Uses target environment authentication (target access key, secret key, and tenant)")
+        print("      • Checks if assets exist in target environment")
+        print("      • Shows progress bar in quiet mode")
+        print("      • Shows detailed HTTP requests/responses in verbose mode")
+        print("      • Provides comprehensive statistics upon completion")
+        print("      • Lists all missing UIDs with row numbers and source UIDs")
+        print("      • Parallel mode: Uses up to 5 threads with minimum 10 UIDs per thread")
+        print("      • Parallel mode: Each thread has its own progress bar")
+        print("      • Parallel mode: Significantly faster for large UID sets")
+        print("      • Thread names: Validator Thread, Checker Thread, Scanner Thread, Probe Thread, Test Thread")
+        print("      • 🚨 CRITICAL: Missing UIDs will cause policy import failures!")
+        print("      • 🚨 CRITICAL: Run this validation before importing policies!")
+    
     elif command_name == 'policy-list-export':
         print(f"\n{BOLD}policy-list-export{RESET} [--quiet] [--verbose] [--parallel]")
         print("    Description: Export all policies from source environment to CSV file")
@@ -470,6 +524,8 @@ def show_command_help(command_name: str):
         print("      • Provides comprehensive summary with aggregated statistics")
         print("      • Tracks UUIDs of imported policy definitions")
         print("      • Reports conflicts (assemblies, policies, SQL views, visual views)")
+        print("      • ⚠️  IMPORTANT: Run 'valid-target-uids' first to check for missing assets!")
+        print("      • ⚠️  IMPORTANT: Missing asset UIDs will cause import failures!")
     
     elif command_name == 'rule-tag-export':
         print(f"\n{BOLD}rule-tag-export{RESET} [--quiet] [--verbose] [--parallel]")
@@ -524,6 +580,8 @@ def show_command_help(command_name: str):
         print("      • Processes asset-all-export.csv -> asset-all-import-ready.csv")
         print("      • Processes asset-config-export.csv -> asset-config-import-ready.csv")
         print("      • Shows detailed processing statistics upon completion")
+        print("      • ⚠️  IMPORTANT: After running this command, validate UIDs with 'valid-target-uids'!")
+        print("      • ⚠️  IMPORTANT: Generated UIDs must exist in target environment for policy imports!")
     
     elif command_name == 'vcs-config':
         print(f"\n{BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
@@ -610,6 +668,103 @@ def show_command_help(command_name: str):
         print("      • Persists across multiple interactive sessions")
         print("      • Can be changed anytime with another set-output-dir command")
     
+    elif command_name == 'set-log-level':
+        print(f"\n{BOLD}set-log-level{RESET} <level>")
+        print("    Description: Change log level dynamically for all loggers in the application")
+        print("    Arguments:")
+        print("      level: Log level (ERROR, WARNING, INFO, DEBUG)")
+        print("    Examples:")
+        print("      set-log-level DEBUG")
+        print("      set-log-level INFO")
+        print("      set-log-level WARNING")
+        print("      set-log-level ERROR")
+        print("    Features:")
+        print("      • Changes log level for all loggers immediately")
+        print("      • Affects both file and console logging")
+        print("      • Changes persist for the current session")
+        print("      • Logs the level change for audit purposes")
+        print("      • Validates log level before applying")
+        print("      • ERROR: Only error messages")
+        print("      • WARNING: Errors and warnings")
+        print("      • INFO: Errors, warnings, and info messages")
+        print("      • DEBUG: All messages including debug information")
+    
+    elif command_name == 'set-http-config':
+        print(f"\n{BOLD}set-http-config{RESET} [--timeout x] [--retry x] [--proxy url]")
+        print("    Description: Configure HTTP timeout, retry, and proxy settings for all API requests")
+        print("    Arguments:")
+        print("      --timeout x: Request timeout in seconds (integer)")
+        print("      --retry x: Number of retry attempts (integer)")
+        print("      --proxy url: Proxy URL (e.g., http://proxy.example.com:8080)")
+        print("    Examples:")
+        print("      set-http-config --timeout 30")
+        print("      set-http-config --retry 5")
+        print("      set-http-config --proxy http://proxy.company.com:8080")
+        print("      set-http-config --timeout 20 --retry 3 --proxy http://proxy:8080")
+        print("    Features:")
+        print("      • Shows current HTTP configuration before changes")
+        print("      • Applies changes immediately to global HTTP config")
+        print("      • Affects all future API requests")
+        print("      • Supports retry with exponential backoff")
+        print("      • Retries on 429, 500, 502, 503, 504 status codes")
+        print("      • Proxy support for HTTP and HTTPS requests")
+        print("      • Changes persist for the current session")
+        print("      • Shows new configuration after changes")
+        print("      • Default timeout: 10 seconds")
+        print("      • Default retry: 3 attempts")
+        print("      • Default proxy: None")
+    
+    elif command_name == 'show-config':
+        print(f"\n{BOLD}show-config{RESET}")
+        print("    Description: Display current configuration for HTTP, logging, environment, and output settings")
+        print("    Arguments:")
+        print("      None (no arguments required)")
+        print("    Example:")
+        print("      show-config")
+        print("    Features:")
+        print("      • Shows HTTP configuration (timeout, retry, proxy)")
+        print("      • Shows current log level")
+        print("      • Shows environment configuration (host, tenants)")
+        print("      • Shows access keys and secret keys (partially masked for security)")
+        print("      • Shows output directory configuration")
+        print("      • Displays host type (static or dynamic with tenant substitution)")
+        print("      • Shows both source and target environment settings")
+        print("      • Security: Only shows first 8 characters of sensitive keys")
+        print("      • Clear section organization with emojis and formatting")
+        print("      • Useful for troubleshooting and configuration verification")
+    
+    elif command_name == 'get':
+        print(f"\n{BOLD}GET{RESET} <endpoint> [--target]")
+        print("    Description: Make GET request to API endpoint")
+        print("    Arguments:")
+        print("      endpoint: API endpoint path (e.g., /catalog-server/api/assets?uid=123)")
+        print("      --target: Use target environment authentication and tenant")
+        print("    Examples:")
+        print("      GET /catalog-server/api/assets?uid=123")
+        print("      GET /catalog-server/api/assets?uid=snowflake_krish_test.DEMO_DB.CS_DEMO.Customer_Sample --target")
+        print("      GET /catalog-server/api/policies")
+        print("    Features:")
+        print("      • Uses source environment authentication by default")
+        print("      • Use --target flag to switch to target environment")
+        print("      • Returns formatted JSON response")
+        print("      • Supports query parameters in endpoint URL")
+    
+    elif command_name == 'put':
+        print(f"\n{BOLD}PUT{RESET} <endpoint> <json_payload> [--target]")
+        print("    Description: Make PUT request to API endpoint with JSON payload")
+        print("    Arguments:")
+        print("      endpoint: API endpoint path")
+        print("      json_payload: JSON data to send (e.g., {\"key\": \"value\"})")
+        print("      --target: Use target environment authentication and tenant")
+        print("    Examples:")
+        print("      PUT /catalog-server/api/assets {\"name\": \"test\", \"type\": \"database\"}")
+        print("      PUT /catalog-server/api/policies {\"policy\": \"data\"} --target")
+        print("    Features:")
+        print("      • Uses source environment authentication by default")
+        print("      • Use --target flag to switch to target environment")
+        print("      • JSON payload must be valid JSON format")
+        print("      • Returns formatted JSON response")
+    
     elif command_name == 'help':
         print(f"\n{BOLD}help{RESET}")
         print("    Description: Show this help information")
@@ -646,10 +801,11 @@ def setup_autocomplete():
     commands = [
         'segments-export', 'segments-import',
         'asset-profile-export', 'asset-profile-import',
-        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-import',
+        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-import', 'valid-target-uids',
         'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
         'vcs-config', 'vcs-init', 'vcs-pull', 'vcs-push',
-        'set-output-dir', 'help', 'history', 'exit', 'quit', 'q'
+        'GET', 'PUT',  # REST API commands
+        'set-output-dir', 'set-log-level', 'set-http-config', 'show-config', 'help', 'history', 'exit', 'quit', 'q'
     ]
     
     # Define command-specific completions
@@ -661,6 +817,7 @@ def setup_autocomplete():
         'asset-profile-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-profile-import': ['--dry-run', '--quiet', '--verbose'],
         'asset-tag-import': ['--quiet', '--verbose', '--parallel'],
+        'valid-target-uids': ['--quiet', '--verbose', '--parallel'],
         'policy-export': ['--type', '--filter', '--quiet', '--verbose', '--batch-size', '--parallel'],
         'policy-import': ['--quiet', '--verbose'],
         'policy-list-export': ['--quiet', '--verbose', '--parallel'],
@@ -672,7 +829,12 @@ def setup_autocomplete():
         'vcs-init': [],
         'vcs-pull': [],
         'vcs-push': [],
-        'set-output-dir': []
+        'GET': ['--target'],  # REST API commands
+        'PUT': ['--target'],  # REST API commands
+        'set-output-dir': [],
+        'set-log-level': ['ERROR', 'WARNING', 'INFO', 'DEBUG'],
+        'set-http-config': ['--timeout', '--retry', '--proxy'],
+        'show-config': []
     }
     
     # Define option values for specific options
@@ -1017,13 +1179,14 @@ def run_interactive(args):
                 valid_commands = [
                     'segments-export', 'segments-import',
                     'asset-profile-export', 'asset-profile-import',
-                    'asset-config-export', 'asset-list-export', 'asset-tag-import',
+                    'asset-config-export', 'asset-list-export', 'asset-tag-import', 'valid-target-uids',
                     'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
                     'vcs-config',
                     'vcs-init',
                     'vcs-pull',
                     'vcs-push',
-                    'set-output-dir',
+                    'GET', 'PUT',  # REST API commands
+                    'set-output-dir', 'set-log-level',
                     # Utility commands (will be filtered anyway)
                     'help', 'history', 'exit', 'quit', 'q'
                 ]
@@ -1161,6 +1324,15 @@ def run_interactive(args):
                     execute_asset_tag_import(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode)
                     continue
                 
+                # Check if it's a valid-target-uids command
+                if command.lower().startswith('valid-target-uids'):
+                    from .command_parsing import parse_valid_target_uids_command
+                    from .asset_operations import execute_valid_target_uids
+                    csv_file, quiet_mode, verbose_mode, parallel_mode = parse_valid_target_uids_command(command)
+                    # Execute the command (csv_file can be None for default file)
+                    execute_valid_target_uids(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode)
+                    continue
+                
                 # Check if it's a policy-list-export command
                 if command.lower().startswith('policy-list-export'):
                     from .command_parsing import parse_policy_list_export_command
@@ -1214,6 +1386,145 @@ def run_interactive(args):
                         set_global_output_directory(directory, logger)
                     continue
                 
+                # Check if it's a set-log-level command
+                if command.lower().startswith('set-log-level'):
+                    from .command_parsing import parse_set_log_level_command
+                    from ..shared.logging import change_log_level
+                    import logging
+                    new_level = parse_set_log_level_command(command)
+                    if new_level:
+                        current_level = logging.getLevelName(logging.getLogger().getEffectiveLevel())
+                        print(f"Current log level: {current_level}")
+                        if change_log_level(new_level):
+                            updated_level = logging.getLevelName(logging.getLogger().getEffectiveLevel())
+                            print(f"✅ Log level changed to: {updated_level}")
+                        else:
+                            print(f"❌ Failed to change log level to: {new_level}")
+                    continue
+
+                # Check if it's a set-http-config command
+                if command.lower().startswith('set-http-config'):
+                    import logging
+                    from .command_parsing import parse_set_http_config_command
+                    from adoc_migration_toolkit.shared import globals as shared_globals
+                    
+                    config = parse_set_http_config_command(command)
+                    if config is not None:
+                        # Show current config
+                        current = shared_globals.HTTP_CONFIG.copy()
+                        print("Current HTTP config:")
+                        print(f"  Timeout: {current['timeout']}s")
+                        print(f"  Retry:   {current['retry']}")
+                        print(f"  Proxy:   {current['proxy']}")
+                        # Apply changes
+                        changed = False
+                        for k in ['timeout', 'retry', 'proxy']:
+                            if config[k] is not None:
+                                shared_globals.HTTP_CONFIG[k] = config[k]
+                                changed = True
+                        if changed:
+                            print("\n✅ HTTP config updated.")
+                        else:
+                            print("\n(No changes made)")
+                        # Show new config
+                        new = shared_globals.HTTP_CONFIG.copy()
+                        print("New HTTP config:")
+                        print(f"  Timeout: {new['timeout']}s")
+                        print(f"  Retry:   {new['retry']}")
+                        print(f"  Proxy:   {new['proxy']}")
+                    continue
+
+                # Check if it's a show-config command
+                if command.lower().startswith('show-config'):
+                    import logging
+                    from .command_parsing import parse_show_config_command
+                    from adoc_migration_toolkit.shared import globals as shared_globals
+                    
+                    if parse_show_config_command(command):
+                        print("\n" + "="*60)
+                        print("🔧 CURRENT CONFIGURATION")
+                        print("="*60)
+                        
+                        # HTTP Configuration
+                        print(f"\n🌐 HTTP CONFIGURATION:")
+                        http_config = shared_globals.HTTP_CONFIG.copy()
+                        print(f"  Timeout: {http_config['timeout']} seconds")
+                        print(f"  Retry:   {http_config['retry']} attempts")
+                        print(f"  Proxy:   {http_config['proxy'] or 'None'}")
+                        
+                        # Log Level
+                        print(f"\n📝 LOGGING CONFIGURATION:")
+                        current_level = logging.getLevelName(logging.getLogger().getEffectiveLevel())
+                        print(f"  Log Level: {current_level}")
+                        
+                        # Environment Configuration
+                        print(f"\n🏢 ENVIRONMENT CONFIGURATION:")
+                        
+                        # Host configuration
+                        host = os.getenv('AD_HOST')
+                        if host:
+                            print(f"  Host Template: {host}")
+                            if "${tenant}" in host:
+                                print(f"  Host Type: Dynamic (uses tenant substitution)")
+                            else:
+                                print(f"  Host Type: Static")
+                        else:
+                            print(f"  Host: Not set in environment")
+                        
+                        # Source tenant and credentials
+                        source_tenant = os.getenv('AD_SOURCE_TENANT')
+                        source_access_key = os.getenv('AD_SOURCE_ACCESS_KEY')
+                        source_secret_key = os.getenv('AD_SOURCE_SECRET_KEY')
+                        
+                        if source_tenant:
+                            print(f"  Source Tenant: {source_tenant}")
+                        else:
+                            print(f"  Source Tenant: Not set")
+                            
+                        if source_access_key:
+                            masked_key = source_access_key[:8] + "..." if len(source_access_key) > 8 else source_access_key
+                            print(f"  Source Access Key: {masked_key}")
+                        else:
+                            print(f"  Source Access Key: Not set")
+                            
+                        if source_secret_key:
+                            masked_secret = source_secret_key[:8] + "..." if len(source_secret_key) > 8 else source_secret_key
+                            print(f"  Source Secret Key: {masked_secret}")
+                        else:
+                            print(f"  Source Secret Key: Not set")
+                        
+                        # Target tenant and credentials
+                        target_tenant = os.getenv('AD_TARGET_TENANT')
+                        target_access_key = os.getenv('AD_TARGET_ACCESS_KEY')
+                        target_secret_key = os.getenv('AD_TARGET_SECRET_KEY')
+                        
+                        if target_tenant:
+                            print(f"  Target Tenant: {target_tenant}")
+                        else:
+                            print(f"  Target Tenant: Not set")
+                            
+                        if target_access_key:
+                            masked_target_key = target_access_key[:8] + "..." if len(target_access_key) > 8 else target_access_key
+                            print(f"  Target Access Key: {masked_target_key}")
+                        else:
+                            print(f"  Target Access Key: Not set")
+                            
+                        if target_secret_key:
+                            masked_target_secret = target_secret_key[:8] + "..." if len(target_secret_key) > 8 else target_secret_key
+                            print(f"  Target Secret Key: {masked_target_secret}")
+                        else:
+                            print(f"  Target Secret Key: Not set")
+                        
+                        # Output directory
+                        print(f"\n📁 OUTPUT CONFIGURATION:")
+                        if shared_globals.GLOBAL_OUTPUT_DIR:
+                            print(f"  Output Directory: {shared_globals.GLOBAL_OUTPUT_DIR}")
+                        else:
+                            print(f"  Output Directory: Not set (will use default)")
+                        
+                        print("\n" + "="*60)
+                    continue
+
                 # Check if it's a vcs-config command
                 if command.lower().startswith('vcs-config'):
                     from ..vcs.operations import execute_vcs_config
@@ -1252,7 +1563,7 @@ def run_interactive(args):
                 
                 # Parse the command for GET/PUT requests
                 from .command_parsing import parse_api_command
-                method, endpoint, json_payload = parse_api_command(command)
+                method, endpoint, json_payload, use_target_auth, use_target_tenant = parse_api_command(command)
                 
                 if method is None:
                     continue
@@ -1266,13 +1577,26 @@ def run_interactive(args):
                     continue
                 
                 # Make the API call
-                print(f"\nMaking {method} request to: {endpoint}")
+                auth_info = " (target environment)" if use_target_auth else " (source environment)"
+                print(f"\nMaking {method} request to: {endpoint}{auth_info}")
                 print("-" * 60)
+                
+                # Add debug information for target environment
+                if use_target_auth:
+                    print(f"🔍 Using target authentication:")
+                    print(f"   Target Access Key: {client.target_access_key[:8]}..." if client.target_access_key else "   Target Access Key: Not configured")
+                    print(f"   Target Secret Key: {client.target_secret_key[:8]}..." if client.target_secret_key else "   Target Secret Key: Not configured")
+                    print(f"   Target Tenant: {client.target_tenant}" if client.target_tenant else "   Target Tenant: Not configured")
+                    if client.host_template:
+                        target_host = client.host_template.replace("${tenant}", client.target_tenant or "UNKNOWN")
+                        print(f"   Target Host: {target_host}")
                 
                 response_data = client.make_api_call(
                     endpoint=endpoint,
                     method=method,
-                    json_payload=json_payload
+                    json_payload=json_payload,
+                    use_target_auth=use_target_auth,
+                    use_target_tenant=use_target_tenant
                 )
                 
                 # Display formatted JSON response

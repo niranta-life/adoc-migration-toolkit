@@ -1268,7 +1268,8 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
             
             # Show target environment information
             print(f"\n🌍 TARGET ENVIRONMENT INFORMATION:")
-            print(f"  Host: {client.host}")
+            target_host = client._build_host_url(use_target_tenant=True)
+            print(f"  Host: {target_host}")
             if hasattr(client, 'target_tenant') and client.target_tenant:
                 print(f"  Target Tenant: {client.target_tenant}")
             else:
