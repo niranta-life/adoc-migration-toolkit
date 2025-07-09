@@ -1257,6 +1257,9 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                 if 'tags' in asset_wrapper and asset_wrapper['tags']:
                     for tag in asset_wrapper['tags']:
                         if 'name' in tag:
+                            # Check if autoTagged is true and skip if so
+                            if tag.get('autoTagged', False):
+                                continue
                             tags.append(tag['name'])
                 
                 tags_str = ':'.join(tags) if tags else ''
@@ -1516,6 +1519,9 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                                 if 'tags' in asset_wrapper and asset_wrapper['tags']:
                                     for tag in asset_wrapper['tags']:
                                         if 'name' in tag:
+                                            # Check if autoTagged is true and skip if so
+                                            if tag.get('autoTagged', False):
+                                                continue
                                             tags.append(tag['name'])
                                 
                                 tags_str = ':'.join(tags) if tags else ''
@@ -1561,6 +1567,9 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                                                 if 'tags' in asset_wrapper and asset_wrapper['tags']:
                                                     for tag in asset_wrapper['tags']:
                                                         if 'name' in tag:
+                                                            # Check if autoTagged is true and skip if so
+                                                            if tag.get('autoTagged', False):
+                                                                continue
                                                             tags.append(tag['name'])
                                                 
                                                 tags_str = ':'.join(tags) if tags else ''

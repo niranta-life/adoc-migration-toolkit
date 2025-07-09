@@ -822,6 +822,75 @@ class TestExecuteAssetListExport:
         assert rows[2] == ['asset-2', '2', 'asset-2', 'tag3']
         assert rows[3] == ['asset-3', '3', 'asset-3', '']
     
+    def test_execute_asset_list_export_with_autotagged_filtering(self, temp_dir, mock_client, mock_logger):
+        """Test asset list export with autoTagged tag filtering."""
+        # Mock count response
+        count_response = {
+            "meta": {
+                "count": 3
+            }
+        }
+        
+        # Mock page responses with autoTagged tags
+        page_response = {
+            "data": {
+                "assets": [
+                    {
+                        "asset": {"id": 1, "uid": "asset-1"},
+                        "tags": [
+                            {"name": "manual-tag1"},
+                            {"name": "auto-tag1", "autoTagged": True},
+                            {"name": "manual-tag2"},
+                            {"name": "auto-tag2", "autoTagged": True}
+                        ]
+                    },
+                    {
+                        "asset": {"id": 2, "uid": "asset-2"},
+                        "tags": [
+                            {"name": "manual-tag3"},
+                            {"name": "auto-tag3", "autoTagged": True}
+                        ]
+                    },
+                    {
+                        "asset": {"id": 3, "uid": "asset-3"},
+                        "tags": [
+                            {"name": "auto-tag4", "autoTagged": True},
+                            {"name": "auto-tag5", "autoTagged": True}
+                        ]
+                    }
+                ]
+            }
+        }
+        
+        mock_client.make_api_call.side_effect = [
+            count_response,  # Count call
+            page_response    # Page call
+        ]
+
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            execute_asset_list_export(
+                client=mock_client,
+                logger=mock_logger,
+                verbose_mode=True
+            )
+
+        # Verify output file was created
+        output_file = temp_dir / "asset-export" / "asset-all-source-export.csv"
+        assert output_file.exists()
+        
+        # Verify CSV content
+        with open(output_file, 'r') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            
+        assert rows[0] == ['source_uid', 'source_id', 'target_uid', 'tags']
+        assert len(rows) == 4  # Header + 3 data rows
+        
+        # Verify that autoTagged tags are filtered out
+        assert rows[1] == ['asset-1', '1', 'asset-1', 'manual-tag1:manual-tag2']  # Only manual tags
+        assert rows[2] == ['asset-2', '2', 'asset-2', 'manual-tag3']  # Only manual tag
+        assert rows[3] == ['asset-3', '3', 'asset-3', '']  # No manual tags, so empty
+    
     def test_execute_asset_list_export_no_assets(self, temp_dir, mock_client, mock_logger):
         """Test asset list export with no assets."""
         # Mock count response with 0 assets
@@ -1009,6 +1078,73 @@ class TestExecuteAssetListExport:
         # Verify first row has correct format
         assert rows[1] == ['asset-1', '1', 'asset-1', 'tag1:tag2']
         assert rows[2] == ['asset-2', '2', 'asset-2', 'tag3']
+    
+    def test_execute_asset_list_export_parallel_with_autotagged_filtering(self, temp_dir, mock_client, mock_logger):
+        """Test parallel asset list export with autoTagged tag filtering."""
+        # Mock count response
+        count_response = {
+            "meta": {
+                "count": 6
+            }
+        }
+        
+        # Mock page responses with autoTagged tags
+        page_response = {
+            "data": {
+                "assets": [
+                    {
+                        "asset": {"id": 1, "uid": "asset-1"},
+                        "tags": [
+                            {"name": "manual-tag1"},
+                            {"name": "auto-tag1", "autoTagged": True},
+                            {"name": "manual-tag2"}
+                        ]
+                    },
+                    {
+                        "asset": {"id": 2, "uid": "asset-2"},
+                        "tags": [
+                            {"name": "auto-tag2", "autoTagged": True},
+                            {"name": "manual-tag3"}
+                        ]
+                    }
+                ]
+            }
+        }
+        
+        # Mock multiple page calls for parallel processing
+        mock_client.make_api_call.side_effect = [
+            count_response,  # Count call
+            page_response,   # Page 0
+            page_response,   # Page 1
+            page_response    # Page 2
+        ]
+        
+        # Mock the client constructor to return the same mock client
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir), \
+             patch.object(type(mock_client), '__init__', return_value=None), \
+             patch.object(type(mock_client), '__new__', return_value=mock_client):
+            
+            execute_asset_list_export_parallel(
+                client=mock_client,
+                logger=mock_logger,
+                verbose_mode=False
+            )
+        
+        # Verify output file was created
+        output_file = temp_dir / "asset-export" / "asset-all-source-export.csv"
+        assert output_file.exists()
+        
+        # Verify CSV content
+        with open(output_file, 'r') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            
+        assert rows[0] == ['source_uid', 'source_id', 'target_uid', 'tags']
+        assert len(rows) > 1  # Header + data rows
+        
+        # Verify that autoTagged tags are filtered out in parallel mode too
+        assert rows[1] == ['asset-1', '1', 'asset-1', 'manual-tag1:manual-tag2']  # Only manual tags
+        assert rows[2] == ['asset-2', '2', 'asset-2', 'manual-tag3']  # Only manual tag
 
 
 class TestAssetOperationsIntegration:
