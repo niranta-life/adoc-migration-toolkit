@@ -1612,6 +1612,43 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     aggregated_stats['files_failed'] += 1
                     continue
                 
+                # Validate that it's a valid ZIP file
+                try:
+                    import zipfile
+                    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+                        # Test if the ZIP file can be read
+                        file_list = zip_ref.namelist()
+                        if not file_list:
+                            error_msg = f"ZIP file is empty: {zip_file}"
+                            if not quiet_mode:
+                                print(f"❌ {error_msg}")
+                            logger.error(error_msg)
+                            failed_imports += 1
+                            aggregated_stats['files_failed'] += 1
+                            continue
+                        
+                        if verbose_mode:
+                            print(f"  📦 ZIP file validation successful:")
+                            print(f"    Files in ZIP: {len(file_list)}")
+                            print(f"    Sample files: {file_list[:3]}")
+                            
+                except zipfile.BadZipFile:
+                    error_msg = f"Invalid ZIP file: {zip_file}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_imports += 1
+                    aggregated_stats['files_failed'] += 1
+                    continue
+                except Exception as e:
+                    error_msg = f"Error validating ZIP file {zip_file}: {e}"
+                    if not quiet_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_imports += 1
+                    aggregated_stats['files_failed'] += 1
+                    continue
+                
                 # Prepare the multipart form data
                 # Read the file content first, then prepare the files dictionary
                 with open(zip_file, 'rb') as f:
@@ -1625,6 +1662,13 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                         'application/zip'            # content type
                     )
                 }
+                
+                if verbose_mode:
+                    print(f"  📁 File Details:")
+                    print(f"    File size: {len(file_content)} bytes ({len(file_content) / 1024:.2f} KB)")
+                    print(f"    File name: {os.path.basename(zip_file)}")
+                    print(f"    Content type: application/zip")
+                    print(f"    Form field name: policy-config-file")
                 
                 if verbose_mode:
                     print(f"\nPOST Request Headers:")
@@ -1647,12 +1691,14 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     print(f"  Content-Type: multipart/form-data")
                     print(f"  File: {zip_file}")
                 
+                # Add longer timeout for file uploads
                 upload_response = client.make_api_call(
                     endpoint="/catalog-server/api/rules/import/policy-definitions/upload-config",
                     method='POST',
                     files=files,
                     use_target_auth=True,
-                    use_target_tenant=True
+                    use_target_tenant=True,
+                    timeout=60  # Increase timeout for file uploads
                 )
                 
                 if not upload_response:
@@ -1694,6 +1740,17 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                 error_msg = f"Failed to upload {zip_file}: {e}"
                 if not quiet_mode:
                     print(f"❌ {error_msg}")
+                    # Add more detailed error information
+                    if "500" in str(e):
+                        print(f"💡 This appears to be a server error (500). Possible causes:")
+                        print(f"   - File format issue (ensure it's a valid ZIP file)")
+                        print(f"   - File size too large")
+                        print(f"   - Server temporarily unavailable")
+                        print(f"   - Authentication or permission issues")
+                    elif "timeout" in str(e).lower():
+                        print(f"💡 Request timed out. Try increasing timeout or check network connection.")
+                    elif "connection" in str(e).lower():
+                        print(f"💡 Connection error. Check network connectivity and server availability.")
                 logger.error(error_msg)
                 failed_imports += 1
                 aggregated_stats['files_failed'] += 1

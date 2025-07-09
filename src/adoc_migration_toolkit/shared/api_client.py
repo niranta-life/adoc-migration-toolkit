@@ -333,12 +333,12 @@ class AcceldataAPIClient:
 
     def _apply_http_config(self):
         """Apply global HTTP_CONFIG for timeout, retry, and proxy."""
-        # Retry logic
+        # Retry logic - exclude 500 errors for file uploads to avoid retrying server errors
         retry_count = HTTP_CONFIG.get('retry', 3)
         retry_strategy = Retry(
             total=retry_count,
             backoff_factor=0.5,
-            status_forcelist=[429, 500, 502, 503, 504],
+            status_forcelist=[429, 502, 503, 504],  # Removed 500 to avoid retrying server errors
             allowed_methods=["HEAD", "GET", "OPTIONS", "POST", "PUT"]
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -403,22 +403,63 @@ class AcceldataAPIClient:
         url = f"{host_url}{endpoint}"
         
         # Setup headers for this request
-        headers = self._build_request_headers(access_key, secret_key, tenant)
+        headers = self._build_request_headers(access_key, secret_key, tenant, files)
         
         # Log request details
         self._log_request_details(method, url, timeout, use_target_auth, use_target_tenant, files)
         
-        try:
-            response = self._execute_request(method, url, headers, json_payload, files, timeout)
-            response.raise_for_status()
+        # For file uploads, use a session without retries to avoid retrying server errors
+        if files:
+            # Create a temporary session without retries for file uploads
+            temp_session = requests.Session()
+            temp_session.headers.update(headers)
             
-            return self._process_response(response, endpoint, method, return_binary)
+            try:
+                if method == 'POST':
+                    response = temp_session.post(url, files=files, timeout=timeout)
+                elif method == 'PUT':
+                    response = temp_session.put(url, files=files, timeout=timeout)
+                else:
+                    raise ValueError(f"File uploads only support POST and PUT methods, got {method}")
+                
+                response.raise_for_status()
+                return self._process_response(response, endpoint, method, return_binary)
+                
+            except Timeout:
+                self.logger.error(f"Request timed out for {method} {endpoint}")
+                raise
+            except RequestException as e:
+                self.logger.info(e)
+                self._log_error_details(e, method, endpoint)
+                
+                # Add specific handling for file upload errors
+                if "500" in str(e):
+                    self.logger.error(f"Server error (500) during file upload to {endpoint}")
+                    self.logger.error("This is likely a server-side issue with the file format or server configuration")
+                
+                raise
+            finally:
+                temp_session.close()
+        else:
+            # Use normal session with retries for non-file requests
+            try:
+                response = self._execute_request(method, url, headers, json_payload, files, timeout)
+                response.raise_for_status()
+                
+                return self._process_response(response, endpoint, method, return_binary)
             
         except Timeout:
             self.logger.error(f"Request timed out for {method} {endpoint}")
             raise
         except RequestException as e:
+            self.logger.info(e)
             self._log_error_details(e, method, endpoint)
+            
+            # Add specific handling for file upload errors
+            if files and "500" in str(e):
+                self.logger.error(f"Server error (500) during file upload to {endpoint}")
+                self.logger.error("This is likely a server-side issue with the file format or server configuration")
+            
             raise
     
     def _get_auth_credentials(self, use_target_auth: bool) -> tuple[str, str]:
@@ -467,7 +508,7 @@ class AcceldataAPIClient:
         
         return tenant
     
-    def _build_request_headers(self, access_key: str, secret_key: str, tenant: str) -> Dict[str, str]:
+    def _build_request_headers(self, access_key: str, secret_key: str, tenant: str, files: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         """
         Build request headers for API calls.
         
@@ -475,19 +516,26 @@ class AcceldataAPIClient:
             access_key: Authentication access key
             secret_key: Authentication secret key
             tenant: Tenant identifier
+            files: Files for multipart upload (if provided, Content-Type will not be set)
             
         Returns:
             Dictionary containing request headers
         """
-        return {
+        headers = {
             'Accept': 'application/json',
-            'Content-Type': 'application/json',
             'accessKey': access_key,
             'secretKey': secret_key,
             'X-Tenant': tenant,
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
             'x-domain-ids': ''
         }
+        
+        # Only set Content-Type for non-multipart requests
+        # For multipart uploads, let requests library set the correct boundary
+        if not files:
+            headers['Content-Type'] = 'application/json'
+        
+        return headers
     
     def _log_request_details(self, method: str, url: str, timeout: int, 
                            use_target_auth: bool, use_target_tenant: bool, 
