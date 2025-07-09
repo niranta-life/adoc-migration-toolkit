@@ -1058,7 +1058,7 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         logger.error(error_msg)
 
 
-def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
     """Execute the asset-list-export command.
     
     Args:
@@ -1066,16 +1066,33 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        use_target: Whether to use target environment instead of source
+        page_size: Number of assets per page (default: 500)
     """
     try:
-        # Determine output file path
-        if globals.GLOBAL_OUTPUT_DIR:
-            output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-export.csv"
+        # Determine output file path based on environment
+        if use_target:
+            if globals.GLOBAL_OUTPUT_DIR:
+                output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-target-export.csv"
+            else:
+                output_file = Path("asset-all-target-export.csv")
+            env_type = "TARGET"
         else:
-            output_file = Path("asset-all-export.csv")
+            if globals.GLOBAL_OUTPUT_DIR:
+                output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-source-export.csv"
+            else:
+                output_file = Path("asset-all-source-export.csv")
+            env_type = "SOURCE"
         
         if not quiet_mode:
-            print(f"\nExporting all assets from ADOC environment")
+            print(f"\nExporting all assets from ADOC {env_type} environment")
+            print(f"Environment: {env_type}")
+            if use_target:
+                tenant = getattr(client, 'target_tenant', getattr(client, 'tenant', 'N/A'))
+            else:
+                tenant = getattr(client, 'tenant', 'N/A')
+            print(f"Host: {client._build_host_url(use_target_tenant=use_target)}")
+            print(f"Tenant: {tenant}")
             print(f"Output will be written to: {output_file}")
             if globals.GLOBAL_OUTPUT_DIR:
                 print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
@@ -1089,7 +1106,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true")
+            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -1097,8 +1114,10 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true",
-            method='GET'
+            endpoint="/catalog-server/api/assets/discover?size=0&page=0&parents=true",
+            method='GET',
+            use_target_auth=use_target,
+            use_target_tenant=use_target
         )
         
         if verbose_mode:
@@ -1113,7 +1132,6 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
             return
         
         total_count = count_response['meta']['count']
-        page_size = 500  # Default page size
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
         
         if not quiet_mode:
@@ -1134,7 +1152,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
             try:
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true")
+                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true")
                     print(f"  Method: GET")
                     print(f"  Content-Type: application/json")
                     print(f"  Authorization: Bearer [REDACTED]")
@@ -1142,8 +1160,10 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                         print(f"  X-Tenant: {client.tenant}")
                 
                 page_response = client.make_api_call(
-                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true",
-                    method='GET'
+                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true",
+                    method='GET',
+                    use_target_auth=use_target,
+                    use_target_tenant=use_target
                 )
                 
                 if verbose_mode:
@@ -1279,6 +1299,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
             print("\n" + "="*80)
             print("ASSET LIST EXPORT COMPLETED")
             print("="*80)
+            print(f"Environment: {env_type}")
             print(f"Output file: {output_file}")
             print(f"Total assets exported: {len(all_assets)}")
             print(f"Successful pages: {successful_pages}")
@@ -1299,7 +1320,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         logger.error(error_msg)
 
 
-def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
     """Execute the asset-list-export command with parallel processing.
     
     Args:
@@ -1307,16 +1328,33 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        use_target: Whether to use target environment instead of source
+        page_size: Number of assets per page (default: 500)
     """
     try:
-        # Determine output file path
-        if globals.GLOBAL_OUTPUT_DIR:
-            output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-export.csv"
+        # Determine output file path based on environment
+        if use_target:
+            if globals.GLOBAL_OUTPUT_DIR:
+                output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-target-export.csv"
+            else:
+                output_file = Path("asset-all-target-export.csv")
+            env_type = "TARGET"
         else:
-            output_file = Path("asset-all-export.csv")
+            if globals.GLOBAL_OUTPUT_DIR:
+                output_file = globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset-all-source-export.csv"
+            else:
+                output_file = Path("asset-all-source-export.csv")
+            env_type = "SOURCE"
         
         if not quiet_mode:
-            print(f"\nExporting all assets from ADOC environment (Parallel Mode)")
+            print(f"\nExporting all assets from ADOC {env_type} environment (Parallel Mode)")
+            print(f"Environment: {env_type}")
+            if use_target:
+                tenant = getattr(client, 'target_tenant', getattr(client, 'tenant', 'N/A'))
+            else:
+                tenant = getattr(client, 'tenant', 'N/A')
+            print(f"Host: {client._build_host_url(use_target_tenant=use_target)}")
+            print(f"Tenant: {tenant}")
             print(f"Output will be written to: {output_file}")
             if globals.GLOBAL_OUTPUT_DIR:
                 print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
@@ -1330,7 +1368,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true")
+            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -1338,8 +1376,10 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/assets/discover?size=0&page=0&profiled_assets=true&parents=true",
-            method='GET'
+            endpoint="/catalog-server/api/assets/discover?size=0&page=0&parents=true",
+            method='GET',
+            use_target_auth=use_target,
+            use_target_tenant=use_target
         )
         
         if verbose_mode:
@@ -1354,7 +1394,6 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
             return
         
         total_count = count_response['meta']['count']
-        page_size = 500  # Default page size
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
         
         if not quiet_mode:
@@ -1400,16 +1439,22 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                 secret_key=client.secret_key,
                 tenant=getattr(client, 'tenant', None)
             )
+            # Copy target credentials to thread client
+            thread_client.target_access_key = getattr(client, 'target_access_key', None)
+            thread_client.target_secret_key = getattr(client, 'target_secret_key', None)
+            thread_client.target_tenant = getattr(client, 'target_tenant', None)
+            # Copy host template for tenant substitution
+            thread_client.host_template = getattr(client, 'host_template', None)
             
             # Create temporary file for this thread
             temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
             temp_files.append(temp_file.name)
             
-            # Create progress bar for this thread
+            # Create progress bar for this thread with green color
             progress_bar = create_progress_bar(
                 total=end_page - start_page,
                 desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
-                unit="pages",
+                unit="",
                 disable=quiet_mode,
                 position=thread_id,
                 leave=False
@@ -1426,7 +1471,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Processing page {page + 1}")
                         print(f"GET Request Headers:")
-                        print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true")
+                        print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true")
                         print(f"  Method: GET")
                         print(f"  Content-Type: application/json")
                         print(f"  Authorization: Bearer [REDACTED]")
@@ -1434,8 +1479,10 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                             print(f"  X-Tenant: {thread_client.tenant}")
                     
                     page_response = thread_client.make_api_call(
-                        endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&profiled_assets=true&parents=true",
-                        method='GET'
+                        endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true",
+                        method='GET',
+                        use_target_auth=use_target,
+                        use_target_tenant=use_target
                     )
                     
                     if verbose_mode:
@@ -1476,14 +1523,12 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                                 # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
                                 writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
                         
-                        if not quiet_mode:
-                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
-                            print(f"{thread_name} - ✅ Page {page + 1}: Retrieved {len(page_assets)} assets")
-                        else:
-                            print(f"✅ Page {page + 1}: {len(page_assets)} assets")
-                        
-                        successful_pages += 1
                         total_assets += len(page_assets)
+                        successful_pages += 1
+                        
+                        # Progress is shown via tqdm progress bar, no need for additional prints
+                        pass
+                    
                     else:
                         # Try alternative response structures
                         assets_found = False
@@ -1523,36 +1568,34 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                                                 # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
                                                 writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
                                         
-                                        if not quiet_mode:
-                                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
-                                            print(f"{thread_name} - ✅ Page {page + 1}: Found {len(page_assets)} assets in 'data.{location}'")
-                                        else:
-                                            print(f"✅ Page {page + 1}: {len(page_assets)} assets")
-                                        
-                                        successful_pages += 1
                                         total_assets += len(page_assets)
+                                        successful_pages += 1
                                         assets_found = True
+                                        
+                                        # Progress is shown via tqdm progress bar, no need for additional prints
+                                        pass
                                         break
                         
                         if not assets_found:
                             error_msg = f"Invalid response format for page {page + 1} - no assets found"
                             if not quiet_mode:
                                 thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
-                                print(f"\n{thread_name} - ❌ {error_msg}")
-                            logger.error(f"Thread {thread_id}: {error_msg}")
+                                print(f"❌ {thread_name} - {error_msg}")
+                            logger.error(error_msg)
                             failed_pages += 1
                     
                 except Exception as e:
                     error_msg = f"Failed to retrieve page {page + 1}: {e}"
                     if not quiet_mode:
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
-                        print(f"\n{thread_name} - ❌ {error_msg}")
-                    logger.error(f"Thread {thread_id}: {error_msg}")
+                        print(f"❌ {thread_name} - {error_msg}")
+                    logger.error(error_msg)
                     failed_pages += 1
                 
                 # Update progress bar
                 progress_bar.update(1)
             
+            # Close progress bar
             progress_bar.close()
             
             return {
@@ -1563,54 +1606,67 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                 'temp_file': temp_file.name
             }
         
-        # Start threads
-        threads = []
-        for i in range(num_threads):
-            start_page = i * pages_per_thread
-            end_page = min(start_page + pages_per_thread, total_pages)
+        # Execute parallel processing
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            # Submit tasks for each thread
+            futures = []
+            for thread_id in range(num_threads):
+                start_page = thread_id * pages_per_thread
+                end_page = min(start_page + pages_per_thread, total_pages)
+                
+                if start_page < total_pages:  # Only submit if there are pages to process
+                    future = executor.submit(process_page_chunk, thread_id, start_page, end_page)
+                    futures.append(future)
             
-            thread = threading.Thread(
-                target=lambda tid=i, start=start_page, end=end_page: thread_results.append(
-                    process_page_chunk(tid, start, end)
-                )
-            )
-            threads.append(thread)
-            thread.start()
+            # Collect results
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    thread_results.append(result)
+                except Exception as e:
+                    logger.error(f"Thread failed with exception: {e}")
         
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-        
-        # Merge temporary files
+        # Step 3: Combine all temporary files into final output
         if not quiet_mode:
-            print("\nMerging temporary files...")
+            print(f"\nCombining {len(temp_files)} temporary files into final output...")
         
         # Create output directory if needed
-        output_path = Path(output_file)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # Read all rows from temporary files
-        all_rows = []
+        # Combine all temporary files
+        with open(output_file, 'w', newline='', encoding='utf-8') as output_f:
+            writer = csv.writer(output_f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            
+            # Combine all temporary files
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    with open(temp_file, 'r', newline='', encoding='utf-8') as temp_f:
+                        reader = csv.reader(temp_f)
+                        for row in reader:
+                            writer.writerow(row)
+        
+        # Clean up temporary files
         for temp_file in temp_files:
             try:
-                with open(temp_file, 'r', newline='', encoding='utf-8') as temp_csv:
-                    reader = csv.reader(temp_csv)
-                    for row in reader:
-                        if len(row) >= 4:  # Ensure we have all required columns
-                            all_rows.append(row)
+                os.unlink(temp_file)
             except Exception as e:
-                logger.error(f"Error reading temporary file {temp_file}: {e}")
-            finally:
-                # Clean up temporary file
-                try:
-                    os.unlink(temp_file)
-                except Exception as e:
-                    logger.warning(f"Could not delete temporary file {temp_file}: {e}")
+                logger.warning(f"Failed to delete temporary file {temp_file}: {e}")
         
-        # Sort rows: first by source_uid, then by source_id
+        # Step 4: Sort the CSV file by source_uid, then source_id
         if not quiet_mode:
             print("Sorting CSV file by source_uid, then source_id...")
         
+        # Read all rows
+        rows = []
+        with open(output_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            rows = list(reader)
+        
+        # Sort rows: first by source_uid, then by source_id
         def sort_key(row):
             source_uid = row[0] if len(row) > 0 else ''
             source_id = row[1] if len(row) > 1 else ''
@@ -1621,58 +1677,47 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                 source_id_int = 0
             return (source_uid, source_id_int)
         
-        all_rows.sort(key=sort_key)
+        rows.sort(key=sort_key)
         
-        # Write final output with header
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        # Write sorted data back to file
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-            
-            # Write header: source_uid, source_id, target_uid, tags
-            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
-            
-            # Write sorted data
-            writer.writerows(all_rows)
+            writer.writerow(header)
+            writer.writerows(rows)
         
-        # Print statistics
+        # Step 5: Calculate total statistics
+        total_successful_pages = sum(result['successful_pages'] for result in thread_results)
+        total_failed_pages = sum(result['failed_pages'] for result in thread_results)
+        total_assets_exported = sum(result['total_assets'] for result in thread_results)
+        
+        # Step 6: Print statistics
         if not quiet_mode:
             print("\n" + "="*80)
             print("ASSET LIST EXPORT COMPLETED (PARALLEL MODE)")
             print("="*80)
+            print(f"Environment: {env_type}")
             print(f"Output file: {output_file}")
-            print(f"Total assets exported: {len(all_rows)}")
+            print(f"Total assets exported: {total_assets_exported}")
+            print(f"Successful pages: {total_successful_pages}")
+            print(f"Failed pages: {total_failed_pages}")
+            print(f"Total pages processed: {total_pages}")
             print(f"Threads used: {num_threads}")
             
-            total_successful_pages = 0
-            total_failed_pages = 0
-            total_assets_exported = 0
-            
+            # Thread-specific statistics
+            print(f"\nThread Statistics:")
             for result in thread_results:
                 thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
-                print(f"{thread_name}: {result['successful_pages']} successful pages, {result['failed_pages']} failed pages, {result['total_assets']} assets")
-                total_successful_pages += result['successful_pages']
-                total_failed_pages += result['failed_pages']
-                total_assets_exported += result['total_assets']
-            
-            print(f"\nTotal successful pages: {total_successful_pages}")
-            print(f"Total failed pages: {total_failed_pages}")
-            print(f"Total pages processed: {total_pages}")
-            print(f"Total assets exported: {total_assets_exported}")
-            
-            # Calculate success rate
-            if total_pages > 0:
-                success_rate = (total_successful_pages / total_pages) * 100
-                print(f"Success rate: {success_rate:.1f}%")
+                print(f"  {thread_name}: {result['successful_pages']} successful, {result['failed_pages']} failed, {result['total_assets']} assets")
             
             print("="*80)
         else:
-            print(f"✅ Asset list export completed: {len(all_rows)} assets exported to {output_file}")
+            print(f"✅ Asset list export completed: {total_assets_exported} assets exported to {output_file}")
         
     except Exception as e:
-        error_msg = f"Error in parallel asset-list-export: {e}"
+        error_msg = f"Error in asset-list-export (parallel): {e}"
         if not quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
-        raise
 
 
 def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
@@ -1759,6 +1804,12 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                 secret_key=client.secret_key,
                 tenant=getattr(client, 'tenant', None)
             )
+            # Copy target credentials to thread client
+            thread_client.target_access_key = getattr(client, 'target_access_key', None)
+            thread_client.target_secret_key = getattr(client, 'target_secret_key', None)
+            thread_client.target_tenant = getattr(client, 'target_tenant', None)
+            # Copy host template for tenant substitution
+            thread_client.host_template = getattr(client, 'host_template', None)
             
             # Get assets for this thread
             thread_env_mappings = env_mappings[start_index:end_index]
@@ -2335,6 +2386,12 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
             secret_key=client.secret_key,
             tenant=getattr(client, 'tenant', None)
         )
+        # Copy target credentials to thread client
+        thread_client.target_access_key = getattr(client, 'target_access_key', None)
+        thread_client.target_secret_key = getattr(client, 'target_secret_key', None)
+        thread_client.target_tenant = getattr(client, 'target_tenant', None)
+        # Copy host template for tenant substitution
+        thread_client.host_template = getattr(client, 'host_template', None)
         
         # Get assets for this thread
         thread_assets = assets_with_tags[start_index:end_index]
@@ -3642,3 +3699,223 @@ def print_results(existing_uids: int, missing_uids: int, failed_checks: int, mis
             # Add warning even in quiet mode
             print(f"\n🚨 WARNING: {missing_uids} missing UIDs will cause policy import failures!")
             print(f"💡 Run without --quiet for detailed recommendations.")
+
+
+def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbose_mode: bool, logger: logging.Logger):
+    """Execute the transform-and-merge command.
+    
+    Args:
+        string_transforms: Dictionary of string transformations {source: target}
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        logger: Logger instance
+    """
+    try:
+        # Determine input and output directories
+        if globals.GLOBAL_OUTPUT_DIR:
+            asset_export_dir = globals.GLOBAL_OUTPUT_DIR / "asset-export"
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+            
+            if not toolkit_dirs:
+                logger.error("No adoc-migration-toolkit directory found")
+                print("❌ No adoc-migration-toolkit directory found")
+                print("💡 Please run asset-list-export first to generate the required CSV files")
+                return
+            
+            toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+            latest_toolkit_dir = toolkit_dirs[0]
+            asset_export_dir = latest_toolkit_dir / "asset-export"
+        
+        # Define file paths
+        source_file = asset_export_dir / "asset-all-source-export.csv"
+        target_file = asset_export_dir / "asset-all-target-export.csv"
+        
+        # Create asset-import directory for output
+        asset_import_dir = asset_export_dir.parent / "asset-import"
+        asset_import_dir.mkdir(parents=True, exist_ok=True)
+        output_file = asset_import_dir / "asset-merged-all.csv"
+        
+        # Check if required files exist
+        if not source_file.exists():
+            logger.error(f"Source file not found: {source_file}")
+            print(f"❌ Source file not found: {source_file}")
+            print("💡 Please run 'asset-list-export' first to generate the source file")
+            return
+        
+        if not target_file.exists():
+            logger.error(f"Target file not found: {target_file}")
+            print(f"❌ Target file not found: {target_file}")
+            print("💡 Please run 'asset-list-export --target' first to generate the target file")
+            return
+        
+        if not quiet_mode:
+            print(f"📁 Asset Export Directory: {asset_export_dir}")
+            print(f"📄 Source file: {source_file}")
+            print(f"📄 Target file: {target_file}")
+            print(f"📄 Output file: {output_file}")
+            print(f"🔄 String transformations: {len(string_transforms)} transformations")
+            for source, target in string_transforms.items():
+                print(f"  '{source}' -> '{target}'")
+            print("="*80)
+        
+        # Read source file
+        source_data = []
+        with open(source_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                source_data.append(row)
+        
+        if verbose_mode:
+            print(f"📊 Read {len(source_data)} records from source file")
+            
+            # Show sample source records
+            if source_data:
+                print(f"📊 Sample source records:")
+                for i, row in enumerate(source_data[:3]):
+                    print(f"  {i+1}. target_uid: '{row['target_uid']}'")
+        
+        # Read target file
+        target_data = {}
+        with open(target_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Use source_uid as key for matching
+                target_data[row['source_uid']] = row
+        
+        if verbose_mode:
+            print(f"📊 Read {len(target_data)} records from target file")
+            
+            # Show sample target keys
+            if target_data:
+                print(f"📊 Sample target keys:")
+                target_keys = list(target_data.keys())
+                for i, key in enumerate(target_keys[:3]):
+                    print(f"  {i+1}. source_uid: '{key}'")
+        
+        # Create temporary source file with transformed target_uid
+        temp_source_file = asset_export_dir / "temp_source_transformed.csv"
+        transformed_count = 0
+        
+        with open(temp_source_file, 'w', newline='', encoding='utf-8') as f:
+            fieldnames = ['source_uid', 'source_id', 'target_uid', 'tags']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for source_row in source_data:
+                # Apply string transformations to target_uid (C -> T)
+                original_target_uid = source_row['target_uid']
+                transformed_target_uid = original_target_uid
+                
+                # Apply all string replacements
+                for source_str, target_str in string_transforms.items():
+                    if source_str in transformed_target_uid:
+                        transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
+                        transformed_count += 1
+                        if verbose_mode:
+                            print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")
+                            print(f"   Applied: '{source_str}' -> '{target_str}'")
+                
+                # Write transformed record to temporary file
+                temp_row = {
+                    'source_uid': source_row['source_uid'],  # A
+                    'source_id': source_row['source_id'],    # B
+                    'target_uid': transformed_target_uid,    # T (transformed C)
+                    'tags': source_row['tags']              # D
+                }
+                writer.writerow(temp_row)
+        
+        if verbose_mode:
+            print(f"📄 Created temporary source file: {temp_source_file}")
+            print(f"🔄 Applied {transformed_count} transformations")
+        
+        # Read temporary source file and target file for matching
+        merged_data = []
+        matched_count = 0
+        
+        with open(temp_source_file, 'r', newline='', encoding='utf-8') as f:
+            temp_reader = csv.DictReader(f)
+            for temp_row in temp_reader:
+                # T from temp source file
+                transformed_target_uid = temp_row['target_uid']
+                
+                if verbose_mode:
+                    print(f"🔍 Looking for match: '{transformed_target_uid}' in target data")
+                
+                # Look for exact match with E (source_uid) in target file
+                if transformed_target_uid in target_data:
+                    target_row = target_data[transformed_target_uid]
+                    matched_count += 1
+                    
+                    # Create merged record according to specification
+                    merged_row = {
+                        'source_id': temp_row['source_id'],      # B
+                        'source_uid': temp_row['source_uid'],    # A
+                        'target_id': target_row['source_id'],    # F
+                        'target_uid': target_row['source_uid'],  # E
+                        'tags': temp_row['tags']                 # D
+                    }
+                    merged_data.append(merged_row)
+                    
+                    if verbose_mode:
+                        print(f"✅ Matched: {temp_row['source_uid']} -> {transformed_target_uid}")
+                else:
+                    if verbose_mode:
+                        print(f"❌ No match found for transformed UID: {transformed_target_uid}")
+        
+        # Clean up temporary file
+        try:
+            temp_source_file.unlink()
+            if verbose_mode:
+                print(f"🗑️  Cleaned up temporary file: {temp_source_file}")
+        except Exception as e:
+            if verbose_mode:
+                print(f"⚠️  Could not delete temporary file {temp_source_file}: {e}")
+        
+        # Write merged data to output file
+        if merged_data:
+            with open(output_file, 'w', newline='', encoding='utf-8') as f:
+                fieldnames = ['source_id', 'source_uid', 'target_id', 'target_uid', 'tags']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(merged_data)
+            
+            if not quiet_mode:
+                print("\n" + "="*80)
+                print("TRANSFORM AND MERGE COMPLETED")
+                print("="*80)
+                print(f"Source file:          {source_file}")
+                print(f"Target file:          {target_file}")
+                print(f"Output file:          {output_file}")
+                print(f"Source records:       {len(source_data)}")
+                print(f"Target records:       {len(target_data)}")
+                print(f"Transformations applied: {transformed_count}")
+                print(f"Matched records:      {matched_count}")
+                print(f"Merged records:       {len(merged_data)}")
+                print(f"Match rate:           {(matched_count/len(source_data)*100):.1f}%")
+                print("="*80)
+                
+                if matched_count < len(source_data):
+                    print("⚠️  Some source records could not be matched with target records")
+                    print("💡 This may be due to:")
+                    print("   • String transformations not finding exact matches")
+                    print("   • Target environment missing some assets")
+                    print("   • Different asset UID formats between environments")
+                else:
+                    print("✅ All source records were successfully matched and merged!")
+        else:
+            logger.warning("No records were merged")
+            print("❌ No records were merged")
+            print("💡 Check that:")
+            print("   • String transformations are correct")
+            print("   • Target file contains matching UIDs")
+            print("   • Both files have the expected format")
+        
+    except Exception as e:
+        logger.error(f"Error executing transform-and-merge: {e}")
+        print(f"❌ Error executing transform-and-merge: {e}")
+        if verbose_mode:
+            import traceback
+            traceback.print_exc()

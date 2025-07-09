@@ -55,7 +55,7 @@ def create_interactive_command():
         \b
         # Asset Configuration Commands
         asset-config-export <csv_file> [--output-file file] [--quiet] [--verbose]
-        asset-list-export [--quiet] [--verbose] [--parallel]
+        asset-list-export [--quiet] [--verbose] [--parallel] [--target]
         
         \b
         # Policy Commands

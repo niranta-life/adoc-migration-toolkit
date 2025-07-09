@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 config/config.env
+demo/
+think
 
 # C extensions
 *.so

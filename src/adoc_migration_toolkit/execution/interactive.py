@@ -120,8 +120,8 @@ def show_interactive_help():
     print("    Export asset configurations from source environment to CSV file")
     print(f"  {BOLD}asset-config-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]")
     print("    Import asset configurations to target environment from CSV file")
-    print(f"  {BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel]")
-    print("    Export all assets from source environment to CSV file")
+    print(f"  {BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]")
+    print("    Export all assets from source or target environment to CSV file")
     print(f"  {BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
     print("    Import tags for assets from CSV file")
     print(f"  {BOLD}valid-target-uids{RESET} [<csv_file>] [--quiet] [--verbose] [--parallel]")
@@ -138,6 +138,8 @@ def show_interactive_help():
     print("    Export rule tags for all policies from policies-all-export.csv")
     print(f"  {BOLD}policy-xfr{RESET} [--input <input_dir>] --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" [options]")
     print("    Format policy export files by replacing multiple substrings in JSON files and ZIP archives")
+    print(f"  {BOLD}transform-and-merge{RESET} --string-transform \"A\":\"B\", \"C\":\"D\" [--quiet] [--verbose]")
+    print("    Transform and merge asset CSV files from source and target environments")
     
     print(f"\n{BOLD}🔧 VCS COMMANDS:{RESET}")
     print(f"  {BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
@@ -352,22 +354,30 @@ def show_command_help(command_name: str):
         print("      • Default mode: Silent (no progress bars)")
     
     elif command_name == 'asset-list-export':
-        print(f"\n{BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel]")
-        print("    Description: Export all assets from source environment to CSV file")
+        print(f"\n{BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]")
+        print("    Description: Export all assets from source or target environment to CSV file")
         print("    Arguments:")
         print("      --quiet: Suppress console output, show only summary")
         print("      --verbose: Show detailed output including headers and responses")
         print("      --parallel: Use parallel processing for faster export (max 5 threads)")
+        print("      --target: Use target environment instead of source environment")
+        print("      --page-size: Number of assets per page (default: 500)")
         print("    Examples:")
         print("      asset-list-export")
         print("      asset-list-export --quiet")
         print("      asset-list-export --verbose")
         print("      asset-list-export --parallel")
+        print("      asset-list-export --target")
+        print("      asset-list-export --target --verbose")
+        print("      asset-list-export --page-size 1000")
+        print("      asset-list-export --page-size 250 --parallel")
         print("    Behavior:")
         print("      • Uses '/catalog-server/api/assets/discover' endpoint with pagination")
         print("      • First call gets total count with size=0&page=0&profiled_assets=true&parents=true")
-        print("      • Retrieves all pages with size=500 and profiled_assets=true&parents=true")
-        print("      • Output file: <output-dir>/asset-export/asset-all-export.csv")
+        print("      • Retrieves all pages with specified page size and profiled_assets=true&parents=true")
+        print("      • Default page size: 500 assets per page")
+        print("      • Source environment output: <output-dir>/asset-export/asset-all-source-export.csv")
+        print("      • Target environment output: <output-dir>/asset-export/asset-all-target-export.csv")
         print("      • CSV columns: source_uid, source_id, target_uid, tags")
         print("      • Extracts asset.uid, asset.id, and asset.tags[].name from response")
         print("      • Concatenates tags with colon (:) separator in tags column")
@@ -376,6 +386,7 @@ def show_command_help(command_name: str):
         print("      • Shows detailed request/response in verbose mode")
         print("      • Provides comprehensive statistics upon completion")
         print("      • Parallel mode: Divides pages among threads, combines results, deletes temp files")
+        print("      • Target mode: Uses target access key, secret key, and tenant for authentication")
     
     elif command_name == 'asset-tag-import':
         print(f"\n{BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
@@ -576,6 +587,30 @@ def show_command_help(command_name: str):
         print("      • Auto-detects input directory from <output-dir>/policy-export if not specified")
         print("      • Creates organized output directory structure")
         print("      • Extracts data quality policy assets to CSV files")
+    
+    elif command_name == 'transform-and-merge':
+        print(f"\n{BOLD}transform-and-merge{RESET} --string-transform \"A\":\"B\", \"C\":\"D\" [--quiet] [--verbose]")
+        print("    Description: Transform and merge asset CSV files from source and target environments")
+        print("    Arguments:")
+        print("      --string-transform: String transformations [REQUIRED]")
+        print("                          Format: \"A\":\"B\", \"C\":\"D\"")
+        print("    Options:")
+        print("      --quiet: Suppress console output, show only summary")
+        print("      --verbose: Show detailed output including transformation details")
+        print("    Examples:")
+        print("      transform-and-merge --string-transform \"PROD_DB\":\"DEV_DB\", \"PROD_URL\":\"DEV_URL\"")
+        print("      transform-and-merge --string-transform \"old\":\"new\", \"test\":\"prod\" --verbose")
+        print("    Behavior:")
+        print("      • Reads asset-all-source-export.csv from asset-export/ directory")
+        print("      • Reads asset-all-target-export.csv from asset-export/ directory")
+        print("      • Applies exact string transformations to target_uid column in source file")
+        print("      • Only replaces target_uid if it exactly matches a source string")
+        print("      • Merges records based on transformed target_uid and target file's source_uid")
+        print("      • Merge operation is like an INNER JOIN - only matched records included")
+        print("      • Outputs merged file: asset-import/asset-merged-all.csv")
+        print("      • Output columns: source_id, source_uid, target_id, target_uid, tags")
+        print("      • Only includes records that successfully match between environments")
+        print("      • Provides detailed statistics on transformations and matches")
         print("      • Generates <output-dir>/asset-export/asset_uids.csv and <output-dir>/policy-import/segmented_spark_uids.csv")
         print("      • Processes asset-all-export.csv -> asset-all-import-ready.csv")
         print("      • Processes asset-config-export.csv -> asset-config-import-ready.csv")
@@ -813,7 +848,7 @@ def setup_autocomplete():
         'help': commands,  # help can be followed by any command
         'asset-config-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-config-import': ['--dry-run', '--quiet', '--verbose', '--parallel'],
-        'asset-list-export': ['--quiet', '--verbose', '--parallel'],
+                    'asset-list-export': ['--quiet', '--verbose', '--parallel', '--target', '--page-size'],
         'asset-profile-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-profile-import': ['--dry-run', '--quiet', '--verbose'],
         'asset-tag-import': ['--quiet', '--verbose', '--parallel'],
@@ -822,6 +857,7 @@ def setup_autocomplete():
         'policy-import': ['--quiet', '--verbose'],
         'policy-list-export': ['--quiet', '--verbose', '--parallel'],
         'policy-xfr': ['--input', '--source-env-string', '--target-env-string', '--quiet', '--verbose'],
+        'transform-and-merge': ['--string-transform', '--quiet', '--verbose'],
         'rule-tag-export': ['--quiet', '--verbose', '--parallel'],
         'segments-export': ['--output-file', '--quiet'],
         'segments-import': ['--dry-run', '--quiet', '--verbose'],
@@ -1259,11 +1295,11 @@ def run_interactive(args):
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)
                 if command.lower().startswith('asset-list-export'):
                     from .command_parsing import parse_asset_list_export_command
-                    quiet_mode, verbose_mode, parallel_mode = parse_asset_list_export_command(command)
+                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size = parse_asset_list_export_command(command)
                     if parallel_mode:
-                        execute_asset_list_export_parallel(client, logger, quiet_mode, verbose_mode)
+                        execute_asset_list_export_parallel(client, logger, quiet_mode, verbose_mode, use_target, page_size)
                     else:
-                        execute_asset_list_export(client, logger, quiet_mode, verbose_mode)
+                        execute_asset_list_export(client, logger, quiet_mode, verbose_mode, use_target, page_size)
                     continue
             
                 
@@ -1376,6 +1412,19 @@ def run_interactive(args):
                     input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
                     if string_transforms:
                         execute_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
+                    continue
+                
+                # Check if it's a transform-and-merge command
+                if command.lower().startswith('transform-and-merge'):
+                    from .command_parsing import parse_transform_and_merge_command
+                    from .asset_operations import execute_transform_and_merge
+                    try:
+                        string_transforms, quiet_mode, verbose_mode = parse_transform_and_merge_command(command)
+                        if string_transforms:
+                            execute_transform_and_merge(string_transforms, quiet_mode, verbose_mode, logger)
+                    except ValueError as e:
+                        print(f"❌ Error: {e}")
+                        print("💡 Usage: transform-and-merge --string-transform \"A\":\"B\", \"C\":\"D\" [--quiet] [--verbose]")
                     continue
                 
                 # Check if it's a set-output-dir command

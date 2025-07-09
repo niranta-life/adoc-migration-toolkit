@@ -344,35 +344,53 @@ def parse_asset_list_export_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
     
     Args:
-        command: Command string like "asset-list-export [--quiet] [--verbose] [--parallel]"
+        command: Command string like "asset-list-export [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]"
         
     Returns:
-        Tuple of (quiet_mode, verbose_mode, parallel_mode)
+        Tuple of (quiet_mode, verbose_mode, parallel_mode, use_target, page_size)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-list-export':
-        return False, False, False
+        return False, False, False, False, 500
     
     quiet_mode = False
     verbose_mode = False
     parallel_mode = False
+    use_target = False
+    page_size = 500  # Default page size
     
-    # Check for flags
-    if '--quiet' in parts:
-        quiet_mode = True
-        verbose_mode = False  # Quiet overrides verbose
-        parts.remove('--quiet')
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--page-size':
+            if i + 1 >= len(parts):
+                raise ValueError("--page-size requires a value")
+            try:
+                page_size = int(parts[i + 1])
+                if page_size <= 0:
+                    raise ValueError("Page size must be positive")
+                parts.pop(i)  # Remove --page-size
+                parts.pop(i)  # Remove the page size value
+            except (ValueError, IndexError):
+                raise ValueError("Invalid page size. Must be a positive integer")
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif parts[i] == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
+        elif parts[i] == '--target':
+            use_target = True
+            parts.remove('--target')
+        else:
+            i += 1
     
-    if '--verbose' in parts:
-        verbose_mode = True
-        quiet_mode = False  # Verbose overrides quiet
-        parts.remove('--verbose')
-    
-    if '--parallel' in parts:
-        parallel_mode = True
-        parts.remove('--parallel')
-    
-    return quiet_mode, verbose_mode, parallel_mode
+    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size
 
 def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.
@@ -984,3 +1002,70 @@ def parse_show_config_command(command: str) -> bool:
         print(f"❌ Error parsing show-config command: {e}")
         print("💡 Usage: show-config")
         return False 
+
+def parse_transform_and_merge_command(command: str) -> tuple:
+    """Parse a transform-and-merge command string into components.
+    
+    Args:
+        command: Command string like "transform-and-merge --string-transform \"A\":\"B\", \"C\":\"D\" [--quiet] [--verbose]"
+        
+    Returns:
+        Tuple of (string_transforms, quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'transform-and-merge':
+        return None, False, False
+    
+    string_transforms = {}
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--string-transform' and i + 1 < len(parts):
+            # Collect all args until next -- or end
+            transform_parts = []
+            j = i + 1
+            while j < len(parts) and not parts[j].startswith('--'):
+                transform_parts.append(parts[j])
+                j += 1
+            
+            if not transform_parts:
+                raise ValueError("Missing string transform argument")
+            
+            transform_arg = ' '.join(transform_parts)
+            try:
+                # Parse format: "A":"B", "C":"D", "E":"F"
+                # Remove outer quotes if present
+                if transform_arg.startswith('"') and transform_arg.endswith('"'):
+                    transform_arg = transform_arg[1:-1]
+                
+                # Split by comma and process each pair
+                pairs = [pair.strip() for pair in transform_arg.split(',')]
+                for pair in pairs:
+                    if ':' in pair:
+                        source, target = pair.split(':', 1)
+                        source = source.strip().strip('"')
+                        target = target.strip().strip('"')
+                        if source and target:
+                            string_transforms[source] = target
+                
+            except Exception as e:
+                raise ValueError(f"Error parsing string transform argument: {e}")
+            i = j
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        else:
+            i += 1
+    
+    if not string_transforms:
+        raise ValueError("Missing required argument: --string-transform")
+    
+    return string_transforms, quiet_mode, verbose_mode 

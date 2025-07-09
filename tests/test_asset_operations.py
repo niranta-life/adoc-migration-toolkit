@@ -797,16 +797,16 @@ class TestExecuteAssetListExport:
             page_response,   # First page
             page_response    # Second page
         ]
-        
+
         with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
             execute_asset_list_export(
                 client=mock_client,
                 logger=mock_logger,
                 verbose_mode=True
             )
-        
+
         # Verify output file was created
-        output_file = temp_dir / "asset-export" / "asset-all-export.csv"
+        output_file = temp_dir / "asset-export" / "asset-all-source-export.csv"
         assert output_file.exists()
         
         # Verify CSV content
@@ -832,15 +832,15 @@ class TestExecuteAssetListExport:
         }
         
         mock_client.make_api_call.return_value = count_response
-        
+
         with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
             execute_asset_list_export(
                 client=mock_client,
                 logger=mock_logger
             )
-        
+
         # Verify output file was created (even with no assets)
-        output_file = temp_dir / "asset-export" / "asset-all-export.csv"
+        output_file = temp_dir / "asset-export" / "asset-all-source-export.csv"
         assert output_file.exists()
     
     def test_execute_asset_list_export_api_error(self, temp_dir, mock_client, mock_logger):
@@ -903,7 +903,7 @@ class TestExecuteAssetListExport:
             )
             
             # Verify output file was created in the temp directory
-            output_file = temp_dir / "asset-export" / "asset-all-export.csv"
+            output_file = temp_dir / "asset-export" / "asset-all-source-export.csv"
             assert output_file.exists()
     
     def test_execute_asset_list_export_alternative_response_structure(self, temp_dir, mock_client, mock_logger):
@@ -929,15 +929,15 @@ class TestExecuteAssetListExport:
             count_response,
             page_response
         ]
-        
+
         with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
             execute_asset_list_export(
                 client=mock_client,
                 logger=mock_logger
             )
-        
+
         # Verify output file was created
-        output_file = temp_dir / "asset-export" / "asset-all-export.csv"
+        output_file = temp_dir / "asset-export" / "asset-all-source-export.csv"
         assert output_file.exists()
         
         # Verify CSV content
@@ -995,7 +995,7 @@ class TestExecuteAssetListExport:
             )
         
         # Verify output file was created
-        output_file = temp_dir / "asset-export" / "asset-all-export.csv"
+        output_file = temp_dir / "asset-export" / "asset-all-source-export.csv"
         assert output_file.exists()
         
         # Verify CSV content
@@ -1133,3 +1133,137 @@ class TestAssetOperationsIntegration:
             # Verify error was logged
             mock_logger.error.assert_called()
             mock_logger.reset_mock() 
+
+    def test_parse_asset_list_export_command_with_page_size(self):
+        """Test parsing asset-list-export command with --page-size option."""
+        from src.adoc_migration_toolkit.execution.command_parsing import parse_asset_list_export_command
+        
+        # Test with page size
+        quiet, verbose, parallel, target, page_size = parse_asset_list_export_command("asset-list-export --page-size 1000")
+        assert not quiet
+        assert not verbose
+        assert not parallel
+        assert not target
+        assert page_size == 1000
+        
+        # Test with page size and other flags
+        quiet, verbose, parallel, target, page_size = parse_asset_list_export_command("asset-list-export --page-size 250 --verbose --parallel")
+        assert not quiet
+        assert verbose
+        assert parallel
+        assert not target
+        assert page_size == 250
+        
+        # Test with page size and target
+        quiet, verbose, parallel, target, page_size = parse_asset_list_export_command("asset-list-export --target --page-size 750 --quiet")
+        assert quiet
+        assert not verbose
+        assert not parallel
+        assert target
+        assert page_size == 750
+        
+        # Test default page size
+        quiet, verbose, parallel, target, page_size = parse_asset_list_export_command("asset-list-export")
+        assert not quiet
+        assert not verbose
+        assert not parallel
+        assert not target
+        assert page_size == 500
+        
+        # Test invalid page size
+        with pytest.raises(ValueError):
+            parse_asset_list_export_command("asset-list-export --page-size -100")
+        
+        with pytest.raises(ValueError):
+            parse_asset_list_export_command("asset-list-export --page-size 0")
+        
+        with pytest.raises(ValueError):
+            parse_asset_list_export_command("asset-list-export --page-size abc")
+        
+        with pytest.raises(ValueError):
+            parse_asset_list_export_command("asset-list-export --page-size") 
+
+    def test_parse_transform_and_merge_command(self):
+        """Test parsing transform-and-merge command with string transformations."""
+        from src.adoc_migration_toolkit.execution.command_parsing import parse_transform_and_merge_command
+        
+        # Test with string transformations
+        string_transforms, quiet_mode, verbose_mode = parse_transform_and_merge_command("transform-and-merge --string-transform \"PROD_DB\":\"DEV_DB\"")
+        assert string_transforms == {"PROD_DB": "DEV_DB"}
+        assert not quiet_mode
+        assert not verbose_mode
+        
+        # Test with multiple transformations
+        string_transforms, quiet_mode, verbose_mode = parse_transform_and_merge_command("transform-and-merge --string-transform \"A\":\"B\", \"C\":\"D\" --verbose")
+        assert string_transforms == {"A": "B", "C": "D"}
+        assert not quiet_mode
+        assert verbose_mode
+        
+        # Test with quiet mode
+        string_transforms, quiet_mode, verbose_mode = parse_transform_and_merge_command("transform-and-merge --string-transform \"old\":\"new\" --quiet")
+        assert string_transforms == {"old": "new"}
+        assert quiet_mode
+        assert not verbose_mode
+        
+        # Test missing string transform
+        with pytest.raises(ValueError):
+            parse_transform_and_merge_command("transform-and-merge")
+        
+        # Test invalid command
+        string_transforms, quiet_mode, verbose_mode = parse_transform_and_merge_command("invalid-command")
+        assert string_transforms is None
+        assert not quiet_mode
+        assert not verbose_mode 
+
+    def test_execute_transform_and_merge_success(self, temp_dir, mock_logger):
+        """Test successful transform-and-merge execution."""
+        from src.adoc_migration_toolkit.execution.asset_operations import execute_transform_and_merge
+        
+        # Create asset-export directory
+        asset_export_dir = temp_dir / "asset-export"
+        asset_export_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create source CSV file
+        source_file = asset_export_dir / "asset-all-source-export.csv"
+        with open(source_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            writer.writerow(['asset-1', '1', 'Snowflake', 'tag1:tag2'])
+            writer.writerow(['asset-2', '2', 'SNOWFLAKE_SAMPLE_DATA', 'tag3'])
+            writer.writerow(['asset-3', '3', 'OTHER_DATA', 'tag4'])
+        
+        # Create target CSV file
+        target_file = asset_export_dir / "asset-all-target-export.csv"
+        with open(target_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            writer.writerow(['snowflake_krish_test', '101', 'snowflake_krish_test', 'tag1:tag2'])
+            writer.writerow(['KRISH_TEST', '102', 'KRISH_TEST', 'tag3'])
+        
+        # Mock global output directory
+        with patch('src.adoc_migration_toolkit.execution.asset_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+            string_transforms = {"Snowflake": "snowflake_krish_test", "SNOWFLAKE_SAMPLE_DATA": "KRISH_TEST"}
+            execute_transform_and_merge(string_transforms, False, False, mock_logger)
+        
+        # Verify output file was created
+        asset_import_dir = asset_export_dir.parent / "asset-import"
+        output_file = asset_import_dir / "asset-merged-all.csv"
+        assert output_file.exists()
+        
+        # Verify output content
+        with open(output_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        
+        assert len(rows) == 2  # Only 2 records should match (exact match only)
+        assert rows[0]['source_uid'] == 'asset-1'
+        assert rows[0]['source_id'] == '1'
+        assert rows[0]['target_uid'] == 'snowflake_krish_test'
+        assert rows[0]['target_id'] == '101'
+        assert rows[0]['tags'] == 'tag1:tag2'
+        
+        assert rows[1]['source_uid'] == 'asset-2'
+        assert rows[1]['source_id'] == '2'
+        assert rows[1]['target_uid'] == 'KRISH_TEST'
+        assert rows[1]['target_id'] == '102'
+        assert rows[1]['tags'] == 'tag3' 
