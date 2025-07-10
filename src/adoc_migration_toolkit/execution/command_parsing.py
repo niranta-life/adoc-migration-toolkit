@@ -342,24 +342,26 @@ def parse_asset_config_export_command(command: str) -> tuple:
 
 def parse_asset_list_export_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
-    
+
     Args:
         command: Command string like "asset-list-export [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]"
-        
+
     Returns:
         Tuple of (quiet_mode, verbose_mode, parallel_mode, use_target, page_size)
     """
     parts = command.strip().split()
+    print(f"Command arguments {parts}")
     if not parts or parts[0].lower() != 'asset-list-export':
         return False, False, False, False, 500
-    
+
     quiet_mode = False
     verbose_mode = False
     parallel_mode = False
     use_target = False
     page_size = 500  # Default page size
     source_type_ids = 5 # Default snowflake
-    
+    asset_type_ids = 2 # Default is Table
+
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -389,12 +391,21 @@ def parse_asset_list_export_command(command: str) -> tuple:
             use_target = True
             parts.remove('--target')
         elif parts[i] == '--source_type_ids':
-            source_type_ids = (parts[i + 1])
-            parts.remove('--source_type_ids')
+            if i + 1 >= len(parts):
+                raise ValueError("--source_type_ids requires a value")
+            source_type_ids = str(parts[i + 1])
+            parts.pop(i)  # Remove --page-size
+            parts.pop(i)  # Remove the page size value
+        elif parts[i] == '--asset_type_ids':
+            if i + 1 >= len(parts):
+                raise ValueError("--asset_type_ids requires a value")
+            asset_type_ids = str(parts[i + 1])
+            parts.pop(i)  # Remove --page-size
+            parts.pop(i)  # Remove the page size value
         else:
             i += 1
-    
-    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids
+
+    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids
 
 def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.

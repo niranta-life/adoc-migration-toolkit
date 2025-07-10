@@ -1265,11 +1265,11 @@ def run_interactive(args):
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)
                 if command.lower().startswith('asset-list-export'):
                     from .command_parsing import parse_asset_list_export_command
-                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids = parse_asset_list_export_command(command)
+                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids = parse_asset_list_export_command(command)
                     if parallel_mode:
-                        execute_asset_list_export_parallel(client, logger, quiet_mode, verbose_mode, use_target, page_size, source_type_ids)
+                        execute_asset_list_export_parallel(client, logger, source_type_ids, asset_type_ids, quiet_mode, verbose_mode, use_target, page_size)
                     else:
-                        execute_asset_list_export(client, logger, quiet_mode, verbose_mode, use_target, page_size, source_type_ids)
+                        execute_asset_list_export(client, logger, source_type_ids, asset_type_ids, quiet_mode, verbose_mode, use_target, page_size)
                     continue
             
                 
