@@ -366,10 +366,11 @@ def show_command_help(command_name: str):
         print("      asset-list-export --quiet")
         print("      asset-list-export --verbose")
         print("      asset-list-export --parallel")
+        print("      asset-list-export --parallel source_type_ids={{comma separated list}}")
         print("      asset-list-export --target")
         print("      asset-list-export --target --verbose")
         print("      asset-list-export --page-size 1000")
-        print("      asset-list-export --page-size 250 --parallel")
+        print("      asset-list-export --page-size 250 --parallel source_type_ids={{comma separated list}}")
         print("    Behavior:")
         print("      • Uses '/catalog-server/api/assets/discover' endpoint with pagination")
         print("      • First call gets total count with size=0&page=0&profiled_assets=true&parents=true")
@@ -1264,11 +1265,11 @@ def run_interactive(args):
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)
                 if command.lower().startswith('asset-list-export'):
                     from .command_parsing import parse_asset_list_export_command
-                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size = parse_asset_list_export_command(command)
+                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids = parse_asset_list_export_command(command)
                     if parallel_mode:
-                        execute_asset_list_export_parallel(client, logger, quiet_mode, verbose_mode, use_target, page_size)
+                        execute_asset_list_export_parallel(client, logger, quiet_mode, verbose_mode, use_target, page_size, source_type_ids)
                     else:
-                        execute_asset_list_export(client, logger, quiet_mode, verbose_mode, use_target, page_size)
+                        execute_asset_list_export(client, logger, quiet_mode, verbose_mode, use_target, page_size, source_type_ids)
                     continue
             
                 
