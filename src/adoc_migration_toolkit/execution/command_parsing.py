@@ -359,9 +359,9 @@ def parse_asset_list_export_command(command: str) -> tuple:
     parallel_mode = False
     use_target = False
     page_size = 500  # Default page size
-    source_type_ids = 5 # Default snowflake
-    asset_type_ids = 2 # Default is Table
-
+    source_type_ids = None
+    asset_type_ids = None
+    assembly_ids = None
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -402,10 +402,16 @@ def parse_asset_list_export_command(command: str) -> tuple:
             asset_type_ids = str(parts[i + 1])
             parts.pop(i)  # Remove --page-size
             parts.pop(i)  # Remove the page size value
+        elif parts[i] == '--assembly_ids':
+            if i + 1 >= len(parts):
+                raise ValueError("--assembly_ids requires a value")
+            assembly_ids = str(parts[i + 1])
+            parts.pop(i)  # Remove --page-size
+            parts.pop(i)  # Remove the page size value
         else:
             i += 1
 
-    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids
+    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids
 
 def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.

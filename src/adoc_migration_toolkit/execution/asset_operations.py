@@ -1058,7 +1058,7 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         logger.error(error_msg)
 
 
-def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: str, asset_type_ids: str, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
+def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
     """Execute the asset-list-export command.
     
     Args:
@@ -1099,14 +1099,33 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
-        
+
+
+        query_params = [
+            f"size=0",
+            f"page=0",
+            f"parents=true"
+        ]
+
+        if asset_type_ids not in [None, 'None', 'null', '']:
+            query_params.append(f"asset_type_ids={asset_type_ids}")
+
+        if source_type_ids not in [None, 'None', 'null', '']:
+            query_params.append(f"source_type_ids={source_type_ids}")
+
+        if assembly_ids not in [None, 'None', 'null', '']:
+            query_params.append(f"assembly_ids={assembly_ids}")
+
+        query_string = "&".join(query_params)
+        end_point = f"/catalog-server/api/assets/discover?{query_string}"
+
         # Step 1: Get total count of assets
         if not quiet_mode:
             print("Getting total asset count...")
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}")
+            print(f"  Endpoint: {end_point}")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -1114,7 +1133,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint=f"/catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}",
+            endpoint=f"{end_point}",
             method='GET',
             use_target_auth=use_target,
             use_target_tenant=use_target
@@ -1152,7 +1171,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
             try:
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}")
+                    print(f"  Endpoint: {end_point}")
                     print(f"  Method: GET")
                     print(f"  Content-Type: application/json")
                     print(f"  Authorization: Bearer [REDACTED]")
@@ -1160,7 +1179,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                         print(f"  X-Tenant: {client.tenant}")
                 
                 page_response = client.make_api_call(
-                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}",
+                    endpoint=f"{end_point}",
                     method='GET',
                     use_target_auth=use_target,
                     use_target_tenant=use_target
@@ -1323,7 +1342,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
         logger.error(error_msg)
 
 
-def execute_asset_list_export_parallel(client, logger: logging.Logger, source_type_ids: str, asset_type_ids: str, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
+def execute_asset_list_export_parallel(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
     """Execute the asset-list-export command with parallel processing.
     
     Args:
@@ -1364,14 +1383,33 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
-        
+
+
+        query_params = [
+            f"size=0",
+            f"page=0",
+            f"parents=true"
+        ]
+
+        if asset_type_ids not in [None, 'None', 'null', '']:
+            query_params.append(f"asset_type_ids={asset_type_ids}")
+
+        if source_type_ids not in [None, 'None', 'null', '']:
+            query_params.append(f"source_type_ids={source_type_ids}")
+
+        if assembly_ids not in [None, 'None', 'null', '']:
+            query_params.append(f"assembly_ids={assembly_ids}")
+
+        query_string = "&".join(query_params)
+        end_point = f"/catalog-server/api/assets/discover?{query_string}"
+
         # Step 1: Get total count of assets
         if not quiet_mode:
             print("Getting total asset count...")
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}")
+            print(f"  Endpoint: {end_point}")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -1379,7 +1417,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint=f"/catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}",
+            endpoint=f"{end_point}",
             method='GET',
             use_target_auth=use_target,
             use_target_tenant=use_target
@@ -1400,7 +1438,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
         
         if not quiet_mode:
-            print(f"/catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}")
+            print(f"{end_point}")
             print(f"Total assets found: {total_count}")
             print(f"Page size: {page_size}")
             print(f"Total pages to retrieve: {total_pages}")
@@ -1475,7 +1513,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Processing page {page + 1}")
                         print(f"GET Request Headers:")
-                        print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}")
+                        print(f"  Endpoint: {end_point}")
                         print(f"  Method: GET")
                         print(f"  Content-Type: application/json")
                         print(f"  Authorization: Bearer [REDACTED]")
@@ -1483,7 +1521,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                             print(f"  X-Tenant: {thread_client.tenant}")
                     
                     page_response = thread_client.make_api_call(
-                        endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids={asset_type_ids}&source_type_ids={source_type_ids}",
+                        endpoint=f"{end_point}",
                         method='GET',
                         use_target_auth=use_target,
                         use_target_tenant=use_target

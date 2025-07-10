@@ -361,16 +361,19 @@ def show_command_help(command_name: str):
         print("      --parallel: Use parallel processing for faster export (max 5 threads)")
         print("      --target: Use target environment instead of source environment")
         print("      --page-size: Number of assets per page (default: 500)")
+        print("      --source_type_ids <list>     Comma-separated list of source type IDs (optional)")
+        print("      --asset_type_ids <list>      Comma-separated list of asset type IDs (optional)")
+        print("      --assembly_ids <list>        Comma-separated list of assembly IDs (optional)")
         print("    Examples:")
         print("      asset-list-export")
         print("      asset-list-export --quiet")
         print("      asset-list-export --verbose")
         print("      asset-list-export --parallel")
-        print("      asset-list-export --parallel source_type_ids={{comma separated list}}")
+        print("      asset-list-export --parallel --source_type_ids=5 --asset_type_ids=2,23,53 --assembly_ids=100,101 ")
         print("      asset-list-export --target")
         print("      asset-list-export --target --verbose")
         print("      asset-list-export --page-size 1000")
-        print("      asset-list-export --page-size 250 --parallel source_type_ids={{comma separated list}}")
+        print("      asset-list-export --page-size 250 --parallel --source_type_ids=5 --asset_type_ids=2,23,53 --assembly_ids=100,101")
         print("    Behavior:")
         print("      • Uses '/catalog-server/api/assets/discover' endpoint with pagination")
         print("      • First call gets total count with size=0&page=0&profiled_assets=true&parents=true")
@@ -1265,11 +1268,11 @@ def run_interactive(args):
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)
                 if command.lower().startswith('asset-list-export'):
                     from .command_parsing import parse_asset_list_export_command
-                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids = parse_asset_list_export_command(command)
+                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids = parse_asset_list_export_command(command)
                     if parallel_mode:
-                        execute_asset_list_export_parallel(client, logger, source_type_ids, asset_type_ids, quiet_mode, verbose_mode, use_target, page_size)
+                        execute_asset_list_export_parallel(client, logger, source_type_ids, asset_type_ids, assembly_ids, quiet_mode, verbose_mode, use_target, page_size)
                     else:
-                        execute_asset_list_export(client, logger, source_type_ids, asset_type_ids, quiet_mode, verbose_mode, use_target, page_size)
+                        execute_asset_list_export(client, logger, source_type_ids, asset_type_ids, assembly_ids, quiet_mode, verbose_mode, use_target, page_size)
                     continue
             
                 
