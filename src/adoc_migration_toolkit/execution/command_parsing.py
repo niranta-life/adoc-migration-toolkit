@@ -358,6 +358,7 @@ def parse_asset_list_export_command(command: str) -> tuple:
     parallel_mode = False
     use_target = False
     page_size = 500  # Default page size
+    source_type_ids = 5 # Default snowflake
     
     # Check for flags and options
     i = 1
@@ -387,10 +388,13 @@ def parse_asset_list_export_command(command: str) -> tuple:
         elif parts[i] == '--target':
             use_target = True
             parts.remove('--target')
+        elif parts[i] == '--source_type_ids':
+            source_type_ids = (parts[i + 1])
+            parts.remove('--source_type_ids')
         else:
             i += 1
     
-    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size
+    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids
 
 def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.

@@ -1058,7 +1058,7 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         logger.error(error_msg)
 
 
-def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
+def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500, source_type_ids: str = "5"):
     """Execute the asset-list-export command.
     
     Args:
@@ -1106,7 +1106,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true")
+            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -1114,7 +1114,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/assets/discover?size=0&page=0&parents=true",
+            endpoint=f"/catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}",
             method='GET',
             use_target_auth=use_target,
             use_target_tenant=use_target
@@ -1152,7 +1152,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
             try:
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true")
+                    print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}")
                     print(f"  Method: GET")
                     print(f"  Content-Type: application/json")
                     print(f"  Authorization: Bearer [REDACTED]")
@@ -1160,7 +1160,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
                         print(f"  X-Tenant: {client.tenant}")
                 
                 page_response = client.make_api_call(
-                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true",
+                    endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}",
                     method='GET',
                     use_target_auth=use_target,
                     use_target_tenant=use_target
@@ -1320,7 +1320,7 @@ def execute_asset_list_export(client, logger: logging.Logger, quiet_mode: bool =
         logger.error(error_msg)
 
 
-def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
+def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500, source_type_ids: str = "5"):
     """Execute the asset-list-export command with parallel processing.
     
     Args:
@@ -1368,7 +1368,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true")
+            print(f"  Endpoint: /catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -1376,7 +1376,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/assets/discover?size=0&page=0&parents=true",
+            endpoint=f"/catalog-server/api/assets/discover?size=0&page=0&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}",
             method='GET',
             use_target_auth=use_target,
             use_target_tenant=use_target
@@ -1471,7 +1471,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Processing page {page + 1}")
                         print(f"GET Request Headers:")
-                        print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true")
+                        print(f"  Endpoint: /catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}")
                         print(f"  Method: GET")
                         print(f"  Content-Type: application/json")
                         print(f"  Authorization: Bearer [REDACTED]")
@@ -1479,7 +1479,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, quiet_mod
                             print(f"  X-Tenant: {thread_client.tenant}")
                     
                     page_response = thread_client.make_api_call(
-                        endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true",
+                        endpoint=f"/catalog-server/api/assets/discover?size={page_size}&page={page}&parents=true&asset_type_ids=2&source_type_ids={source_type_ids}",
                         method='GET',
                         use_target_auth=use_target,
                         use_target_tenant=use_target
