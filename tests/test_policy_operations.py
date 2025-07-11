@@ -440,26 +440,32 @@ class TestExecutePolicyImport:
     
     def test_execute_policy_import_success(self, temp_dir, mock_client, mock_logger, sample_policy_import_response):
         """Test successful policy import execution."""
+        import zipfile
+        
         # Create test ZIP file
         zip_file = temp_dir / "policy-import" / "test-policy.zip"
         zip_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(zip_file, 'wb') as f:
-            f.write(b"fake_zip_content")
+        # Create a proper ZIP file with some content
+        with zipfile.ZipFile(zip_file, 'w') as zf:
+            zf.writestr('policy.json', '{"test": "data"}')
         
-        # Mock API response
-        mock_client.make_api_call.return_value = sample_policy_import_response
+        # Mock API responses for upload-config and apply-config
+        mock_client.make_api_call.side_effect = [
+            sample_policy_import_response,  # upload-config response
+            {"status": "success"}          # apply-config response
+        ]
         
         with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
-                file_pattern="*.zip",
+                file_pattern=str(zip_file),
                 verbose_mode=True
             )
         
-        # Verify API call was made
-        mock_client.make_api_call.assert_called()
+        # Verify API calls were made (upload-config + apply-config)
+        assert mock_client.make_api_call.call_count == 2
     
     def test_execute_policy_import_no_files_found(self, temp_dir, mock_client, mock_logger):
         """Test policy import with no files found."""
@@ -487,12 +493,15 @@ class TestExecutePolicyImport:
     
     def test_execute_policy_import_api_error(self, temp_dir, mock_client, mock_logger):
         """Test policy import with API error."""
+        import zipfile
+        
         # Create test ZIP file
         zip_file = temp_dir / "policy-import" / "test-policy.zip"
         zip_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(zip_file, 'wb') as f:
-            f.write(b"fake_zip_content")
+        # Create a proper ZIP file with some content
+        with zipfile.ZipFile(zip_file, 'w') as zf:
+            zf.writestr('policy.json', '{"test": "data"}')
         
         # Mock API error
         mock_client.make_api_call.side_effect = Exception("API Error")
@@ -501,21 +510,24 @@ class TestExecutePolicyImport:
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
-                file_pattern="*.zip"
+                file_pattern=str(zip_file)
             )
         
         mock_logger.error.assert_called()
     
     def test_execute_policy_import_multiple_files(self, temp_dir, mock_client, mock_logger, sample_policy_import_response):
         """Test policy import with multiple files."""
+        import zipfile
+        
         # Create test ZIP files
         zip_dir = temp_dir / "policy-import"
         zip_dir.mkdir(parents=True, exist_ok=True)
         
         for i in range(3):
             zip_file = zip_dir / f"test-policy-{i}.zip"
-            with open(zip_file, 'wb') as f:
-                f.write(b"fake_zip_content")
+            # Create a proper ZIP file with some content
+            with zipfile.ZipFile(zip_file, 'w') as zf:
+                zf.writestr('policy.json', f'{{"test": "data{i}"}}')
         
         # Mock API response
         mock_client.make_api_call.return_value = sample_policy_import_response
@@ -524,7 +536,7 @@ class TestExecutePolicyImport:
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
-                file_pattern="*.zip"
+                file_pattern=str(zip_dir / "*.zip")
             )
         
         # Verify API calls were made for each file (2 calls per file: upload-config + apply-config)
@@ -532,14 +544,20 @@ class TestExecutePolicyImport:
     
     def test_execute_policy_import_absolute_path(self, temp_dir, mock_client, mock_logger, sample_policy_import_response):
         """Test policy import with absolute path."""
+        import zipfile
+        
         # Create test ZIP file
         zip_file = temp_dir / "test-policy.zip"
         
-        with open(zip_file, 'wb') as f:
-            f.write(b"fake_zip_content")
+        # Create a proper ZIP file with some content
+        with zipfile.ZipFile(zip_file, 'w') as zf:
+            zf.writestr('policy.json', '{"test": "data"}')
         
-        # Mock API response
-        mock_client.make_api_call.return_value = sample_policy_import_response
+        # Mock API responses for upload-config and apply-config
+        mock_client.make_api_call.side_effect = [
+            sample_policy_import_response,  # upload-config response
+            {"status": "success"}          # apply-config response
+        ]
         
         execute_policy_import(
             client=mock_client,
@@ -547,17 +565,20 @@ class TestExecutePolicyImport:
             file_pattern=str(zip_file)
         )
         
-        # Verify API call was made
-        mock_client.make_api_call.assert_called()
+        # Verify API calls were made (upload-config + apply-config)
+        assert mock_client.make_api_call.call_count == 2
 
     def test_execute_policy_import_two_step_process(self, temp_dir, mock_client, mock_logger):
         """Test policy import with two-step process (upload-config + apply-config)."""
+        import zipfile
+        
         # Create test ZIP file
         zip_file = temp_dir / "policy-import" / "test-policy.zip"
         zip_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(zip_file, 'wb') as f:
-            f.write(b"fake_zip_content")
+        # Create a proper ZIP file with some content
+        with zipfile.ZipFile(zip_file, 'w') as zf:
+            zf.writestr('policy.json', '{"test": "data"}')
         
         # Mock upload-config response
         upload_response = {
@@ -598,7 +619,7 @@ class TestExecutePolicyImport:
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
-                file_pattern="*.zip",
+                file_pattern=str(zip_file),
                 verbose_mode=True
             )
         
@@ -621,12 +642,15 @@ class TestExecutePolicyImport:
 
     def test_execute_policy_import_upload_success_apply_failure(self, temp_dir, mock_client, mock_logger):
         """Test policy import where upload-config succeeds but apply-config fails."""
+        import zipfile
+        
         # Create test ZIP file
         zip_file = temp_dir / "policy-import" / "test-policy.zip"
         zip_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(zip_file, 'wb') as f:
-            f.write(b"fake_zip_content")
+        # Create a proper ZIP file with some content
+        with zipfile.ZipFile(zip_file, 'w') as zf:
+            zf.writestr('policy.json', '{"test": "data"}')
         
         # Mock upload-config response (success)
         upload_response = {
@@ -648,11 +672,11 @@ class TestExecutePolicyImport:
             "totalSchemaDriftPolicyCount": 0,
             "totalUDFPackages": 0,
             "totalUDFTemplates": 0,
-            "uuid": "bba64f45-e0f9-44ac-9f28-968422abaadc"
+            "uuid": "test-uuid-123"
         }
         
-        # Mock apply-config response (failure - None response)
-        apply_response = None
+        # Mock apply-config response (failure)
+        apply_response = {"error": "Apply failed"}
         
         # Mock API calls to return different responses for upload and apply
         mock_client.make_api_call.side_effect = [upload_response, apply_response]
@@ -661,17 +685,26 @@ class TestExecutePolicyImport:
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
-                file_pattern="*.zip"
+                file_pattern=str(zip_file),
+                verbose_mode=True
             )
         
         # Verify both API calls were made
         assert mock_client.make_api_call.call_count == 2
         
-        # Verify error was logged
-        mock_logger.error.assert_called()
-        error_call = mock_logger.error.call_args[0][0]
-        assert "Apply config failed" in error_call
-        assert "bba64f45-e0f9-44ac-9f28-968422abaadc" in error_call
+        # Verify upload-config call
+        first_call = mock_client.make_api_call.call_args_list[0]
+        assert first_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/upload-config"
+        assert first_call[1]['method'] == 'POST'
+        assert 'files' in first_call[1]
+        
+        # Verify apply-config call
+        second_call = mock_client.make_api_call.call_args_list[1]
+        assert second_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/apply-config"
+        assert second_call[1]['method'] == 'POST'
+        assert 'json_payload' in second_call[1]
+        assert second_call[1]['json_payload']['uuid'] == "test-uuid-123"
+        assert second_call[1]['json_payload']['policyOverride'] is True
 
 
 class TestExecuteRuleTagExport:

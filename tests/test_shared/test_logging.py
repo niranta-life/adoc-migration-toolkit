@@ -112,7 +112,7 @@ class TestSetupLogging:
         """Test that file handler is created with correct configuration."""
         with patch('logging.basicConfig') as mock_basic_config:
             with patch('logging.getLogger') as mock_get_logger:
-                with patch('logging.FileHandler') as mock_file_handler:
+                with patch('adoc_migration_toolkit.shared.logging.ReadOnlyRotatingFileHandler') as mock_file_handler:
                     mock_handler = Mock()
                     mock_file_handler.return_value = mock_handler
                     mock_logger = Mock()
@@ -120,7 +120,7 @@ class TestSetupLogging:
                     
                     logger = setup_logging()
                     
-                    # Verify FileHandler was created
+                    # Verify ReadOnlyRotatingFileHandler was created
                     mock_file_handler.assert_called_once()
                     
                     # Verify file name pattern
@@ -138,7 +138,7 @@ class TestSetupLogging:
         with patch('logging.basicConfig') as mock_basic_config:
             with patch('logging.getLogger') as mock_get_logger:
                 with patch('adoc_migration_toolkit.shared.logging.CustomFormatter') as mock_formatter:
-                    with patch('logging.FileHandler') as mock_file_handler:
+                    with patch('adoc_migration_toolkit.shared.logging.ReadOnlyRotatingFileHandler') as mock_file_handler:
                         mock_handler = Mock()
                         mock_file_handler.return_value = mock_handler
                         mock_formatter_instance = Mock()
@@ -155,7 +155,7 @@ class TestSetupLogging:
         """Test that handler is properly configured."""
         with patch('logging.basicConfig') as mock_basic_config:
             with patch('logging.getLogger') as mock_get_logger:
-                with patch('logging.FileHandler') as mock_file_handler:
+                with patch('adoc_migration_toolkit.shared.logging.ReadOnlyRotatingFileHandler') as mock_file_handler:
                     with patch('adoc_migration_toolkit.shared.logging.CustomFormatter') as mock_formatter:
                         mock_handler = Mock()
                         mock_file_handler.return_value = mock_handler
@@ -252,7 +252,7 @@ class TestSetupLogging:
         """Test that log file name uses correct date format."""
         with patch('logging.basicConfig'):
             with patch('logging.getLogger') as mock_get_logger:
-                with patch('logging.FileHandler') as mock_file_handler:
+                with patch('adoc_migration_toolkit.shared.logging.ReadOnlyRotatingFileHandler') as mock_file_handler:
                     with patch('adoc_migration_toolkit.shared.logging.datetime') as mock_datetime:
                         mock_date = Mock()
                         mock_date.strftime.return_value = "20231201"
