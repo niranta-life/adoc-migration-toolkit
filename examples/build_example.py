@@ -7,8 +7,8 @@ and provides examples of different build configurations.
 """
 
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -16,8 +16,9 @@ def run_command(cmd, cwd=None, check=True):
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, cwd=cwd, check=check, 
-                              capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, cwd=cwd, check=check, capture_output=True, text=True
+        )
         if result.stdout:
             print("STDOUT:", result.stdout)
         if result.stderr:
@@ -31,18 +32,15 @@ def run_command(cmd, cwd=None, check=True):
 def example_basic_build():
     """Example: Basic build with default settings."""
     print("=== Example: Basic Build ===")
-    
+
     # Run the build script
-    success = run_command([
-        sys.executable, "build_with_integrity.py",
-        "--onefile",
-        "--console",
-        "--clean"
-    ])
-    
+    success = run_command(
+        [sys.executable, "build_with_integrity.py", "--onefile", "--console", "--clean"]
+    )
+
     if success:
         print("✅ Basic build completed successfully")
-        
+
         # Test the executable
         executable = Path("dist/adoc-migration-toolkit")
         if executable.exists():
@@ -55,14 +53,17 @@ def example_basic_build():
 def example_windowed_build():
     """Example: Build windowed executable (no console)."""
     print("\n=== Example: Windowed Build ===")
-    
-    success = run_command([
-        sys.executable, "build_with_integrity.py",
-        "--onefile",
-        "--windowed",
-        "--clean"
-    ])
-    
+
+    success = run_command(
+        [
+            sys.executable,
+            "build_with_integrity.py",
+            "--onefile",
+            "--windowed",
+            "--clean",
+        ]
+    )
+
     if success:
         print("✅ Windowed build completed successfully")
     else:
@@ -72,17 +73,14 @@ def example_windowed_build():
 def example_directory_build():
     """Example: Build as directory with dependencies."""
     print("\n=== Example: Directory Build ===")
-    
-    success = run_command([
-        sys.executable, "build_with_integrity.py",
-        "--onedir",
-        "--console",
-        "--clean"
-    ])
-    
+
+    success = run_command(
+        [sys.executable, "build_with_integrity.py", "--onedir", "--console", "--clean"]
+    )
+
     if success:
         print("✅ Directory build completed successfully")
-        
+
         # Check the directory structure
         dist_dir = Path("dist/adoc-migration-toolkit")
         if dist_dir.exists():
@@ -96,15 +94,15 @@ def example_directory_build():
 def example_integrity_verification():
     """Example: Verify integrity of built executable."""
     print("\n=== Example: Integrity Verification ===")
-    
+
     executable = Path("dist/adoc-migration-toolkit")
     if not executable.exists():
         print("❌ No executable found. Run a build first.")
         return
-    
+
     print("Running integrity checks...")
     success = run_command([str(executable), "--help"], check=False)
-    
+
     if success:
         print("✅ Integrity verification passed")
     else:
@@ -114,7 +112,7 @@ def example_integrity_verification():
 def example_custom_build():
     """Example: Custom build with specific options."""
     print("\n=== Example: Custom Build ===")
-    
+
     # This would be a more complex build with custom options
     # For now, just show the concept
     print("Custom build options:")
@@ -122,7 +120,7 @@ def example_custom_build():
     print("  - Specific hidden imports")
     print("  - Custom excludes")
     print("  - Code signing")
-    
+
     # Example of how you might modify the build script
     print("\nTo customize the build, edit build_with_integrity.py:")
     print("  - Modify the datas list")
@@ -134,20 +132,20 @@ def example_custom_build():
 def example_makefile_usage():
     """Example: Using Makefile for builds."""
     print("\n=== Example: Makefile Usage ===")
-    
+
     makefile_targets = [
         "build",
-        "build-onefile", 
+        "build-onefile",
         "build-onedir",
         "build-windowed",
         "clean",
-        "verify"
+        "verify",
     ]
-    
+
     print("Available Makefile targets:")
     for target in makefile_targets:
         print(f"  make {target}")
-    
+
     print("\nExample usage:")
     print("  make clean && make build")
     print("  make build-onefile")
@@ -157,20 +155,16 @@ def example_makefile_usage():
 def example_troubleshooting():
     """Example: Common troubleshooting steps."""
     print("\n=== Example: Troubleshooting ===")
-    
+
     print("Common issues and solutions:")
-    
+
     issues = [
-        ("Build fails with import errors", 
-         "pip install -r requirements.txt"),
-        ("Executable is too large", 
-         "Review excludes in build script"),
-        ("Permission denied on Linux/macOS", 
-         "chmod +x dist/adoc-migration-toolkit"),
-        ("Integrity check fails", 
-         "make clean && make build"),
+        ("Build fails with import errors", "pip install -r requirements.txt"),
+        ("Executable is too large", "Review excludes in build script"),
+        ("Permission denied on Linux/macOS", "chmod +x dist/adoc-migration-toolkit"),
+        ("Integrity check fails", "make clean && make build"),
     ]
-    
+
     for issue, solution in issues:
         print(f"  {issue}: {solution}")
 
@@ -179,13 +173,13 @@ def main():
     """Main function to run all examples."""
     print("PyInstaller Build Examples")
     print("==========================")
-    
+
     # Check if we're in the right directory
     if not Path("build_with_integrity.py").exists():
         print("❌ build_with_integrity.py not found")
         print("Please run this script from the project root directory")
         return
-    
+
     # Run examples
     examples = [
         example_basic_build,
@@ -196,15 +190,15 @@ def main():
         example_makefile_usage,
         example_troubleshooting,
     ]
-    
+
     for example in examples:
         try:
             example()
         except Exception as e:
             print(f"❌ Example failed: {e}")
-        
+
         print()  # Add spacing between examples
-    
+
     print("=== Summary ===")
     print("Examples completed. Check the output above for results.")
     print("\nNext steps:")
@@ -215,4 +209,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

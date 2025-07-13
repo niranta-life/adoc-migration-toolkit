@@ -9,6 +9,6 @@ from .config import VCSConfig
 from .operations import execute_vcs_config
 
 __all__ = [
-    'VCSConfig',
-    'execute_vcs_config',
-] 
+    "VCSConfig",
+    "execute_vcs_config",
+]

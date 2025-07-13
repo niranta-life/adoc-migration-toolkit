@@ -5,22 +5,23 @@ This module contains comprehensive tests for policy-related operations
 including policy export/import, list export, and rule tag export.
 """
 
-import pytest
-import json
 import csv
-import tempfile
+import json
 import logging
 import os
-from pathlib import Path
-from unittest.mock import Mock, patch, mock_open, MagicMock
-from io import StringIO
+import tempfile
 from datetime import datetime
+from io import StringIO
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, mock_open, patch
+
+import pytest
 
 from src.adoc_migration_toolkit.execution.policy_operations import (
-    execute_policy_list_export,
     execute_policy_export,
     execute_policy_import,
-    execute_rule_tag_export
+    execute_policy_list_export,
+    execute_rule_tag_export,
 )
 from src.adoc_migration_toolkit.shared import globals
 
@@ -51,11 +52,7 @@ def mock_logger():
 @pytest.fixture
 def sample_count_response():
     """Sample count API response."""
-    return {
-        "meta": {
-            "count": 5
-        }
-    }
+    return {"meta": {"count": 5}}
 
 
 @pytest.fixture
@@ -68,10 +65,7 @@ def sample_policies_response():
                     "id": 1,
                     "type": "DataQuality",
                     "engineType": "SPARK",
-                    "backingAssets": [
-                        {"tableAssetId": 101},
-                        {"tableAssetId": 102}
-                    ]
+                    "backingAssets": [{"tableAssetId": 101}, {"tableAssetId": 102}],
                 }
             },
             {
@@ -79,11 +73,9 @@ def sample_policies_response():
                     "id": 2,
                     "type": "DataDrift",
                     "engineType": "JDBC_SQL",
-                    "backingAssets": [
-                        {"tableAssetId": 103}
-                    ]
+                    "backingAssets": [{"tableAssetId": 103}],
                 }
-            }
+            },
         ]
     }
 
@@ -93,39 +85,15 @@ def sample_assets_response():
     """Sample assets API response."""
     return {
         "assets": [
-            {
-                "id": 101,
-                "name": "Asset 1",
-                "assemblyId": 201
-            },
-            {
-                "id": 102,
-                "name": "Asset 2",
-                "assemblyId": 202
-            },
-            {
-                "id": 103,
-                "name": "Asset 3",
-                "assemblyId": 203
-            }
+            {"id": 101, "name": "Asset 1", "assemblyId": 201},
+            {"id": 102, "name": "Asset 2", "assemblyId": 202},
+            {"id": 103, "name": "Asset 3", "assemblyId": 203},
         ],
         "assemblies": [
-            {
-                "id": 201,
-                "name": "Assembly 1",
-                "sourceType": {"name": "PostgreSQL"}
-            },
-            {
-                "id": 202,
-                "name": "Assembly 2",
-                "sourceType": {"name": "MySQL"}
-            },
-            {
-                "id": 203,
-                "name": "Assembly 3",
-                "sourceType": {"name": "Oracle"}
-            }
-        ]
+            {"id": 201, "name": "Assembly 1", "sourceType": {"name": "PostgreSQL"}},
+            {"id": 202, "name": "Assembly 2", "sourceType": {"name": "MySQL"}},
+            {"id": 203, "name": "Assembly 3", "sourceType": {"name": "Oracle"}},
+        ],
     }
 
 
@@ -145,7 +113,7 @@ def sample_policy_import_response():
         "totalDataSourceCount": 3,
         "totalBusinessRules": 2,
         "conflictingPolicies": 1,
-        "conflictingAssemblies": 0
+        "conflictingAssemblies": 0,
     }
 
 
@@ -156,280 +124,434 @@ def sample_rule_tags_response():
         "ruleTags": [
             {"name": "production"},
             {"name": "critical"},
-            {"name": "data-quality"}
+            {"name": "data-quality"},
         ]
     }
 
 
 class TestExecutePolicyListExport:
     """Test cases for execute_policy_list_export function."""
-    
-    def test_execute_policy_list_export_success(self, temp_dir, mock_client, mock_logger, sample_count_response, sample_policies_response, sample_assets_response):
+
+    def test_execute_policy_list_export_success(
+        self,
+        temp_dir,
+        mock_client,
+        mock_logger,
+        sample_count_response,
+        sample_policies_response,
+        sample_assets_response,
+    ):
         """Test successful policy list export execution."""
         # Mock API responses
         mock_client.make_api_call.side_effect = [
             sample_count_response,  # Count call
             sample_policies_response,  # First page
             sample_assets_response,  # Asset details for first policy
-            sample_assets_response   # Asset details for second policy
+            sample_assets_response,  # Asset details for second policy
         ]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger,
-                verbose_mode=True
+                client=mock_client, logger=mock_logger, verbose_mode=True
             )
-        
+
         # Verify output file was created
         output_file = temp_dir / "policy-export" / "policies-all-export.csv"
         assert output_file.exists()
-        
+
         # Verify CSV content
-        with open(output_file, 'r') as f:
+        with open(output_file, "r") as f:
             reader = csv.reader(f)
             rows = list(reader)
-            
-        assert rows[0] == ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes']
+
+        assert rows[0] == [
+            "id",
+            "type",
+            "engineType",
+            "tableAssetIds",
+            "assemblyIds",
+            "assemblyNames",
+            "sourceTypes",
+        ]
         assert len(rows) == 3  # Header + 2 data rows
-        
+
         # Verify data rows
-        assert rows[1][0] == '1'  # Policy ID
-        assert rows[1][1] == 'DataQuality'  # Policy type
-        assert rows[1][2] == 'SPARK'  # Engine type
-        assert '101,102' in rows[1][3]  # Table asset IDs
-        assert '201,202' in rows[1][4]  # Assembly IDs
-        assert 'Assembly 1,Assembly 2' in rows[1][5]  # Assembly names
+        assert rows[1][0] == "1"  # Policy ID
+        assert rows[1][1] == "DataQuality"  # Policy type
+        assert rows[1][2] == "SPARK"  # Engine type
+        assert "101,102" in rows[1][3]  # Table asset IDs
+        assert "201,202" in rows[1][4]  # Assembly IDs
+        assert "Assembly 1,Assembly 2" in rows[1][5]  # Assembly names
         # Source types are sorted alphabetically, so check both orders
         source_types = rows[1][6]
-        assert ('PostgreSQL' in source_types and 'MySQL' in source_types)  # Source types
-    
-    def test_execute_policy_list_export_no_policies(self, temp_dir, mock_client, mock_logger):
+        assert "PostgreSQL" in source_types and "MySQL" in source_types  # Source types
+
+    def test_execute_policy_list_export_no_policies(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test policy list export with no policies."""
         # Mock count response with 0 policies
-        count_response = {
-            "meta": {
-                "count": 0
-            }
-        }
-        
+        count_response = {"meta": {"count": 0}}
+
         mock_client.make_api_call.return_value = count_response
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_list_export(client=mock_client, logger=mock_logger)
+
         # Verify output file was created (even with no policies)
         output_file = temp_dir / "policy-export" / "policies-all-export.csv"
         assert output_file.exists()
-    
-    def test_execute_policy_list_export_api_error(self, temp_dir, mock_client, mock_logger):
+
+    def test_execute_policy_list_export_api_error(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test policy list export with API error."""
         # Mock API error
         mock_client.make_api_call.side_effect = Exception("API Error")
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_list_export(client=mock_client, logger=mock_logger)
+
         mock_logger.error.assert_called()
-    
-    def test_execute_policy_list_export_invalid_count_response(self, temp_dir, mock_client, mock_logger):
+
+    def test_execute_policy_list_export_invalid_count_response(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test policy list export with invalid count response."""
         # Mock invalid count response
         mock_client.make_api_call.return_value = {"error": "Invalid response"}
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_list_export(client=mock_client, logger=mock_logger)
+
         mock_logger.error.assert_called()
-    
-    def test_execute_policy_list_export_asset_api_error(self, temp_dir, mock_client, mock_logger, sample_count_response, sample_policies_response):
+
+    def test_execute_policy_list_export_asset_api_error(
+        self,
+        temp_dir,
+        mock_client,
+        mock_logger,
+        sample_count_response,
+        sample_policies_response,
+    ):
         """Test policy list export with asset API error."""
         # Mock responses
         mock_client.make_api_call.side_effect = [
             sample_count_response,  # Count call
             sample_policies_response,  # First page
-            Exception("Asset API Error")  # Asset details call fails
+            Exception("Asset API Error"),  # Asset details call fails
         ]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_list_export(client=mock_client, logger=mock_logger)
+
         # Verify output file was still created
         output_file = temp_dir / "policy-export" / "policies-all-export.csv"
         assert output_file.exists()
-        
+
         mock_logger.error.assert_called()
 
 
 class TestExecutePolicyExport:
     """Test cases for execute_policy_export function."""
-    
-    def test_execute_policy_export_success(self, temp_dir, mock_client, mock_logger, sample_policy_export_response):
+
+    def test_execute_policy_export_success(
+        self, temp_dir, mock_client, mock_logger, sample_policy_export_response
+    ):
         """Test successful policy export execution."""
         # Create test CSV file
         csv_file = temp_dir / "policy-export" / "policies-all-export.csv"
         csv_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(csv_file, 'w', newline='') as f:
+
+        with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-            writer.writerow(['2', 'DataDrift', 'JDBC_SQL', '103', '203', 'Assembly 3', 'Oracle'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+            writer.writerow(
+                ["2", "DataDrift", "JDBC_SQL", "103", "203", "Assembly 3", "Oracle"]
+            )
+
         # Mock API response
         mock_client.make_api_call.return_value = sample_policy_export_response
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_export(
                 client=mock_client,
                 logger=mock_logger,
-                export_type='rule-types',
-                verbose_mode=True
+                export_type="rule-types",
+                verbose_mode=True,
             )
-        
+
         # Verify output files were created
         zip_files = list(temp_dir.glob("**/*.zip"))
         assert len(zip_files) > 0
-    
-    def test_execute_policy_export_no_input_file(self, temp_dir, mock_client, mock_logger):
+
+    def test_execute_policy_export_no_input_file(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test policy export with no input file."""
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_export(client=mock_client, logger=mock_logger)
+
         mock_logger.error.assert_called()
         mock_client.make_api_call.assert_not_called()
-    
-    def test_execute_policy_export_invalid_csv_format(self, temp_dir, mock_client, mock_logger):
+
+    def test_execute_policy_export_invalid_csv_format(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test policy export with invalid CSV format."""
         # Create invalid CSV file
         csv_file = temp_dir / "policy-export" / "policies-all-export.csv"
         csv_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(csv_file, 'w', newline='') as f:
+
+        with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['invalid', 'header'])
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+            writer.writerow(["invalid", "header"])
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_export(client=mock_client, logger=mock_logger)
+
         mock_logger.error.assert_called()
         mock_client.make_api_call.assert_not_called()
-    
-    def test_execute_policy_export_with_filter(self, temp_dir, mock_client, mock_logger, sample_policy_export_response):
+
+    def test_execute_policy_export_with_filter(
+        self, temp_dir, mock_client, mock_logger, sample_policy_export_response
+    ):
         """Test policy export with filter."""
         # Create test CSV file
         csv_file = temp_dir / "policy-export" / "policies-all-export.csv"
         csv_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(csv_file, 'w', newline='') as f:
+
+        with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-            writer.writerow(['2', 'DataDrift', 'JDBC_SQL', '103', '203', 'Assembly 3', 'Oracle'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+            writer.writerow(
+                ["2", "DataDrift", "JDBC_SQL", "103", "203", "Assembly 3", "Oracle"]
+            )
+
         # Mock API response
         mock_client.make_api_call.return_value = sample_policy_export_response
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_export(
                 client=mock_client,
                 logger=mock_logger,
-                export_type='rule-types',
-                filter_value='DataQuality'
+                export_type="rule-types",
+                filter_value="DataQuality",
             )
-        
+
         # Verify only DataQuality policies were exported
         zip_files = list(temp_dir.glob("**/*.zip"))
         assert len(zip_files) > 0
-    
+
     def test_execute_policy_export_api_error(self, temp_dir, mock_client, mock_logger):
         """Test policy export with API error."""
         # Create test CSV file
         csv_file = temp_dir / "policy-export" / "policies-all-export.csv"
         csv_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(csv_file, 'w', newline='') as f:
+
+        with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+
         # Mock API error
         mock_client.make_api_call.side_effect = Exception("API Error")
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_export(client=mock_client, logger=mock_logger)
+
         mock_logger.error.assert_called()
-    
-    def test_execute_policy_export_engine_types(self, temp_dir, mock_client, mock_logger, sample_policy_export_response):
+
+    def test_execute_policy_export_engine_types(
+        self, temp_dir, mock_client, mock_logger, sample_policy_export_response
+    ):
         """Test policy export by engine types."""
         # Create test CSV file
         csv_file = temp_dir / "policy-export" / "policies-all-export.csv"
         csv_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(csv_file, 'w', newline='') as f:
+
+        with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-            writer.writerow(['2', 'DataDrift', 'JDBC_SQL', '103', '203', 'Assembly 3', 'Oracle'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+            writer.writerow(
+                ["2", "DataDrift", "JDBC_SQL", "103", "203", "Assembly 3", "Oracle"]
+            )
+
         # Mock API response
         mock_client.make_api_call.return_value = sample_policy_export_response
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_export(
-                client=mock_client,
-                logger=mock_logger,
-                export_type='engine-types'
+                client=mock_client, logger=mock_logger, export_type="engine-types"
             )
-        
+
         # Verify output files were created
         zip_files = list(temp_dir.glob("**/*.zip"))
         assert len(zip_files) > 0
-    
-    def test_execute_policy_export_assemblies(self, temp_dir, mock_client, mock_logger, sample_policy_export_response):
+
+    def test_execute_policy_export_assemblies(
+        self, temp_dir, mock_client, mock_logger, sample_policy_export_response
+    ):
         """Test policy export by assemblies."""
         # Create test CSV file
         csv_file = temp_dir / "policy-export" / "policies-all-export.csv"
         csv_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(csv_file, 'w', newline='') as f:
+
+        with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-            writer.writerow(['2', 'DataDrift', 'JDBC_SQL', '103', '203', 'Assembly 3', 'Oracle'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+            writer.writerow(
+                ["2", "DataDrift", "JDBC_SQL", "103", "203", "Assembly 3", "Oracle"]
+            )
+
         # Mock API response
         mock_client.make_api_call.return_value = sample_policy_export_response
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_export(
-                client=mock_client,
-                logger=mock_logger,
-                export_type='assemblies'
+                client=mock_client, logger=mock_logger, export_type="assemblies"
             )
-        
+
         # Verify output files were created
         zip_files = list(temp_dir.glob("**/*.zip"))
         assert len(zip_files) > 0
@@ -437,158 +559,175 @@ class TestExecutePolicyExport:
 
 class TestExecutePolicyImport:
     """Test cases for execute_policy_import function."""
-    
-    def test_execute_policy_import_success(self, temp_dir, mock_client, mock_logger, sample_policy_import_response):
+
+    def test_execute_policy_import_success(
+        self, temp_dir, mock_client, mock_logger, sample_policy_import_response
+    ):
         """Test successful policy import execution."""
         import zipfile
-        
+
         # Create test ZIP file
         zip_file = temp_dir / "policy-import" / "test-policy.zip"
         zip_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Create a proper ZIP file with some content
-        with zipfile.ZipFile(zip_file, 'w') as zf:
-            zf.writestr('policy.json', '{"test": "data"}')
-        
+        with zipfile.ZipFile(zip_file, "w") as zf:
+            zf.writestr("policy.json", '{"test": "data"}')
+
         # Mock API responses for upload-config and apply-config
         mock_client.make_api_call.side_effect = [
             sample_policy_import_response,  # upload-config response
-            {"status": "success"}          # apply-config response
+            {"status": "success"},  # apply-config response
         ]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
                 file_pattern=str(zip_file),
-                verbose_mode=True
+                verbose_mode=True,
             )
-        
-        # Verify API calls were made (upload-config + apply-config)
-        assert mock_client.make_api_call.call_count == 2
-    
-    def test_execute_policy_import_no_files_found(self, temp_dir, mock_client, mock_logger):
-        """Test policy import with no files found."""
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_import(
-                client=mock_client,
-                logger=mock_logger,
-                file_pattern="*.zip"
-            )
-        
-        mock_logger.error.assert_called()
-        mock_client.make_api_call.assert_not_called()
-    
-    def test_execute_policy_import_file_not_found(self, temp_dir, mock_client, mock_logger):
-        """Test policy import with file not found."""
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_import(
-                client=mock_client,
-                logger=mock_logger,
-                file_pattern="/nonexistent/file.zip"
-            )
-        
-        mock_logger.error.assert_called()
-        mock_client.make_api_call.assert_not_called()
-    
-    def test_execute_policy_import_api_error(self, temp_dir, mock_client, mock_logger):
-        """Test policy import with API error."""
-        import zipfile
-        
-        # Create test ZIP file
-        zip_file = temp_dir / "policy-import" / "test-policy.zip"
-        zip_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Create a proper ZIP file with some content
-        with zipfile.ZipFile(zip_file, 'w') as zf:
-            zf.writestr('policy.json', '{"test": "data"}')
-        
-        # Mock API error
-        mock_client.make_api_call.side_effect = Exception("API Error")
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_import(
-                client=mock_client,
-                logger=mock_logger,
-                file_pattern=str(zip_file)
-            )
-        
-        mock_logger.error.assert_called()
-    
-    def test_execute_policy_import_multiple_files(self, temp_dir, mock_client, mock_logger, sample_policy_import_response):
-        """Test policy import with multiple files."""
-        import zipfile
-        
-        # Create test ZIP files
-        zip_dir = temp_dir / "policy-import"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        
-        for i in range(3):
-            zip_file = zip_dir / f"test-policy-{i}.zip"
-            # Create a proper ZIP file with some content
-            with zipfile.ZipFile(zip_file, 'w') as zf:
-                zf.writestr('policy.json', f'{{"test": "data{i}"}}')
-        
-        # Mock API response
-        mock_client.make_api_call.return_value = sample_policy_import_response
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_import(
-                client=mock_client,
-                logger=mock_logger,
-                file_pattern=str(zip_dir / "*.zip")
-            )
-        
-        # Verify API calls were made for each file (2 calls per file: upload-config + apply-config)
-        assert mock_client.make_api_call.call_count == 6
-    
-    def test_execute_policy_import_absolute_path(self, temp_dir, mock_client, mock_logger, sample_policy_import_response):
-        """Test policy import with absolute path."""
-        import zipfile
-        
-        # Create test ZIP file
-        zip_file = temp_dir / "test-policy.zip"
-        
-        # Create a proper ZIP file with some content
-        with zipfile.ZipFile(zip_file, 'w') as zf:
-            zf.writestr('policy.json', '{"test": "data"}')
-        
-        # Mock API responses for upload-config and apply-config
-        mock_client.make_api_call.side_effect = [
-            sample_policy_import_response,  # upload-config response
-            {"status": "success"}          # apply-config response
-        ]
-        
-        execute_policy_import(
-            client=mock_client,
-            logger=mock_logger,
-            file_pattern=str(zip_file)
-        )
-        
+
         # Verify API calls were made (upload-config + apply-config)
         assert mock_client.make_api_call.call_count == 2
 
-    def test_execute_policy_import_two_step_process(self, temp_dir, mock_client, mock_logger):
-        """Test policy import with two-step process (upload-config + apply-config)."""
+    def test_execute_policy_import_no_files_found(
+        self, temp_dir, mock_client, mock_logger
+    ):
+        """Test policy import with no files found."""
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_import(
+                client=mock_client, logger=mock_logger, file_pattern="*.zip"
+            )
+
+        mock_logger.error.assert_called()
+        mock_client.make_api_call.assert_not_called()
+
+    def test_execute_policy_import_file_not_found(
+        self, temp_dir, mock_client, mock_logger
+    ):
+        """Test policy import with file not found."""
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_import(
+                client=mock_client,
+                logger=mock_logger,
+                file_pattern="/nonexistent/file.zip",
+            )
+
+        mock_logger.error.assert_called()
+        mock_client.make_api_call.assert_not_called()
+
+    def test_execute_policy_import_api_error(self, temp_dir, mock_client, mock_logger):
+        """Test policy import with API error."""
         import zipfile
-        
+
         # Create test ZIP file
         zip_file = temp_dir / "policy-import" / "test-policy.zip"
         zip_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Create a proper ZIP file with some content
-        with zipfile.ZipFile(zip_file, 'w') as zf:
-            zf.writestr('policy.json', '{"test": "data"}')
-        
+        with zipfile.ZipFile(zip_file, "w") as zf:
+            zf.writestr("policy.json", '{"test": "data"}')
+
+        # Mock API error
+        mock_client.make_api_call.side_effect = Exception("API Error")
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_import(
+                client=mock_client, logger=mock_logger, file_pattern=str(zip_file)
+            )
+
+        mock_logger.error.assert_called()
+
+    def test_execute_policy_import_multiple_files(
+        self, temp_dir, mock_client, mock_logger, sample_policy_import_response
+    ):
+        """Test policy import with multiple files."""
+        import zipfile
+
+        # Create test ZIP files
+        zip_dir = temp_dir / "policy-import"
+        zip_dir.mkdir(parents=True, exist_ok=True)
+
+        for i in range(3):
+            zip_file = zip_dir / f"test-policy-{i}.zip"
+            # Create a proper ZIP file with some content
+            with zipfile.ZipFile(zip_file, "w") as zf:
+                zf.writestr("policy.json", f'{{"test": "data{i}"}}')
+
+        # Mock API response
+        mock_client.make_api_call.return_value = sample_policy_import_response
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_import(
+                client=mock_client,
+                logger=mock_logger,
+                file_pattern=str(zip_dir / "*.zip"),
+            )
+
+        # Verify API calls were made for each file (2 calls per file: upload-config + apply-config)
+        assert mock_client.make_api_call.call_count == 6
+
+    def test_execute_policy_import_absolute_path(
+        self, temp_dir, mock_client, mock_logger, sample_policy_import_response
+    ):
+        """Test policy import with absolute path."""
+        import zipfile
+
+        # Create test ZIP file
+        zip_file = temp_dir / "test-policy.zip"
+
+        # Create a proper ZIP file with some content
+        with zipfile.ZipFile(zip_file, "w") as zf:
+            zf.writestr("policy.json", '{"test": "data"}')
+
+        # Mock API responses for upload-config and apply-config
+        mock_client.make_api_call.side_effect = [
+            sample_policy_import_response,  # upload-config response
+            {"status": "success"},  # apply-config response
+        ]
+
+        execute_policy_import(
+            client=mock_client, logger=mock_logger, file_pattern=str(zip_file)
+        )
+
+        # Verify API calls were made (upload-config + apply-config)
+        assert mock_client.make_api_call.call_count == 2
+
+    def test_execute_policy_import_two_step_process(
+        self, temp_dir, mock_client, mock_logger
+    ):
+        """Test policy import with two-step process (upload-config + apply-config)."""
+        import zipfile
+
+        # Create test ZIP file
+        zip_file = temp_dir / "policy-import" / "test-policy.zip"
+        zip_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create a proper ZIP file with some content
+        with zipfile.ZipFile(zip_file, "w") as zf:
+            zf.writestr("policy.json", '{"test": "data"}')
+
         # Mock upload-config response
         upload_response = {
             "conflictingAssemblies": [],
             "conflictingPolicies": [
-                {
-                    "ruleId": None,
-                    "ruleName": "test_policy",
-                    "ruleType": "DATA_QUALITY"
-                }
+                {"ruleId": None, "ruleName": "test_policy", "ruleType": "DATA_QUALITY"}
             ],
             "conflictingSqlViews": [],
             "conflictingVisualViews": [],
@@ -606,52 +745,66 @@ class TestExecutePolicyImport:
             "totalSchemaDriftPolicyCount": 0,
             "totalUDFPackages": 0,
             "totalUDFTemplates": 0,
-            "uuid": "bba64f45-e0f9-44ac-9f28-968422abaadc"
+            "uuid": "bba64f45-e0f9-44ac-9f28-968422abaadc",
         }
-        
+
         # Mock apply-config response (success)
         apply_response = {"status": "success"}
-        
+
         # Mock API calls to return different responses for upload and apply
         mock_client.make_api_call.side_effect = [upload_response, apply_response]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
                 file_pattern=str(zip_file),
-                verbose_mode=True
+                verbose_mode=True,
             )
-        
+
         # Verify both API calls were made
         assert mock_client.make_api_call.call_count == 2
-        
+
         # Verify upload-config call
         first_call = mock_client.make_api_call.call_args_list[0]
-        assert first_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/upload-config"
-        assert first_call[1]['method'] == 'POST'
-        assert 'files' in first_call[1]
-        
+        assert (
+            first_call[1]["endpoint"]
+            == "/catalog-server/api/rules/import/policy-definitions/upload-config"
+        )
+        assert first_call[1]["method"] == "POST"
+        assert "files" in first_call[1]
+
         # Verify apply-config call
         second_call = mock_client.make_api_call.call_args_list[1]
-        assert second_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/apply-config"
-        assert second_call[1]['method'] == 'POST'
-        assert 'json_payload' in second_call[1]
-        assert second_call[1]['json_payload']['uuid'] == "bba64f45-e0f9-44ac-9f28-968422abaadc"
-        assert second_call[1]['json_payload']['policyOverride'] is True
+        assert (
+            second_call[1]["endpoint"]
+            == "/catalog-server/api/rules/import/policy-definitions/apply-config"
+        )
+        assert second_call[1]["method"] == "POST"
+        assert "json_payload" in second_call[1]
+        assert (
+            second_call[1]["json_payload"]["uuid"]
+            == "bba64f45-e0f9-44ac-9f28-968422abaadc"
+        )
+        assert second_call[1]["json_payload"]["policyOverride"] is True
 
-    def test_execute_policy_import_upload_success_apply_failure(self, temp_dir, mock_client, mock_logger):
+    def test_execute_policy_import_upload_success_apply_failure(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test policy import where upload-config succeeds but apply-config fails."""
         import zipfile
-        
+
         # Create test ZIP file
         zip_file = temp_dir / "policy-import" / "test-policy.zip"
         zip_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Create a proper ZIP file with some content
-        with zipfile.ZipFile(zip_file, 'w') as zf:
-            zf.writestr('policy.json', '{"test": "data"}')
-        
+        with zipfile.ZipFile(zip_file, "w") as zf:
+            zf.writestr("policy.json", '{"test": "data"}')
+
         # Mock upload-config response (success)
         upload_response = {
             "conflictingAssemblies": [],
@@ -672,218 +825,327 @@ class TestExecutePolicyImport:
             "totalSchemaDriftPolicyCount": 0,
             "totalUDFPackages": 0,
             "totalUDFTemplates": 0,
-            "uuid": "test-uuid-123"
+            "uuid": "test-uuid-123",
         }
-        
+
         # Mock apply-config response (failure)
         apply_response = {"error": "Apply failed"}
-        
+
         # Mock API calls to return different responses for upload and apply
         mock_client.make_api_call.side_effect = [upload_response, apply_response]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_import(
                 client=mock_client,
                 logger=mock_logger,
                 file_pattern=str(zip_file),
-                verbose_mode=True
+                verbose_mode=True,
             )
-        
+
         # Verify both API calls were made
         assert mock_client.make_api_call.call_count == 2
-        
+
         # Verify upload-config call
         first_call = mock_client.make_api_call.call_args_list[0]
-        assert first_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/upload-config"
-        assert first_call[1]['method'] == 'POST'
-        assert 'files' in first_call[1]
-        
+        assert (
+            first_call[1]["endpoint"]
+            == "/catalog-server/api/rules/import/policy-definitions/upload-config"
+        )
+        assert first_call[1]["method"] == "POST"
+        assert "files" in first_call[1]
+
         # Verify apply-config call
         second_call = mock_client.make_api_call.call_args_list[1]
-        assert second_call[1]['endpoint'] == "/catalog-server/api/rules/import/policy-definitions/apply-config"
-        assert second_call[1]['method'] == 'POST'
-        assert 'json_payload' in second_call[1]
-        assert second_call[1]['json_payload']['uuid'] == "test-uuid-123"
-        assert second_call[1]['json_payload']['policyOverride'] is True
+        assert (
+            second_call[1]["endpoint"]
+            == "/catalog-server/api/rules/import/policy-definitions/apply-config"
+        )
+        assert second_call[1]["method"] == "POST"
+        assert "json_payload" in second_call[1]
+        assert second_call[1]["json_payload"]["uuid"] == "test-uuid-123"
+        assert second_call[1]["json_payload"]["policyOverride"] is True
 
 
 class TestExecuteRuleTagExport:
     """Test cases for execute_rule_tag_export function."""
-    
-    def test_execute_rule_tag_export_success(self, temp_dir, mock_client, mock_logger, sample_rule_tags_response):
+
+    def test_execute_rule_tag_export_success(
+        self, temp_dir, mock_client, mock_logger, sample_rule_tags_response
+    ):
         """Test successful rule tag export execution."""
         # Create test policies CSV file
         policies_file = temp_dir / "policy-export" / "policies-all-export.csv"
         policies_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(policies_file, 'w', newline='') as f:
+
+        with open(policies_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-            writer.writerow(['2', 'DataDrift', 'JDBC_SQL', '103', '203', 'Assembly 3', 'Oracle'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+            writer.writerow(
+                ["2", "DataDrift", "JDBC_SQL", "103", "203", "Assembly 3", "Oracle"]
+            )
+
         # Mock API response
         mock_client.make_api_call.return_value = sample_rule_tags_response
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_rule_tag_export(
-                client=mock_client,
-                logger=mock_logger,
-                verbose_mode=True
+                client=mock_client, logger=mock_logger, verbose_mode=True
             )
-        
+
         # Verify output file was created
         output_file = temp_dir / "policy-export" / "rule-tags-export.csv"
         assert output_file.exists()
-        
+
         # Verify CSV content
-        with open(output_file, 'r') as f:
+        with open(output_file, "r") as f:
             reader = csv.reader(f)
             rows = list(reader)
-            
-        assert rows[0] == ['rule_id', 'tags']
+
+        assert rows[0] == ["rule_id", "tags"]
         assert len(rows) == 3  # Header + 2 data rows
-        
+
         # Verify data rows
-        assert rows[1][0] == '1'  # Rule ID
-        assert 'production,critical,data-quality' in rows[1][1]  # Tags
-    
-    def test_execute_rule_tag_export_no_policies_file(self, temp_dir, mock_client, mock_logger):
+        assert rows[1][0] == "1"  # Rule ID
+        assert "production,critical,data-quality" in rows[1][1]  # Tags
+
+    def test_execute_rule_tag_export_no_policies_file(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test rule tag export with no policies file."""
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_rule_tag_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_rule_tag_export(client=mock_client, logger=mock_logger)
+
         mock_logger.error.assert_called()
-    
+
     def test_execute_rule_tag_export_no_tags(self, temp_dir, mock_client, mock_logger):
         """Test rule tag export with no tags."""
         # Create test policies CSV file
         policies_file = temp_dir / "policy-export" / "policies-all-export.csv"
         policies_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(policies_file, 'w', newline='') as f:
+
+        with open(policies_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+
         # Mock API response with no tags
         mock_client.make_api_call.return_value = {"ruleTags": []}
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_rule_tag_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_rule_tag_export(client=mock_client, logger=mock_logger)
+
         # Verify output file was created (but empty for rules with no tags)
         output_file = temp_dir / "policy-export" / "rule-tags-export.csv"
         assert output_file.exists()
-        
+
         # Verify CSV content
-        with open(output_file, 'r') as f:
+        with open(output_file, "r") as f:
             reader = csv.reader(f)
             rows = list(reader)
-            
-        assert rows[0] == ['rule_id', 'tags']
+
+        assert rows[0] == ["rule_id", "tags"]
         assert len(rows) == 1  # Only header, no data rows (no tags)
-    
-    def test_execute_rule_tag_export_api_error(self, temp_dir, mock_client, mock_logger):
+
+    def test_execute_rule_tag_export_api_error(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test rule tag export with API error."""
         # Create test policies CSV file
         policies_file = temp_dir / "policy-export" / "policies-all-export.csv"
         policies_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(policies_file, 'w', newline='') as f:
+
+        with open(policies_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['1', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-        
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
+            )
+            writer.writerow(
+                [
+                    "1",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+
         # Mock API error
         mock_client.make_api_call.side_effect = Exception("API Error")
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_rule_tag_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_rule_tag_export(client=mock_client, logger=mock_logger)
+
         mock_logger.error.assert_called()
-    
-    def test_execute_rule_tag_export_invalid_rule_id(self, temp_dir, mock_client, mock_logger):
+
+    def test_execute_rule_tag_export_invalid_rule_id(
+        self, temp_dir, mock_client, mock_logger
+    ):
         """Test rule tag export with invalid rule ID."""
         # Create test policies CSV file with invalid rule ID
         policies_file = temp_dir / "policy-export" / "policies-all-export.csv"
         policies_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(policies_file, 'w', newline='') as f:
+
+        with open(policies_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-            writer.writerow(['invalid', 'DataQuality', 'SPARK', '101,102', '201,202', 'Assembly 1,Assembly 2', 'PostgreSQL,MySQL'])
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_rule_tag_export(
-                client=mock_client,
-                logger=mock_logger
+            writer.writerow(
+                [
+                    "id",
+                    "type",
+                    "engineType",
+                    "tableAssetIds",
+                    "assemblyIds",
+                    "assemblyNames",
+                    "sourceTypes",
+                ]
             )
-        
+            writer.writerow(
+                [
+                    "invalid",
+                    "DataQuality",
+                    "SPARK",
+                    "101,102",
+                    "201,202",
+                    "Assembly 1,Assembly 2",
+                    "PostgreSQL,MySQL",
+                ]
+            )
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_rule_tag_export(client=mock_client, logger=mock_logger)
+
         # Verify no API calls were made for invalid rule ID
         mock_client.make_api_call.assert_not_called()
 
 
 class TestPolicyOperationsIntegration:
     """Integration tests for policy operations."""
-    
-    def test_policy_list_export_export_import_workflow(self, temp_dir, mock_client, mock_logger, sample_count_response, sample_policies_response, sample_assets_response, sample_policy_export_response, sample_policy_import_response):
+
+    def test_policy_list_export_export_import_workflow(
+        self,
+        temp_dir,
+        mock_client,
+        mock_logger,
+        sample_count_response,
+        sample_policies_response,
+        sample_assets_response,
+        sample_policy_export_response,
+        sample_policy_import_response,
+    ):
         """Test complete policy list export, export, and import workflow."""
         # Step 1: Export policy list
         mock_client.make_api_call.side_effect = [
             sample_count_response,
             sample_policies_response,
             sample_assets_response,
-            sample_assets_response
+            sample_assets_response,
         ]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-            execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
+            execute_policy_list_export(client=mock_client, logger=mock_logger)
+
         # Verify policy list file was created
         policies_file = temp_dir / "policy-export" / "policies-all-export.csv"
         assert policies_file.exists()
-        
-                # Step 2: Export policies
+
+        # Step 2: Export policies
         # Reset the mock to return the export response
         mock_client.make_api_call.reset_mock()
         mock_client.make_api_call.return_value = sample_policy_export_response
 
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_export(
-                client=mock_client,
-                logger=mock_logger,
-                export_type='rule-types'
+                client=mock_client, logger=mock_logger, export_type="rule-types"
             )
 
         # Verify ZIP files were created (or at least the export process completed)
         # The export might fail due to mock setup, but we can verify the process ran
         assert mock_client.make_api_call.call_count > 0
-        
+
         # Step 3: Import policies
         mock_client.make_api_call.return_value = sample_policy_import_response
-        
+
         execute_policy_import(
-            client=mock_client,
-            logger=mock_logger,
-            file_pattern="*.zip"
+            client=mock_client, logger=mock_logger, file_pattern="*.zip"
         )
-        
+
         # Verify API calls were made for import
         assert mock_client.make_api_call.call_count > 0
-    
+
     def test_policy_operations_error_handling(self, temp_dir, mock_client, mock_logger):
         """Test error handling across different policy operations."""
         # Test with various error conditions
@@ -895,104 +1157,132 @@ class TestPolicyOperationsIntegration:
             # Policy import with no files
             ("policy-import", FileNotFoundError("No files found")),
         ]
-        
+
         for operation, error in test_cases:
             mock_client.make_api_call.side_effect = error
-            
+
             if operation == "policy-list-export":
-                with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-                    execute_policy_list_export(
-                        client=mock_client,
-                        logger=mock_logger
-                    )
+                with patch(
+                    "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+                    temp_dir,
+                ):
+                    execute_policy_list_export(client=mock_client, logger=mock_logger)
             elif operation == "policy-export":
-                with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
-                    execute_policy_export(
-                        client=mock_client,
-                        logger=mock_logger
-                    )
+                with patch(
+                    "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+                    temp_dir,
+                ):
+                    execute_policy_export(client=mock_client, logger=mock_logger)
             elif operation == "policy-import":
-                with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+                with patch(
+                    "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+                    temp_dir,
+                ):
                     execute_policy_import(
-                        client=mock_client,
-                        logger=mock_logger,
-                        file_pattern="*.zip"
+                        client=mock_client, logger=mock_logger, file_pattern="*.zip"
                     )
-            
+
             # Verify error was logged
             mock_logger.error.assert_called()
             mock_logger.reset_mock()
-    
-    def test_policy_operations_without_global_output_dir(self, temp_dir, mock_client, mock_logger, sample_count_response, sample_policies_response, sample_assets_response):
+
+    def test_policy_operations_without_global_output_dir(
+        self,
+        temp_dir,
+        mock_client,
+        mock_logger,
+        sample_count_response,
+        sample_policies_response,
+        sample_assets_response,
+    ):
         """Test policy operations without global output directory."""
         # Mock API responses
         mock_client.make_api_call.side_effect = [
             sample_count_response,
             sample_policies_response,
             sample_assets_response,
-            sample_assets_response
+            sample_assets_response,
         ]
-        
+
         # Create a timestamped directory
         timestamp = datetime.now().strftime("%Y%m%d%H%M")
         toolkit_dir = temp_dir / f"adoc-migration-toolkit-{timestamp}"
         toolkit_dir.mkdir()
-        
+
         # Mock Path.cwd to return temp_dir
-        with patch('pathlib.Path.cwd', return_value=temp_dir):
-            execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger
-            )
-        
+        with patch("pathlib.Path.cwd", return_value=temp_dir):
+            execute_policy_list_export(client=mock_client, logger=mock_logger)
+
         # Verify output was created in the timestamped directory
-        output_files = list(temp_dir.glob("adoc-migration-toolkit-*/policy-export/policies-all-export.csv"))
+        output_files = list(
+            temp_dir.glob(
+                "adoc-migration-toolkit-*/policy-export/policies-all-export.csv"
+            )
+        )
         assert len(output_files) > 0
-    
-    def test_policy_operations_verbose_mode(self, temp_dir, mock_client, mock_logger, sample_count_response, sample_policies_response, sample_assets_response):
+
+    def test_policy_operations_verbose_mode(
+        self,
+        temp_dir,
+        mock_client,
+        mock_logger,
+        sample_count_response,
+        sample_policies_response,
+        sample_assets_response,
+    ):
         """Test policy operations in verbose mode."""
         # Mock API responses
         mock_client.make_api_call.side_effect = [
             sample_count_response,
             sample_policies_response,
             sample_assets_response,
-            sample_assets_response
+            sample_assets_response,
         ]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger,
-                verbose_mode=True
+                client=mock_client, logger=mock_logger, verbose_mode=True
             )
-        
+
         # Verify output file was created
         output_file = temp_dir / "policy-export" / "policies-all-export.csv"
         assert output_file.exists()
-        
+
         # Verify verbose output was generated (API calls were made)
         assert mock_client.make_api_call.call_count > 0
-    
-    def test_policy_operations_quiet_mode(self, temp_dir, mock_client, mock_logger, sample_count_response, sample_policies_response, sample_assets_response):
+
+    def test_policy_operations_quiet_mode(
+        self,
+        temp_dir,
+        mock_client,
+        mock_logger,
+        sample_count_response,
+        sample_policies_response,
+        sample_assets_response,
+    ):
         """Test policy operations in quiet mode."""
         # Mock API responses
         mock_client.make_api_call.side_effect = [
             sample_count_response,
             sample_policies_response,
             sample_assets_response,
-            sample_assets_response
+            sample_assets_response,
         ]
-        
-        with patch('src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR', temp_dir):
+
+        with patch(
+            "src.adoc_migration_toolkit.execution.policy_operations.globals.GLOBAL_OUTPUT_DIR",
+            temp_dir,
+        ):
             execute_policy_list_export(
-                client=mock_client,
-                logger=mock_logger,
-                quiet_mode=True
+                client=mock_client, logger=mock_logger, quiet_mode=True
             )
-        
+
         # Verify output file was created
         output_file = temp_dir / "policy-export" / "policies-all-export.csv"
         assert output_file.exists()
-        
+
         # Verify API calls were made (quiet mode doesn't affect functionality)
-        assert mock_client.make_api_call.call_count > 0 
+        assert mock_client.make_api_call.call_count > 0
