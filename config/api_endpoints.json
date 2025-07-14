@@ -1,0 +1,190 @@
+{
+  "description": "Configuration file for GET and PUT API endpoints used in auto-completion",
+  "version": "1.0",
+  "endpoints": {
+    "GET": [
+      {
+        "path": "/catalog-server/api/assets/sample/result/:requestId",
+        "description": "Retrieve Sample Data Status and Results"
+      },
+      {
+        "path": "/catalog-server/api/assets/:id/metadata",
+        "description": "Retrieve Asset Metadata"
+      },
+      {
+        "path": "/catalog-server/api/assets/search",
+        "description": "Get all policies",
+        "parameters": {
+          "name": "string",
+          "ids": "string"
+        }
+      },
+      {
+        "path": "/catalog-server/api/assets",
+        "description": "Search Asset by UID",
+        "parameters": {
+          "uid": "string"
+        }
+      },
+      {
+        "path": "/catalog-server/api/assets/:uid/metadata",
+        "description": "Retrieve Asset Metadata by UID",
+        "parameters": {}
+      }
+    ],
+    "PUT": [
+      {
+        "path": "/api/v1/assets/:id",
+        "description": "Update asset by ID",
+        "json_template": {
+          "name": "string",
+          "description": "string",
+          "tags": ["string"],
+          "config": {}
+        },
+        "json_examples": [
+          {
+            "name": "Updated Asset Name",
+            "description": "Updated description",
+            "tags": ["production", "critical"],
+            "config": {
+              "enabled": true,
+              "threshold": 100
+            }
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/assets/:id/config",
+        "description": "Update asset configuration",
+        "json_template": {
+          "enabled": "boolean",
+          "threshold": "number",
+          "notifications": "boolean"
+        },
+        "json_examples": [
+          {
+            "enabled": true,
+            "threshold": 95,
+            "notifications": true
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/policies/:id",
+        "description": "Update policy by ID",
+        "json_template": {
+          "name": "string",
+          "description": "string",
+          "rules": [],
+          "active": "boolean"
+        },
+        "json_examples": [
+          {
+            "name": "Updated Policy",
+            "description": "Updated policy description",
+            "rules": [
+              {
+                "condition": "threshold > 90",
+                "action": "alert"
+              }
+            ],
+            "active": true
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/segments/:id",
+        "description": "Update segment by ID",
+        "json_template": {
+          "name": "string",
+          "spark_uid": "string",
+          "config": {}
+        },
+        "json_examples": [
+          {
+            "name": "Updated Segment",
+            "spark_uid": "spark-12345",
+            "config": {
+              "auto_scaling": true,
+              "max_nodes": 10
+            }
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/config",
+        "description": "Update system configuration",
+        "json_template": {
+          "log_level": "string",
+          "timeout": "number",
+          "retry_count": "number"
+        },
+        "json_examples": [
+          {
+            "log_level": "INFO",
+            "timeout": 30,
+            "retry_count": 3
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/users/:id",
+        "description": "Update user by ID",
+        "json_template": {
+          "name": "string",
+          "email": "string",
+          "role": "string",
+          "active": "boolean"
+        },
+        "json_examples": [
+          {
+            "name": "Updated User",
+            "email": "user@example.com",
+            "role": "admin",
+            "active": true
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/dashboards/:id",
+        "description": "Update dashboard by ID",
+        "json_template": {
+          "name": "string",
+          "category": "string",
+          "widgets": [],
+          "active": "boolean"
+        },
+        "json_examples": [
+          {
+            "name": "Updated Dashboard",
+            "category": "monitoring",
+            "widgets": [
+              {
+                "type": "chart",
+                "title": "CPU Usage"
+              }
+            ],
+            "active": true
+          }
+        ]
+      }
+    ]
+  },
+  "parameter_values": {
+    "include": ["profile", "config", "tags", "metadata"],
+    "type": ["alert", "threshold", "compliance", "custom"],
+    "role": ["admin", "user", "viewer", "editor"],
+    "log_level": ["DEBUG", "INFO", "WARNING", "ERROR"],
+    "category": ["monitoring", "analytics", "reporting", "custom"]
+  },
+  "id_examples": {
+    "assets": ["asset-123", "asset-456", "spark-asset-789"],
+    "policies": ["policy-001", "policy-002", "compliance-policy-003"],
+    "segments": ["segment-abc", "segment-def", "spark-segment-xyz"],
+    "users": ["user-001", "admin-002", "viewer-003"],
+    "dashboards": ["dashboard-001", "monitor-dash-002", "analytics-dash-003"],
+    "uid": ["uid-12345", "spark-uid-67890", "catalog-uid-abcd"],
+    "requestId": ["req-001", "sample-req-123", "result-req-456"]
+  }
+}

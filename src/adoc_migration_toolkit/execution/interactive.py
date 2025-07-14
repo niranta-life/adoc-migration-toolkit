@@ -1396,7 +1396,7 @@ def run_interactive(args):
         while True:
             try:
                 # Get user input with improved handling
-                command = get_user_input("\n\033[1m\033[36mADOC\033[0m > ")
+                command = get_user_input("\nADOC > ")
 
                 if not command:
                     continue
@@ -1444,6 +1444,8 @@ def run_interactive(args):
                     "PUT",  # REST API commands
                     "set-output-dir",
                     "set-log-level",
+                    "set-http-config",
+                    "show-config",
                     # Utility commands (will be filtered anyway)
                     "help",
                     "history",

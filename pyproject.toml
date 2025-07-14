@@ -30,7 +30,7 @@ dependencies = [
     "tqdm>=4.65.0",
     "click>=8.0.0",
     "keyring>=24.0.0",
-    "prompt_toolkit>=3.0.0",
+    "prompt-toolkit>=3.0.0",
 ]
 
 [project.optional-dependencies]
