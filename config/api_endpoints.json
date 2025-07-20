@@ -29,7 +29,9 @@
       {
         "path": "/catalog-server/api/assets/:uid/metadata",
         "description": "Retrieve Asset Metadata by UID",
-        "parameters": {}
+        "parameters": {
+          "uid": "string"
+        }
       }
     ],
     "PUT": [
