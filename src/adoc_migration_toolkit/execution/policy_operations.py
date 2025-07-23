@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .utils import create_progress_bar
 from ..shared.file_utils import get_output_file_path
 from ..shared import globals
+from .utils import get_source_to_target_asset_id_map
 
 def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, existing_target_assets_mode: bool = False):
     """Execute the policy-list-export command.
@@ -579,7 +580,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
     try:
         # Determine output file path using the policy-export category
         output_file = get_output_file_path("", "policies-all-export.csv", category="policy-export")
-        
+        sql_policies_output_file = get_output_file_path("", "policies-sql-export.csv", category="policy-export")
         if not quiet_mode:
             print(f"\nExporting all rules from ADOC environment (Parallel Mode)")
             if existing_target_assets_mode:
@@ -823,13 +824,19 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             # Write processed policies to temporary CSV file
             with open(temp_file.name, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-                writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
-                
+                writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType',])
+                sqlBasedPolicies = 0
+                columnBasedPolicies = 0
                 for policy in processed_policies:
                     policy_id = policy.get('id', '')
                     policy_type = policy.get('type', '') or ''
+                    policy_sub_type = policy.get('subType', '') or ''
                     engine_type = policy.get('engineType', '') or ''
-                    
+
+                    if policy_type is not None and policy_sub_type == 'SQL':
+                        sqlBasedPolicies += 1
+                    else:
+                        columnBasedPolicies += 1
                     # Extract tableAssetIds from backingAssets
                     table_asset_ids = []
                     assembly_ids = set()
@@ -867,12 +874,14 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     
                     writer.writerow([
                         policy_id, 
-                        policy_type, 
+                        policy_type,
                         engine_type, 
                         table_asset_ids_str,
                         assembly_ids_str,
                         assembly_names_str,
-                        source_types_str
+                        source_types_str,
+                        policy_sub_type,
+
                     ])
             
             return {
@@ -882,7 +891,9 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 'total_asset_calls': total_asset_calls,
                 'successful_asset_calls': successful_asset_calls,
                 'failed_asset_calls': failed_asset_calls,
-                'temp_file': temp_file.name
+                'temp_file': temp_file.name,
+                'sqlBasedPolicies': sqlBasedPolicies,
+                'columnBasedPolicies': columnBasedPolicies
             }
         
         # Step 5: Start threads
@@ -914,7 +925,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             writer = csv.writer(output_csv, quoting=csv.QUOTE_ALL)
             
             # Write header
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes'])
+            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType'])
             
             # Merge all temporary files
             for temp_file in temp_files:
@@ -961,7 +972,14 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             writer.writerow(header)
             writer.writerows(rows)
-        
+        # Write SQL based policies to separate file
+        with open(sql_policies_output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(header)
+            for row in rows:
+                if row[7] == 'SQL':
+                    writer.writerow(row)
+        print(f"SQL based policies exported to {sql_policies_output_file}")
         # Step 9: Print statistics
         if not quiet_mode:
             print("\n" + "="*80)
@@ -974,14 +992,16 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             total_asset_calls = 0
             total_successful_asset_calls = 0
             total_failed_asset_calls = 0
-            
+            total_sql_based_policies = 0
+            total_column_based_policies = 0
             for result in thread_results:
                 total_processed += result['processed']
                 total_excluded += result.get('excluded', 0)
                 total_asset_calls += result['total_asset_calls']
                 total_successful_asset_calls += result['successful_asset_calls']
                 total_failed_asset_calls += result['failed_asset_calls']
-                
+                total_sql_based_policies += result['sqlBasedPolicies']
+                total_column_based_policies += result['columnBasedPolicies']
                 excluded_info = f", {result.get('excluded', 0)} excluded" if existing_target_assets_mode else ""
                 print(f"Thread {result['thread_id']}: {result['processed']} policies{excluded_info}, "
                       f"{result['successful_asset_calls']}/{result['total_asset_calls']} asset calls successful")
@@ -992,6 +1012,8 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             print(f"Total asset API calls made: {total_asset_calls}")
             print(f"Successful asset calls: {total_successful_asset_calls}")
             print(f"Failed asset calls: {total_failed_asset_calls}")
+            print(f"SQL based policies: {total_sql_based_policies}")
+            print(f"Column based policies: {total_column_based_policies}")
             print("="*80)
         
     except Exception as e:
@@ -2934,3 +2956,81 @@ def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
         raise
+
+
+def check_for_profiling_required_before_migration(client, logger: logging.Logger, policy_types: str, quiet_mode: bool = False, verbose_mode: bool = False):
+    if globals.GLOBAL_OUTPUT_DIR:
+        input_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+    else:
+        input_file = "policies-all-export.csv"
+
+    if not input_file.exists():
+        logger.error(f"Input file {input_file} does not exist, Please run 'policy-xfr' first to generate the policies-all-export.csv file")
+        print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/policy-export/policies-all-export.csv")
+        return None
+    # Read CSV data
+    asset_data = []
+    # Support comma-separated policy types
+    policy_types_list = [ptype.strip() for ptype in policy_types.split(',')] if policy_types else []
+    print(f"Policy types: {policy_types_list}")
+    with open(input_file, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        header = next(reader)  # Skip header
+        for row in reader:
+            if len(row) >= 7:
+                if str(row[1]).strip() in policy_types_list:
+                    tableAssetId = str(row[3])
+                    asset_data.append(tableAssetId)
+                    asset_data.append(str(int(tableAssetId)+1))
+                
+
+    if not asset_data:
+        print("❌ No valid asset data found in CSV file...")
+        logger.warning("No valid asset data found in CSV file...")
+        return None
+    print(f"Asset data: {asset_data}")
+    assets_mapped_csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
+    assets_mapping = get_source_to_target_asset_id_map(assets_mapped_csv_file, logger)
+
+    un_profiled_assets = []
+    for each_asset_id in asset_data:
+        if each_asset_id not in assets_mapping:
+            print(f"Source Asset {each_asset_id} not found in target assets_mapping, skipping...")
+            continue
+        target_table_asset = int(assets_mapping[each_asset_id])
+        try:
+            count_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets/{target_table_asset}/profiles",
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True,
+                )
+            if not count_response:
+                un_profiled_assets.append(target_table_asset)
+        except Exception as e:
+            print(f"Error getting profiles for asset {target_table_asset}: {e}")
+            un_profiled_assets.append(target_table_asset)
+            continue
+
+
+    if un_profiled_assets:
+        print(f"Assets required to be profiled on target : {un_profiled_assets}")
+        print(f"Tenant: {client.tenant}")
+        # Write asset_data to profile-assets.csv in asset-import directory
+        if globals.GLOBAL_OUTPUT_DIR:
+            profile_assets_csv = globals.GLOBAL_OUTPUT_DIR / "asset-import" / "profile-assets.csv"
+        else:
+            profile_assets_csv = Path("asset-import/profile-assets.csv")
+        profile_assets_csv.parent.mkdir(parents=True, exist_ok=True)
+        # Remove duplicates and write
+        unique_asset_ids = sorted(set(asset_data), key=lambda x: int(x) if x.isdigit() else x)
+        with open(profile_assets_csv, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['assetId'])
+            for asset_id in unique_asset_ids:
+                writer.writerow([asset_id])
+        print(f"Wrote asset IDs to {profile_assets_csv}")
+    else:
+        print("All assets are profiled on target")
+    
+    pass

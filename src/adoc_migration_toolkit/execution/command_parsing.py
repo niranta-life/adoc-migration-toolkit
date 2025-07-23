@@ -869,6 +869,45 @@ def parse_asset_config_import_command(command: str) -> tuple:
     
     return csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode 
 
+def parse_profile_command(command: str) -> tuple:
+    """Parse a profile command string into components.
+    
+    Args:
+        command: Command string like "profile [--type <policy_type>] [--quiet] [--verbose] [--parallel]"
+    Returns:
+        Tuple of (policy_type, parallel_mode, verbose_mode, quiet_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'profile-check':
+        return None, False, False, False
+
+    policy_type = None
+    parallel_mode = False
+    verbose_mode = False
+    quiet_mode = False
+
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--type' and i + 1 < len(parts):
+            policy_type = parts[i + 1]
+            parts.pop(i)
+            parts.pop(i)
+        elif parts[i] == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        else:
+            i += 1
+
+    return policy_type, parallel_mode, verbose_mode, quiet_mode
+
 
 
 

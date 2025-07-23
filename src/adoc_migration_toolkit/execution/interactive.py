@@ -17,7 +17,7 @@ from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
 from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import
-from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
+from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import, check_for_profiling_required_before_migration
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
 from adoc_migration_toolkit.shared import globals
@@ -1380,6 +1380,15 @@ def run_interactive(args):
                         execute_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
                     continue
                 
+                # Check if it's a profile-check command
+                if command.lower().startswith('profile-check'):
+                    from .command_parsing import parse_profile_command
+                    policy_types, parallel_mode, verbose_mode, quiet_mode = parse_profile_command(command)
+                    if parallel_mode:
+                        check_for_profiling_required_before_migration(client, logger, policy_types, quiet_mode, verbose_mode)
+                    else:
+                        check_for_profiling_required_before_migration(client, logger, policy_types, quiet_mode, verbose_mode)
+                    continue
                 # Check if it's a transform-and-merge command
                 if command.lower().startswith('transform-and-merge'):
                     from .command_parsing import parse_transform_and_merge_command
