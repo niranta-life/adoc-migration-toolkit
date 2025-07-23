@@ -1100,7 +1100,6 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
 
-
         query_params = [
             f"size=0",
             f"page=0",
@@ -1169,9 +1168,27 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                 print(f"\n[Page {page + 1}/{total_pages}] Retrieving assets...")
             
             try:
+                query_params = [
+                    f"size={page_size}",
+                    f"page={page}",
+                    f"parents=true"
+                ]
+
+                if asset_type_ids not in [None, 'None', 'null', '']:
+                    query_params.append(f"asset_type_ids={asset_type_ids}")
+
+                if source_type_ids not in [None, 'None', 'null', '']:
+                    query_params.append(f"source_type_ids={source_type_ids}")
+
+                if assembly_ids not in [None, 'None', 'null', '']:
+                    query_params.append(f"assembly_ids={assembly_ids}")
+
+                query_string = "&".join(query_params)
+                end_point_per_page = f"/catalog-server/api/assets/discover?{query_string}"
+
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: {end_point}")
+                    print(f"  Endpoint: {end_point_per_page}")
                     print(f"  Method: GET")
                     print(f"  Content-Type: application/json")
                     print(f"  Authorization: Bearer [REDACTED]")
@@ -1179,7 +1196,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                         print(f"  X-Tenant: {client.tenant}")
                 
                 page_response = client.make_api_call(
-                    endpoint=f"{end_point}",
+                    endpoint=f"{end_point_per_page}",
                     method='GET',
                     use_target_auth=use_target,
                     use_target_tenant=use_target
@@ -1490,6 +1507,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             
             # Create temporary file for this thread
             temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+            print(f"Writing to temp file - {temp_file.name}")
             temp_files.append(temp_file.name)
             
             # Create progress bar for this thread with green color
@@ -1509,19 +1527,36 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             # Process each page in this thread's range
             for page in range(start_page, end_page):
                 try:
+                    query_params = [
+                        f"size={page_size}",
+                        f"page={page}",
+                        f"parents=true"
+                    ]
+
+                    if asset_type_ids not in [None, 'None', 'null', '']:
+                        query_params.append(f"asset_type_ids={asset_type_ids}")
+
+                    if source_type_ids not in [None, 'None', 'null', '']:
+                        query_params.append(f"source_type_ids={source_type_ids}")
+
+                    if assembly_ids not in [None, 'None', 'null', '']:
+                        query_params.append(f"assembly_ids={assembly_ids}")
+
+                    query_string = "&".join(query_params)
+                    print(f"Query::: {query_string}")
+                    end_point_per_page = f"/catalog-server/api/assets/discover?{query_string}"
                     if verbose_mode:
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Processing page {page + 1}")
                         print(f"GET Request Headers:")
-                        print(f"  Endpoint: {end_point}")
+                        print(f"  Endpoint: {end_point_per_page}")
                         print(f"  Method: GET")
                         print(f"  Content-Type: application/json")
                         print(f"  Authorization: Bearer [REDACTED]")
                         if hasattr(thread_client, 'tenant') and thread_client.tenant:
                             print(f"  X-Tenant: {thread_client.tenant}")
-                    
                     page_response = thread_client.make_api_call(
-                        endpoint=f"{end_point}",
+                        endpoint=f"{end_point_per_page}",
                         method='GET',
                         use_target_auth=use_target,
                         use_target_tenant=use_target
@@ -2132,7 +2167,58 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         if not quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
-        raise 
+        raise
+
+
+def load_source_assets_to_target_assets_map(csv_file: str, logger: logging.Logger, quiet_mode: bool = False):
+    """Execute the asset-tag-import command.
+
+    Args:
+        csv_file: Path to the CSV file containing asset data
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        parallel_mode: Whether to use parallel processing
+    """
+    try:
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {csv_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv")
+            else:
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-merged-all.csv")
+            logger.error(error_msg)
+            return
+
+        # Read CSV data
+        asset_data = []
+        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            for row in reader:
+                if len(row) >= 5:
+                    source_id = str(row[0])
+                    target_id = str(row[2])
+                    asset_data.append((source_id, target_id))
+
+        if not asset_data:
+            print("❌ No valid asset data found in CSV file")
+            logger.warning("No valid asset data found in CSV file")
+            return None
+
+        # Return as a dict mapping source_id to target_id (both as strings)
+        return {source_id: target_id for source_id, target_id in asset_data}
+
+    except Exception as e:
+        error_msg = f"Error in asset-source to target map reading: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
 
 
 def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, parallel_mode: bool = False):
@@ -2734,6 +2820,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                 source_uid = asset['source_uid']
                 source_id = asset['source_id']
                 target_uid = asset['target_uid']
+                target_id = asset['target_id']
                 
                 if verbose_mode:
                     print(f"\n[Thread {thread_id}] Processing asset - source_uid: {source_uid}, source_id: {source_id}")
@@ -2756,7 +2843,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         if hasattr(client, 'tenant') and client.tenant:
                             print(f"  X-Tenant: {client.tenant}")
                     
-                    config_response = client.make_api_call(
+                    asset_config = client.make_api_call(
                         endpoint=f"/catalog-server/api/assets/{source_id}/config",
                         method='GET'
                     )
@@ -2764,11 +2851,48 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                     # Show response in verbose mode
                     if verbose_mode:
                         print(f"\n[Thread {thread_id}] Config Response:")
-                        print(json.dumps(config_response, indent=2, ensure_ascii=False))
+                        print(json.dumps(asset_config, indent=2, ensure_ascii=False))
                     
+                    asset_config_json = json.dumps(asset_config, ensure_ascii=False, separators=(',', ':'))
+
+                    asset_profile_anomaly_config = client.make_api_call(
+                        endpoint=f"/catalog-server/api/rules/profile-anomaly/byAsset/{source_id}",
+                        method='GET'
+                    )
+                    asset_profile_anomaly_config_json = json.dumps(asset_profile_anomaly_config, ensure_ascii=False, separators=(',', ':'))
+
+                    # Get child assets of each asset
+                    asset_child_assets_config = client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets/{source_id}/childAssets",
+                        method='GET'
+                    )
+
+                    asset_child_assets_config_json = json.dumps(asset_child_assets_config, ensure_ascii=False, separators=(',', ':'))
+                    asset_child_assets_config_dict = json.loads(asset_child_assets_config_json)
+
+                    # Build a dictionary of assetId -> uid
+                    asset_id_to_uid_map = {item["assetId"]: item["uid"] for item in asset_child_assets_config_dict["childAssets"]}
+                    asset_id_to_uid_map_json = json.dumps(asset_id_to_uid_map, ensure_ascii=False, separators=(',', ':'))
+
+
+                    # Get child assets of each asset
+                    asset_target_child_assets_config = client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets/{target_id}/childAssets",
+                        method='GET',
+                        use_target_auth=True,
+                        use_target_tenant=True
+                    )
+
+                    asset_target_child_assets_config_json = json.dumps(asset_target_child_assets_config, ensure_ascii=False, separators=(',', ':'))
+                    asset_target_child_assets_config_dict = json.loads(asset_target_child_assets_config_json)
+
+                    # Build a dictionary of assetId -> uid
+                    asset_target_id_to_uid_map = {item["assetId"]: item["uid"] for item in asset_target_child_assets_config_dict["childAssets"]}
+                    asset_target_id_to_uid_map_json = json.dumps(asset_target_id_to_uid_map, ensure_ascii=False, separators=(',', ':'))
+
+
                     # Write the compressed JSON response to CSV with target_uid
-                    config_json = json.dumps(config_response, ensure_ascii=False, separators=(',', ':'))
-                    thread_results.append([target_uid, config_json])
+                    thread_results.append([target_uid, asset_config_json, asset_profile_anomaly_config_json, asset_id_to_uid_map_json, asset_target_id_to_uid_map_json])
                     
                     if verbose_mode:
                         print(f"[Thread {thread_id}] ✅ Written to file: {target_uid}")
@@ -2837,7 +2961,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
             # Write header
-            writer.writerow(['target_uid', 'config_json'])
+            writer.writerow(['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json', 'asset_target_id_to_uid_map_json'])
             
             # Write all results
             writer.writerows(all_results)
@@ -2854,45 +2978,100 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                 validation_errors = []
                 
                 # Validate header
-                if len(header) != 2:
-                    validation_errors.append(f"Invalid header: expected 2 columns, got {len(header)}")
-                elif header[0] != 'target_uid' or header[1] != 'config_json':
-                    validation_errors.append(f"Invalid header: expected ['target_uid', 'config_json'], got {header}")
+                if len(header) != 4:
+                    validation_errors.append(f"Invalid header: expected 4 columns, got {len(header)}")
+                elif header[0] != 'target_uid' or header[1] != 'asset_config_json' or header[2] != 'asset_profile_anomaly_config_json' or header[3] != 'asset_id_to_uid_map_json' or header[4] != 'asset_target_id_to_uid_map_json':
+                    validation_errors.append(f"Invalid header: expected ['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json', 'asset_target_id_to_uid_map_json], got {header}")
                 
                 # Validate each row
                 for row_num, row in enumerate(reader, start=2):
                     row_count += 1
                     
                     # Check column count
-                    if len(row) != 2:
-                        validation_errors.append(f"Row {row_num}: Expected 2 columns, got {len(row)}")
+                    if len(row) != 4:
+                        validation_errors.append(f"Row {row_num}: Expected 4 columns, got {len(row)}")
                         continue
                     
-                    target_uid, config_json_str = row
+                    target_uid, config_json_str, asset_profile_anomaly_config_json_str, asset_id_to_uid_map_json_str, asset_target_id_to_uid_map_json_str = row
                     
                     # Check for empty values
                     if not target_uid.strip():
                         validation_errors.append(f"Row {row_num}: Empty target_uid value")
                     
                     if not config_json_str.strip():
-                        validation_errors.append(f"Row {row_num}: Empty config_json value")
+                        validation_errors.append(f"Row {row_num}: Empty asset_config_json value")
+
+                    if not asset_profile_anomaly_config_json_str.strip():
+                        validation_errors.append(f"Row {row_num}: Empty asset_profile_anomaly_config_json value")
                         continue
-                    
+
+                    if not asset_id_to_uid_map_json_str.strip():
+                        validation_errors.append(f"Row {row_num}: Empty asset_id_to_uid_map_json value")
+                        continue
+
+                    if not asset_target_id_to_uid_map_json_str.strip():
+                        validation_errors.append(f"Row {row_num}: Empty asset_target_id_to_uid_map_json value")
+                        continue
                     # Verify JSON is parsable
                     try:
                         config_data = json.loads(config_json_str)
                         
                         # Additional validation: check if it's a valid config response
                         if not isinstance(config_data, dict):
-                            validation_errors.append(f"Row {row_num}: config_json is not a valid JSON object")
+                            validation_errors.append(f"Row {row_num}: asset_config_json is not a valid JSON object")
                         elif not config_data:  # Empty object
-                            validation_errors.append(f"Row {row_num}: config_json is empty")
+                            validation_errors.append(f"Row {row_num}: asset_config_json is empty")
                         
                     except json.JSONDecodeError as e:
-                        validation_errors.append(f"Row {row_num}: Invalid JSON in config_json - {e}")
+                        validation_errors.append(f"Row {row_num}: Invalid JSON in asset_config_json - {e}")
                     except Exception as e:
-                        validation_errors.append(f"Row {row_num}: Error parsing config_json - {e}")
-                
+                        validation_errors.append(f"Row {row_num}: Error parsing asset_config_json - {e}")
+
+                    # Verify asset_profile_anomaly_config_json JSON is parsable
+                    try:
+                        config_data = json.loads(asset_profile_anomaly_config_json_str)
+
+                        # Additional validation: check if it's a valid config response
+                        if not isinstance(config_data, dict):
+                            validation_errors.append(f"Row {row_num}: asset_profile_anomaly_config_json is not a valid JSON object")
+                        elif not config_data:  # Empty object
+                            validation_errors.append(f"Row {row_num}: asset_profile_anomaly_config_json is empty")
+
+                    except json.JSONDecodeError as e:
+                        validation_errors.append(f"Row {row_num}: Invalid JSON in asset_profile_anomaly_config_json - {e}")
+                    except Exception as e:
+                        validation_errors.append(f"Row {row_num}: Error parsing asset_profile_anomaly_config_json - {e}")
+
+                    # Verify asset_id_to_uid_map_json JSON is parsable
+                    try:
+                        config_data = json.loads(asset_id_to_uid_map_json_str)
+
+                        # Additional validation: check if it's a valid config response
+                        if not isinstance(config_data, dict):
+                            validation_errors.append(f"Row {row_num}: asset_id_to_uid_map_json is not a valid JSON object")
+                        elif not config_data:  # Empty object
+                            validation_errors.append(f"Row {row_num}: asset_id_to_uid_map_json is empty")
+
+                    except json.JSONDecodeError as e:
+                        validation_errors.append(f"Row {row_num}: Invalid JSON in asset_id_to_uid_map_json - {e}")
+                    except Exception as e:
+                        validation_errors.append(f"Row {row_num}: Error parsing asset_id_to_uid_map_json - {e}")
+
+                        # Verify asset_id_to_uid_map_json JSON is parsable
+                    try:
+                        config_data = json.loads(asset_target_id_to_uid_map_json_str)
+
+                        # Additional validation: check if it's a valid config response
+                        if not isinstance(config_data, dict):
+                            validation_errors.append(
+                                f"Row {row_num}: asset_target_id_to_uid_map_json is not a valid JSON object")
+                        elif not config_data:  # Empty object
+                            validation_errors.append(f"Row {row_num}: asset_target_id_to_uid_map_json is empty")
+
+                    except json.JSONDecodeError as e:
+                        validation_errors.append(f"Row {row_num}: Invalid JSON in asset_target_id_to_uid_map_json - {e}")
+                    except Exception as e:
+                        validation_errors.append(f"Row {row_num}: Error parsing asset_target_id_to_uid_map_json - {e}")
                 # Report validation results
                 if verbose_mode or not quiet_mode:
                     if validation_errors:
@@ -2905,7 +3084,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                     else:
                         print(f"✅ CSV validation successful: {row_count} data rows read")
                         print(f"   Header: {header}")
-                        print(f"   Expected columns: target_uid, config_json")
+                        print(f"   Expected columns: target_uid, asset_config_json")
                         print(f"   All JSON entries are valid and parseable")
                         logger.info(f"CSV validation successful: {row_count} rows validated")
                 
@@ -2978,7 +3157,9 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                 print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-config-import-ready.csv")
             logger.error(error_msg)
             return
-        
+
+        assets_mapped_csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
+        assets_mapping = load_source_assets_to_target_assets_map(assets_mapped_csv_file, logger)
         # Read CSV data
         asset_data = []
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
@@ -2999,12 +3180,18 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                 if len(row) >= 2:  # Ensure we have at least target_uid and config_json
                     target_uid = row[0].strip()
                     config_json = row[1].strip()
+                    asset_profile_anomaly_config_json = row[2].strip()
+                    asset_id_to_uid_map_json = row[3].strip()
+                    asset_target_id_to_uid_map_json = row[4].strip()
                     if target_uid and config_json:  # Skip empty rows
                         asset_data.append({
                             'target_uid': target_uid,
-                            'config_json': config_json
+                            'config_json': config_json,
+                            'asset_profile_anomaly_config_json' : asset_profile_anomaly_config_json,
+                            'asset_id_to_uid_map_json': asset_id_to_uid_map_json,
+                            'asset_target_id_to_uid_map_json': asset_target_id_to_uid_map_json,
                         })
-        
+
         if not asset_data:
             print("❌ No valid asset data found in CSV file")
             logger.warning("No valid asset data found in CSV file")
@@ -3060,6 +3247,9 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                 asset = asset_data[i]
                 target_uid = asset['target_uid']
                 config_json = asset['config_json']
+                profile_anomaly_config_json = asset['asset_profile_anomaly_config_json']
+                source_asset_id_to_uid_map = asset['asset_id_to_uid_map_json']
+                target_asset_id_to_uid_map = asset['asset_target_id_to_uid_map_json']
                 
                 try:
                     # Step 1: Get asset ID from target_uid
@@ -3125,7 +3315,47 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                             print(f"   ❌ {error_msg}")
                         thread_failed += 1
                         thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
-                
+
+                    # Only process profile_anomaly_config_json if it has data
+                    if profile_anomaly_config_json and profile_anomaly_config_json.strip() and profile_anomaly_config_json.strip() not in ('{}', 'null'):
+                        print("Enter profile_anomaly_config_json")
+                        profile_anomaly_config_dict = json.loads(profile_anomaly_config_json)
+
+                        asset_profile_anomaly_response = client.make_api_call(
+                            endpoint=f'/catalog-server/api/rules/profile-anomaly/byAsset/{asset_id}',
+                            method='GET',
+                            json_payload=transformed_config,
+                            use_target_auth=True,
+                            use_target_tenant=True
+                        )
+
+                        rule_id = asset_profile_anomaly_response['rule']['id']
+                        print(f" AssetId : {asset_id} Rule ID: {rule_id} source ruleid :{profile_anomaly_config_dict['rule']['id']}")
+                        # Extract monitorColumns from details -> items
+                        source_items = profile_anomaly_config_dict['details']['items']
+                        each_item_monitor_columns = []
+                        for each_item in source_items:
+                            for monitorColumn in each_item['monitorColumns']:
+                                each_item_monitor_columns.append(assets_mapping.get(monitorColumn))
+
+                        items = asset_profile_anomaly_response['details']['items']
+                        for item in items:
+                            item["monitorColumns"] = each_item_monitor_columns
+
+                        # Remove 'details' key
+                        asset_profile_anomaly_response.pop("details", None)
+                        # Add 'items' with flattened monitorColumns
+                        asset_profile_anomaly_response["items"] = items
+                        asset_profile_anomaly_response_json = json.dumps(asset_profile_anomaly_response)
+                        print(f"endpoint /catalog-server/api/rules/profile-anomaly/{rule_id}")
+                        print(f"asset_profile_anomaly_response_json = {asset_profile_anomaly_response_json}")
+                        client.make_api_call(
+                            endpoint=f'/catalog-server/api/rules/profile-anomaly/{rule_id}',
+                            method='PUT',
+                            json_payload=asset_profile_anomaly_response,
+                            use_target_auth=True,
+                            use_target_tenant=True
+                        )
                 except Exception as e:
                     error_msg = f"Error processing {target_uid}: {str(e)}"
                     if verbose_mode:
@@ -3219,11 +3449,11 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
         logger.error(error_msg)
 
 
-def transform_config_json_to_asset_configuration(config_data: dict, asset_id: int) -> dict:
-    """Transform the raw config JSON from CSV into the required assetConfiguration format.
+def transform_config_json_to_asset_configuration(config_data_dict: dict, asset_id: int) -> dict:
+    """Transform the raw config_data JSON from CSV into the required assetConfiguration format.
     
     Args:
-        config_data: The raw configuration data from the CSV
+        config_data_dict: The raw configuration data from the CSV
         asset_id: The asset ID to include in the configuration
         
     Returns:
@@ -3242,26 +3472,18 @@ def transform_config_json_to_asset_configuration(config_data: dict, asset_id: in
         "cadenceAnomalyModelSensitivity", "resourceStrategyType",
         "selectedResourceInventory", "autoRetryEnabled"
     }
-    
-    # Start with the CSV config data as the base
-    if not isinstance(config_data, dict):
-        config_data = {}
-    
-    # Create a clean copy of the config data, removing predefined fields
-    clean_config = {}
-    for key, value in config_data.items():
-        if key not in predefined_fields:
-            clean_config[key] = value
-    
-    # Add the assetConfiguration wrapper with only the assetId
-    asset_config = {
-        "assetConfiguration": {
-            "assetId": asset_id,
-            **clean_config  # Include all non-predefined fields from CSV
-        }
-    }
-    
-    return asset_config
+
+    # print(f"config_data::: {json.dumps(config_data_dict, indent=2)}")
+    # Update assetId in the main assetConfiguration
+    if "assetConfiguration" in config_data_dict:
+        config_data_dict["assetConfiguration"]["assetId"] = asset_id
+        # Update assetId in freshnessColumnInfo if it exists
+        freshness = config_data_dict["assetConfiguration"].get("freshnessColumnInfo")
+        if freshness and "assetId" in freshness:
+            freshness["assetId"] = asset_id
+    # print(f"transform_config_json_to_asset_configuration : {json.dumps(config_data_dict, indent=2)}")
+
+    return config_data_dict
 
 
 

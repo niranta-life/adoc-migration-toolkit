@@ -159,9 +159,10 @@ def read_csv_asset_data(csv_file: str, logger: logging.Logger) -> List[Dict[str,
                             'source_uid': source_uid,
                             'source_id': source_id,
                             'target_uid': target_uid,
+                            'target_id' : target_id,
                             'tags': tags
                         })
-                        logger.debug(f"Row {row_num}: Found asset - source_id: {source_id}, source_uid: {source_uid}, target_uid: {target_uid}, tags: {tags}")
+                        logger.debug(f"Row {row_num}: Found asset - source_id: {source_id}, source_uid: {source_uid}, target_uid: {target_uid}, target_id: {target_id}, tags: {tags}")
                     else:
                         logger.warning(f"Row {row_num}: Empty required fields (source_id or target_uid)")
                 else:
