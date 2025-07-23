@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from adoc_migration_toolkit.execution.utils import create_progress_bar, read_csv_uids, read_csv_uids_single_column, read_csv_asset_data
 from ..shared.file_utils import get_output_file_path
 from ..shared import globals
+from .utils import get_source_to_target_asset_id_map
 
 
 def execute_asset_profile_export_guided(
@@ -2170,57 +2171,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         raise
 
 
-def load_source_assets_to_target_assets_map(csv_file: str, logger: logging.Logger, quiet_mode: bool = False):
-    """Execute the asset-tag-import command.
-
-    Args:
-        csv_file: Path to the CSV file containing asset data
-        client: API client instance
-        logger: Logger instance
-        quiet_mode: Whether to suppress console output
-        verbose_mode: Whether to enable verbose logging
-        parallel_mode: Whether to use parallel processing
-    """
-    try:
-        # Check if CSV file exists
-        csv_path = Path(csv_file)
-        if not csv_path.exists():
-            error_msg = f"CSV file does not exist: {csv_file}"
-            print(f"❌ {error_msg}")
-            print(f"💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file")
-            if globals.GLOBAL_OUTPUT_DIR:
-                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv")
-            else:
-                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-merged-all.csv")
-            logger.error(error_msg)
-            return
-
-        # Read CSV data
-        asset_data = []
-        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            header = next(reader)  # Skip header
-            for row in reader:
-                if len(row) >= 5:
-                    source_id = str(row[0])
-                    target_id = str(row[2])
-                    asset_data.append((source_id, target_id))
-
-        if not asset_data:
-            print("❌ No valid asset data found in CSV file")
-            logger.warning("No valid asset data found in CSV file")
-            return None
-
-        # Return as a dict mapping source_id to target_id (both as strings)
-        return {source_id: target_id for source_id, target_id in asset_data}
-
-    except Exception as e:
-        error_msg = f"Error in asset-source to target map reading: {e}"
-        if not quiet_mode:
-            print(f"❌ {error_msg}")
-        logger.error(error_msg)
-
-
 def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, parallel_mode: bool = False):
     """Execute the asset-tag-import command.
     
@@ -3159,7 +3109,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             return
 
         assets_mapped_csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
-        assets_mapping = load_source_assets_to_target_assets_map(assets_mapped_csv_file, logger)
+        assets_mapping = get_source_to_target_asset_id_map(assets_mapped_csv_file, logger)
         # Read CSV data
         asset_data = []
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
@@ -3247,9 +3197,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                 asset = asset_data[i]
                 target_uid = asset['target_uid']
                 config_json = asset['config_json']
-                profile_anomaly_config_json = asset['asset_profile_anomaly_config_json']
-                source_asset_id_to_uid_map = asset['asset_id_to_uid_map_json']
-                target_asset_id_to_uid_map = asset['asset_target_id_to_uid_map_json']
+                # profile_anomaly_config_json = asset['asset_profile_anomaly_config_json']
                 
                 try:
                     # Step 1: Get asset ID from target_uid
@@ -3316,46 +3264,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         thread_failed += 1
                         thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
 
-                    # Only process profile_anomaly_config_json if it has data
-                    if profile_anomaly_config_json and profile_anomaly_config_json.strip() and profile_anomaly_config_json.strip() not in ('{}', 'null'):
-                        print("Enter profile_anomaly_config_json")
-                        profile_anomaly_config_dict = json.loads(profile_anomaly_config_json)
-
-                        asset_profile_anomaly_response = client.make_api_call(
-                            endpoint=f'/catalog-server/api/rules/profile-anomaly/byAsset/{asset_id}',
-                            method='GET',
-                            json_payload=transformed_config,
-                            use_target_auth=True,
-                            use_target_tenant=True
-                        )
-
-                        rule_id = asset_profile_anomaly_response['rule']['id']
-                        print(f" AssetId : {asset_id} Rule ID: {rule_id} source ruleid :{profile_anomaly_config_dict['rule']['id']}")
-                        # Extract monitorColumns from details -> items
-                        source_items = profile_anomaly_config_dict['details']['items']
-                        each_item_monitor_columns = []
-                        for each_item in source_items:
-                            for monitorColumn in each_item['monitorColumns']:
-                                each_item_monitor_columns.append(assets_mapping.get(monitorColumn))
-
-                        items = asset_profile_anomaly_response['details']['items']
-                        for item in items:
-                            item["monitorColumns"] = each_item_monitor_columns
-
-                        # Remove 'details' key
-                        asset_profile_anomaly_response.pop("details", None)
-                        # Add 'items' with flattened monitorColumns
-                        asset_profile_anomaly_response["items"] = items
-                        asset_profile_anomaly_response_json = json.dumps(asset_profile_anomaly_response)
-                        print(f"endpoint /catalog-server/api/rules/profile-anomaly/{rule_id}")
-                        print(f"asset_profile_anomaly_response_json = {asset_profile_anomaly_response_json}")
-                        client.make_api_call(
-                            endpoint=f'/catalog-server/api/rules/profile-anomaly/{rule_id}',
-                            method='PUT',
-                            json_payload=asset_profile_anomaly_response,
-                            use_target_auth=True,
-                            use_target_tenant=True
-                        )
+                    import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, quiet_mode, verbose_mode,
+                                                   dry_run)
                 except Exception as e:
                     error_msg = f"Error processing {target_uid}: {str(e)}"
                     if verbose_mode:
@@ -3716,3 +3626,87 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         if verbose_mode:
             import traceback
             traceback.print_exc()
+
+
+def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, quiet_mode=False, verbose_mode=False, dry_run=False):
+    """
+    Import profile anomaly configs for a list of assets.
+    Args:
+        asset_data: List of asset dicts with keys including 'target_uid', 'config_json', 'asset_profile_anomaly_config_json', etc.
+        assets_mapping: Dict mapping source_id to target_id.
+        client: API client instance.
+        logger: Logger instance.
+        quiet_mode: Whether to suppress output.
+        verbose_mode: Whether to enable verbose output.
+        dry_run: If True, do not make actual API calls.
+    """
+    for asset in asset_data:
+        target_uid = asset['target_uid']
+        config_json = asset['config_json']
+        profile_anomaly_config_json = asset['asset_profile_anomaly_config_json']
+        try:
+            if profile_anomaly_config_json and profile_anomaly_config_json.strip() and profile_anomaly_config_json.strip() not in ('{}', 'null'):
+                if verbose_mode:
+                    print("Enter profile_anomaly_config_json")
+                profile_anomaly_config_dict = json.loads(profile_anomaly_config_json)
+
+                # Get asset_id from target_uid
+                response = client.make_api_call(
+                    endpoint=f'/catalog-server/api/assets?uid={target_uid}',
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+                if not response or 'data' not in response or not response['data']:
+                    error_msg = f"No asset found for UID: {target_uid}"
+                    if verbose_mode:
+                        print(f"   ❌ {error_msg}")
+                    logger.error(error_msg)
+                    continue
+                asset_id = response['data'][0]['id']
+
+                asset_profile_anomaly_response = client.make_api_call(
+                    endpoint=f'/catalog-server/api/rules/profile-anomaly/byAsset/{asset_id}',
+                    method='GET',
+                    json_payload=json.loads(config_json),
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+
+                rule_id = asset_profile_anomaly_response['rule']['id']
+                if verbose_mode:
+                    print(f" AssetId : {asset_id} Rule ID: {rule_id} source ruleid :{profile_anomaly_config_dict['rule']['id']}")
+                # Extract monitorColumns from details -> items
+                source_items = profile_anomaly_config_dict['details']['items']
+                each_item_monitor_columns = []
+                for each_item in source_items:
+                    for monitorColumn in each_item['monitorColumns']:
+                        each_item_monitor_columns.append(assets_mapping.get(monitorColumn))
+
+                items = asset_profile_anomaly_response['details']['items']
+                for item in items:
+                    item["monitorColumns"] = each_item_monitor_columns
+
+                # Remove 'details' key
+                asset_profile_anomaly_response.pop("details", None)
+                # Add 'items' with flattened monitorColumns
+                asset_profile_anomaly_response["items"] = items
+                asset_profile_anomaly_response_json = json.dumps(asset_profile_anomaly_response)
+                if verbose_mode:
+                    print(f"endpoint /catalog-server/api/rules/profile-anomaly/{rule_id}")
+                    print(f"asset_profile_anomaly_response_json = {asset_profile_anomaly_response_json}")
+                if not dry_run:
+                    client.make_api_call(
+                        endpoint=f'/catalog-server/api/rules/profile-anomaly/{rule_id}',
+                        method='PUT',
+                        json_payload=asset_profile_anomaly_response,
+                        use_target_auth=True,
+                        use_target_tenant=True
+                    )
+                if verbose_mode:
+                    print(f"............Rule {rule_id} done ............")
+        except Exception as e:
+            error_msg = f"Error processing {target_uid}: {str(e)}"
+            if verbose_mode:
+                print(f"   ❌ {error_msg}")
+            logger.error(error_msg)

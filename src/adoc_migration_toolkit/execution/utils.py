@@ -12,6 +12,8 @@ from typing import List, Tuple, Dict
 from tqdm import tqdm
 
 from ..shared.file_utils import get_output_file_path
+from ..shared import globals
+
 
 
 def create_progress_bar(total: int, desc: str = "Processing", unit: str = "items", disable: bool = False, position: int = None, leave: bool = True):
@@ -174,3 +176,56 @@ def read_csv_asset_data(csv_file: str, logger: logging.Logger) -> List[Dict[str,
     except Exception as e:
         logger.error(f"Error reading CSV file {csv_file}: {e}")
         raise 
+
+
+def get_source_to_target_asset_id_map(csv_file: str, logger, quiet_mode: bool = False):
+    """Load a mapping from source_id to target_id from a CSV file. Both keys and values are strings.
+
+    Args:
+        csv_file: Path to the CSV file containing asset data
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+    Returns:
+        dict: Mapping from source_id (str) to target_id (str)
+    """
+    import csv
+    from pathlib import Path
+    try:
+        # Check if CSV file exists
+        csv_path = Path(csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {csv_file}"
+            print(f"❌ {error_msg}")
+            print(f"💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file")
+            if hasattr(globals, 'GLOBAL_OUTPUT_DIR') and globals.GLOBAL_OUTPUT_DIR:
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv")
+            else:
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-merged-all.csv")
+            logger.error(error_msg)
+            return None
+
+        # Read CSV data
+        asset_data = []
+        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            for row in reader:
+                if len(row) >= 5:
+                    source_id = str(row[0])
+                    target_id = str(row[2])
+                    asset_data.append((source_id, target_id))
+
+        if not asset_data:
+            print("❌ No valid asset data found in CSV file")
+            logger.warning("No valid asset data found in CSV file")
+            return None
+
+        # Return as a dict mapping source_id to target_id (both as strings)
+        return {source_id: target_id for source_id, target_id in asset_data}
+
+    except Exception as e:
+        error_msg = f"Error in asset-source to target map reading: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        return None 
