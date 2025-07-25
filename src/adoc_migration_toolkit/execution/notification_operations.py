@@ -5,7 +5,7 @@ from pathlib import Path
 
 import requests
 
-# from adoc_migration_toolkit import get_output_file_path
+from ..shared.file_utils import get_output_file_path
 
 SOURCE_CONTEXT_ID=1643800761
 TARGET_CONTEXT_ID=1080269831
@@ -203,7 +203,7 @@ def write_notification_data_to_csv(notification_ids, notification_groups, output
     print(f"✅ Notification group info written to: {output_file}")
 
 
-def generate_comparison_csv(source_groups, target_groups, filename="notification_group_comparison.csv"):
+def generate_comparison_csv(source_groups, target_groups, filename):
     """Compare source vs target notification groups by NAME and write to CSV."""
     print("🔄 Generating notification group comparison report...")
 
@@ -230,7 +230,7 @@ def generate_comparison_csv(source_groups, target_groups, filename="notification
             "Comment": "" if exists_in_target else "Missing in target environment"
         })
 
-    with open(filename, mode="w", newline="", encoding="utf-8") as out_csv:
+    with open(filename.name, mode="w", newline="", encoding="utf-8") as out_csv:
         writer = csv.DictWriter(out_csv, fieldnames=[
             "Notification ID", "Notification Name", "Notification Type",
             "Present in Target", "Comment"
@@ -291,7 +291,7 @@ def precheck_on_notifications(client, logger: logging.Logger, source_context_id:
 
     # Generate default output file if not provided
 
-    # output_file = get_output_file_path(csv_file= '', default_filename = "notification_group_comparison.csv", category="notifications-check")
+    output_file = get_output_file_path(csv_file= '', default_filename = "notification_group_comparison.csv", category="notifications-check")
 
     print("📄 Generating source vs target notification comparison...")
-    generate_comparison_csv(notification_groups, target_notification_groups)
+    generate_comparison_csv(notification_groups, target_notification_groups, output_file)
