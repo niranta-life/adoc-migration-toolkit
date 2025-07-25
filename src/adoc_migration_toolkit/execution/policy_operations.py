@@ -1089,7 +1089,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
             # Check if this is the new format with additional columns
             if len(header) >= 7 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
                 # New format with additional columns
-                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes']
+                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType']
                 if len(header) != len(expected_columns):
                     error_msg = f"Invalid CSV format. Expected {len(expected_columns)} columns, got {len(header)}"
                     print(f"❌ {error_msg}")
@@ -2222,9 +2222,9 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
             # Check if this is the new format with additional columns
             if len(header) >= 7 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
                 # New format with additional columns
-                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes']
+                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType']
                 if len(header) != len(expected_columns):
-                    error_msg = f"Invalid CSV format. Expected {len(expected_columns)} columns, got {len(header)}"
+                    error_msg = f"Invalid CSV format.. Expected {len(expected_columns)} columns, got {len(header)}"
                     print(f"❌ {error_msg}")
                     logger.error(error_msg)
                     return
