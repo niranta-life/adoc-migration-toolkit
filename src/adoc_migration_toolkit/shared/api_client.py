@@ -356,7 +356,7 @@ class AcceldataAPIClient:
 
     def make_api_call(self, endpoint: str, method: str = 'GET', json_payload: Optional[Dict[str, Any]] = None, 
                      use_target_auth: bool = False, use_target_tenant: bool = False, return_binary: bool = False,
-                     files: Optional[Dict[str, Any]] = None, timeout: Optional[int] = None) -> Any:
+                     files: Optional[Dict[str, Any]] = None, timeout: Optional[int] = None, dont_parse_reponse: bool = False) -> Any:
         """
         Make a generic API call with configurable endpoint and method.
         
@@ -421,7 +421,8 @@ class AcceldataAPIClient:
                     response = temp_session.put(url, files=files, timeout=timeout)
                 else:
                     raise ValueError(f"File uploads only support POST and PUT methods, got {method}")
-                
+                if dont_parse_reponse:
+                    return response
                 response.raise_for_status()
                 return self._process_response(response, endpoint, method, return_binary)
                 
@@ -445,7 +446,8 @@ class AcceldataAPIClient:
             try:
                 response = self._execute_request(method, url, headers, json_payload, files, timeout)
                 response.raise_for_status()
-                
+                if dont_parse_reponse:
+                    return response
                 return self._process_response(response, endpoint, method, return_binary)
             
             except Timeout:

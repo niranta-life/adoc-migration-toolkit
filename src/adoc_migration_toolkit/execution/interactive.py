@@ -13,13 +13,15 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+from .command_parsing import parse_run_profile_command
 from .notification_operations import precheck_on_notifications
+from .profile_operations import check_for_profiling_required_before_migration, trigger_profile_action
 from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
 from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import
-from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import, check_for_profiling_required_before_migration
+from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
 from adoc_migration_toolkit.shared import globals
@@ -1385,11 +1387,21 @@ def run_interactive(args):
                 # Check if it's a profile-check command
                 if command.lower().startswith('profile-check'):
                     from .command_parsing import parse_profile_command
-                    policy_types, parallel_mode, verbose_mode, quiet_mode = parse_profile_command(command)
+                    policy_types, parallel_mode, run_profile, verbose_mode, quiet_mode = parse_profile_command(command)
                     if parallel_mode:
-                        check_for_profiling_required_before_migration(client, logger, policy_types, quiet_mode, verbose_mode)
+                        check_for_profiling_required_before_migration(client, logger, policy_types, run_profile, quiet_mode, verbose_mode)
                     else:
-                        check_for_profiling_required_before_migration(client, logger, policy_types, quiet_mode, verbose_mode)
+                        check_for_profiling_required_before_migration(client, logger, policy_types, run_profile, quiet_mode, verbose_mode)
+                    continue
+
+                # Check if it's a profile-run command
+                if command.lower().startswith('profile-run'):
+                    from .command_parsing import parse_run_profile_command
+                    profile_assets_config_csv_path, parallel_mode, verbose_mode, quiet_mode = parse_run_profile_command(command)
+                    if parallel_mode:
+                        trigger_profile_action(client, logger, profile_assets_config_csv_path, quiet_mode, verbose_mode)
+                    else:
+                        trigger_profile_action(client, logger, profile_assets_config_csv_path, quiet_mode, verbose_mode)
                     continue
 
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)

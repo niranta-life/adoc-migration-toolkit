@@ -9,19 +9,16 @@ import csv
 import json
 import logging
 import os
-import threading
 import tempfile
-from pathlib import Path
+import threading
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
-from tqdm import tqdm
 from glob import glob
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from .utils import create_progress_bar
-from ..shared.file_utils import get_output_file_path
 from ..shared import globals
-from .utils import get_source_to_target_asset_id_map
+from ..shared.file_utils import get_output_file_path
+
 
 def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, existing_target_assets_mode: bool = False):
     """Execute the policy-list-export command.
@@ -2975,79 +2972,3 @@ def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
         raise
-
-
-def check_for_profiling_required_before_migration(client, logger: logging.Logger, policy_types: str, quiet_mode: bool = False, verbose_mode: bool = False):
-    if globals.GLOBAL_OUTPUT_DIR:
-        input_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
-    else:
-        input_file = "policies-all-export.csv"
-
-    if not input_file.exists():
-        logger.error(f"Input file {input_file} does not exist, Please run 'policy-xfr' first to generate the policies-all-export.csv file")
-        print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/policy-export/policies-all-export.csv")
-        return None
-    # Read CSV data
-    asset_data = []
-    # Support comma-separated policy types
-    policy_types_list = [ptype.strip() for ptype in policy_types.split(',')] if policy_types else []
-    print(f"Policy types: {policy_types_list}")
-    with open(input_file, 'r', newline='', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        header = next(reader)  # Skip header
-        for row in reader:
-            if len(row) >= 7:
-                if str(row[1]).strip() in policy_types_list:
-                    tableAssetId = str(row[3])
-                    asset_data.append(tableAssetId)
-
-
-    if not asset_data:
-        print("❌ No valid asset data found in CSV file...")
-        logger.warning("No valid asset data found in CSV file...")
-        return None
-    print(f"Asset data: {asset_data}")
-    assets_mapped_csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
-    assets_mapping = get_source_to_target_asset_id_map(assets_mapped_csv_file, logger)
-    un_profiled_assets = []
-    for each_asset_id in asset_data:
-        if each_asset_id not in assets_mapping:
-            print(f"Source Asset {each_asset_id} not found in target assets_mapping, skipping...")
-            continue
-        target_table_asset = int(assets_mapping[each_asset_id])
-        try:
-            count_response = client.make_api_call(
-                    endpoint=f"/catalog-server/api/assets/{target_table_asset}/profiles",
-                    method='GET',
-                    use_target_auth=True,
-                    use_target_tenant=True,
-                )
-            if not count_response.get("profileRequests"):
-                un_profiled_assets.append(target_table_asset)
-        except Exception as e:
-            print(f"Error getting profiles for asset {target_table_asset}: {e}")
-            un_profiled_assets.append(target_table_asset)
-            continue
-
-
-    if un_profiled_assets:
-        print(f"Assets required to be profiled on target : {un_profiled_assets}")
-        print(f"Tenant: {client.tenant}")
-        # Write asset_data to profile-assets.csv in asset-import directory
-        if globals.GLOBAL_OUTPUT_DIR:
-            profile_assets_csv = globals.GLOBAL_OUTPUT_DIR / "asset-import" / "profile-assets.csv"
-        else:
-            profile_assets_csv = Path("asset-import/profile-assets.csv")
-        profile_assets_csv.parent.mkdir(parents=True, exist_ok=True)
-        # Remove duplicates and write
-        unique_asset_ids = sorted(set(asset_data), key=lambda x: int(x) if x.isdigit() else x)
-        with open(profile_assets_csv, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(['assetId'])
-            for asset_id in unique_asset_ids:
-                writer.writerow([asset_id])
-        print(f"Wrote asset IDs to {profile_assets_csv}")
-    else:
-        print("All assets are profiled on target")
-    
-    pass

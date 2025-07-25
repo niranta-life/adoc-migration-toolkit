@@ -3119,7 +3119,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
 
         assets_mapped_csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
         assets_mapping = get_source_to_target_asset_id_map(assets_mapped_csv_file, logger)
-        
+
         # Read CSV data
         asset_data = []
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
@@ -3691,7 +3691,12 @@ def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, q
                 each_item_monitor_columns = []
                 for each_item in source_items:
                     for monitorColumn in each_item['monitorColumns']:
-                        each_item_monitor_columns.append(assets_mapping.get(monitorColumn))
+                        target_info = assets_mapping.get(monitorColumn)
+                        if target_info is not None:
+                            each_item_monitor_columns.append(int(target_info["target_id"]))
+                        else:
+                            # Optionally handle missing mapping, e.g., log or skip
+                            pass
 
                 items = asset_profile_anomaly_response['details']['items']
                 for item in items:

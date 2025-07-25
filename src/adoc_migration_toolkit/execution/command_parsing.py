@@ -954,6 +954,7 @@ def parse_profile_command(command: str) -> tuple:
     parallel_mode = False
     verbose_mode = False
     quiet_mode = False
+    run_profile = False
 
     i = 1
     while i < len(parts):
@@ -972,11 +973,63 @@ def parse_profile_command(command: str) -> tuple:
             quiet_mode = True
             verbose_mode = False  # Quiet overrides verbose
             parts.remove('--quiet')
+        elif parts[i] == '--run-profile':
+            run_profile = True
+            parts.remove('--run-profile')
         else:
             i += 1
 
-    return policy_type, parallel_mode, verbose_mode, quiet_mode
+    return policy_type, parallel_mode, run_profile, verbose_mode, quiet_mode
 
+
+def parse_run_profile_command(command: str) -> tuple:
+    """Parse a profile command string into components.
+
+    Args:
+        command: Command string like 
+                 "profile-run --config <path> [--quiet] [--verbose] [--parallel]"
+
+    Returns:
+        Tuple of (profile_assets_config_path, parallel_mode, verbose_mode, quiet_mode)
+    """
+    parts = command.strip().split()
+    print(f"parts: {parts}")
+
+    if not parts or parts[0].lower() != 'profile-run':
+        return None, False, False, False
+
+    if '--config' not in parts:
+        raise ValueError("--config argument is required")
+
+    profile_assets_config_csv_path = None
+    parallel_mode = False
+    verbose_mode = False
+    quiet_mode = False
+
+    i = 1
+    while i < len(parts):
+        part = parts[i]
+        if part == '--config':
+            if i + 1 >= len(parts) or parts[i + 1].startswith('--'):
+                raise ValueError("--config argument requires a file path")
+            profile_assets_config_csv_path = parts[i + 1]
+            parts.pop(i)
+            parts.pop(i)
+        elif part == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
+        elif part == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif part == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        else:
+            i += 1  # Ignore unknown flags
+
+    return profile_assets_config_csv_path, parallel_mode, verbose_mode, quiet_mode
 
 
 

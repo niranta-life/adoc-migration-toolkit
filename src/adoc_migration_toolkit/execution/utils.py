@@ -179,14 +179,14 @@ def read_csv_asset_data(csv_file: str, logger: logging.Logger) -> List[Dict[str,
 
 
 def get_source_to_target_asset_id_map(csv_file: str, logger, quiet_mode: bool = False):
-    """Load a mapping from source_id to target_id from a CSV file. Both keys and values are strings.
+    """Load a mapping from source_id to a dict with target_id and target_uid from a CSV file.
 
     Args:
         csv_file: Path to the CSV file containing asset data
         logger: Logger instance
         quiet_mode: Whether to suppress console output
     Returns:
-        dict: Mapping from source_id (str) to target_id (str)
+        dict: Mapping from source_id (str) to dict with keys 'target_id' and 'target_uid'
     """
     import csv
     from pathlib import Path
@@ -213,15 +213,16 @@ def get_source_to_target_asset_id_map(csv_file: str, logger, quiet_mode: bool = 
                 if len(row) >= 5:
                     source_id = str(row[0])
                     target_id = str(row[2])
-                    asset_data.append((source_id, target_id))
+                    target_uid = str(row[3])
+                    asset_data.append((source_id, target_id, target_uid))
 
         if not asset_data:
             print("❌ No valid asset data found in CSV file")
             logger.warning("No valid asset data found in CSV file")
             return None
 
-        # Return as a dict mapping source_id to target_id (both as strings)
-        return {source_id: target_id for source_id, target_id in asset_data}
+        # Return as a dict mapping source_id to dict with target_id and target_uid
+        return {source_id: {"target_id": target_id, "target_uid": target_uid} for source_id, target_id, target_uid in asset_data}
 
     except Exception as e:
         error_msg = f"Error in asset-source to target map reading: {e}"

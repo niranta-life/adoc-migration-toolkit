@@ -225,11 +225,10 @@ def generate_comparison_csv(source_groups, target_groups, filename):
             "Comment": "" if exists_in_target else "Missing in target environment"
         })
 
-    with open(filename.name, mode="w", newline="", encoding="utf-8") as out_csv:
-        writer = csv.DictWriter(out_csv, fieldnames=[
-            "Notification ID", "Notification Name", "Notification Type",
-            "Present in Target", "Comment"
-        ])
+
+    with open(filename, 'w', newline='', encoding='utf-8') as f:
+        fieldnames = ["Notification ID", "Notification Name", "Notification Type", "Present in Target", "Comment"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
         writer.writeheader()
         writer.writerows(comparison_data)
 
