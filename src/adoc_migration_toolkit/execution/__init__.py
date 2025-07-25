@@ -27,6 +27,10 @@ from .policy_operations import (
     execute_rule_tag_export
 )
 
+from .notification_operations import (
+    precheck_on_notifications
+)
+
 from .segment_operations import (
     execute_segments_export,
     execute_segments_import
@@ -71,6 +75,7 @@ __all__ = [
     'execute_policy_export',
     'execute_policy_import',
     'execute_rule_tag_export',
+    'precheck_on_notifications',
     
     # Segment operations
     'execute_segments_export',
@@ -95,4 +100,4 @@ __all__ = [
     'save_global_output_directory',
     'get_output_file_path',
     'set_global_output_directory'
-] 
+]
