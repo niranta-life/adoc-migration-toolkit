@@ -794,7 +794,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                             endpoint=f"/catalog-server/api/assets/search?ids={table_asset_ids_str}",
                             method='GET'
                         )
-                        
+
                         if assets_response and 'assets' in assets_response:
                             for asset in assets_response['assets']:
                                 asset_id = asset.get('id')

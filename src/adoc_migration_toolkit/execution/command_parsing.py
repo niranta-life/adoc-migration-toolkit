@@ -413,6 +413,76 @@ def parse_asset_list_export_command(command: str) -> tuple:
 
     return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids
 
+def parse_notifications_check_command(command: str) -> tuple:
+    """Parse an asset-list-export command string into components.
+
+    Args:
+        command: Command string like "asset-list-export [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]"
+
+    Returns:
+        Tuple of (quiet_mode, verbose_mode, parallel_mode, use_target, page_size)
+    """
+    parts = command.strip().split()
+    print(f"Command arguments {parts}")
+    if not parts or parts[0].lower() != 'notifications-check':
+        return False, False, False, False, 500
+
+    quiet_mode = False
+    verbose_mode = False
+    parallel_mode = False
+    page_size = 500  # Default page size
+    source_context_id = None
+    target_context_id = None
+    assembly_ids = None
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--page-size':
+            if i + 1 >= len(parts):
+                raise ValueError("--page-size requires a value")
+            try:
+                page_size = int(parts[i + 1])
+                if page_size <= 0:
+                    raise ValueError("Page size must be positive")
+                parts.pop(i)  # Remove --page-size
+                parts.pop(i)  # Remove the page size value
+            except (ValueError, IndexError):
+                raise ValueError("Invalid page size. Must be a positive integer")
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif parts[i] == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
+        elif parts[i] == '--source_context_id':
+            if i + 1 >= len(parts):
+                raise ValueError("--source_context_id requires a value")
+            source_context_id = str(parts[i + 1])
+            parts.pop(i)  # Remove --page-size
+            parts.pop(i)  # Remove the page size value
+        elif parts[i] == '--target_context_id':
+            if i + 1 >= len(parts):
+                raise ValueError("--target_context_id requires a value")
+            target_context_id = str(parts[i + 1])
+            parts.pop(i)  # Remove --page-size
+            parts.pop(i)  # Remove the page size value
+        elif parts[i] == '--assembly_ids':
+            if i + 1 >= len(parts):
+                raise ValueError("--assembly_ids requires a value")
+            assembly_ids = str(parts[i + 1])
+            parts.pop(i)  # Remove --page-size
+            parts.pop(i)  # Remove the page size value
+        else:
+            i += 1
+
+    print("arguments processed")
+    return quiet_mode, verbose_mode, parallel_mode, page_size, source_context_id, target_context_id, assembly_ids
+
 def parse_policy_list_export_command(command: str) -> tuple:
     """Parse a policy-list-export command string into components.
     

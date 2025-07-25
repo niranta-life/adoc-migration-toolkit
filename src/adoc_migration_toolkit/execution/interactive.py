@@ -12,6 +12,8 @@ import signal
 import logging
 from datetime import datetime
 from pathlib import Path
+
+from .notification_operations import precheck_on_notifications
 from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
@@ -1389,6 +1391,17 @@ def run_interactive(args):
                     else:
                         check_for_profiling_required_before_migration(client, logger, policy_types, quiet_mode, verbose_mode)
                     continue
+
+                # Check if it's an asset-list-export command (check this first to avoid conflicts)
+                if command.lower().startswith('notifications-check'):
+                    from .command_parsing import parse_notifications_check_command
+                    quiet_mode, verbose_mode, parallel_mode, page_size, source_context_id, target_context_id, assembly_ids = parse_notifications_check_command(command)
+                    if parallel_mode:
+                        precheck_on_notifications(client, logger, source_context_id, target_context_id, quiet_mode, verbose_mode)
+                    else:
+                        precheck_on_notifications(client, logger, source_context_id, target_context_id, quiet_mode, verbose_mode)
+                    continue
+
                 # Check if it's a transform-and-merge command
                 if command.lower().startswith('transform-and-merge'):
                     from .command_parsing import parse_transform_and_merge_command
