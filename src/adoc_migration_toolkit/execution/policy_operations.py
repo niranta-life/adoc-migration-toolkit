@@ -581,6 +581,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
         # Determine output file path using the policy-export category
         output_file = get_output_file_path("", "policies-all-export.csv", category="policy-export")
         sql_policies_output_file = get_output_file_path("", "policies-sql-export.csv", category="policy-export")
+        sql_view_policies_output_file = get_output_file_path("", "policies-sql-view-export.csv", category="policy-export")
         if not quiet_mode:
             print(f"\nExporting all rules from ADOC environment (Parallel Mode)")
             if existing_target_assets_mode:
@@ -781,6 +782,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 
                 # Get asset details for this policy's tableAssetIds
                 asset_details = {}
+                asset_details_types = {}
                 assembly_details = {}
                 
                 if table_asset_ids:
@@ -798,6 +800,10 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                                 asset_id = asset.get('id')
                                 if asset_id:
                                     asset_details[asset_id] = asset
+                                asset_type_definition = asset.get('assetType')
+                                if asset_type_definition:
+                                    asset_id_type = asset_type_definition.get('name')
+                                    asset_details_types[asset_id] = asset_id_type
                         
                         if assets_response and 'assemblies' in assets_response:
                             for assembly in assets_response['assemblies']:
@@ -810,10 +816,11 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     except Exception as e:
                         failed_asset_calls += 1
                         logger.error(f"Thread {thread_id}: Failed to retrieve asset details for policy {policy.get('id')}: {e}")
-                
+
                 # Add asset and assembly details to the policy
                 policy['_asset_details'] = asset_details
                 policy['_assembly_details'] = assembly_details
+                policy['_asset_details_types'] = asset_details_types
                 processed_policies.append(policy)
                 
                 # Update progress bar
@@ -824,7 +831,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             # Write processed policies to temporary CSV file
             with open(temp_file.name, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-                writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType',])
+                writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType','policyName'])
                 sqlBasedPolicies = 0
                 columnBasedPolicies = 0
                 for policy in processed_policies:
@@ -832,26 +839,28 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     policy_type = policy.get('type', '') or ''
                     policy_sub_type = policy.get('subType', '') or ''
                     engine_type = policy.get('engineType', '') or ''
-
+                    policy_name = policy.get('name', '')
                     if policy_type is not None and policy_sub_type == 'SQL':
                         sqlBasedPolicies += 1
                     else:
                         columnBasedPolicies += 1
                     # Extract tableAssetIds from backingAssets
                     table_asset_ids = []
+                    table_asset_ids_type = []
                     assembly_ids = set()
                     assembly_names = set()
                     source_types = set()
                     
                     backing_assets = policy.get('backingAssets', [])
                     asset_details = policy.get('_asset_details', {})
+                    asset_details_types = policy.get('_asset_details_types', {})
                     assembly_details = policy.get('_assembly_details', {})
                     
                     for asset in backing_assets:
                         table_asset_id = asset.get('tableAssetId')
                         if table_asset_id:
                             table_asset_ids.append(str(table_asset_id))
-                            
+                            table_asset_ids_type.append(asset_details_types[table_asset_id])
                             # Get assembly information from asset details
                             if table_asset_id in asset_details:
                                 asset_detail = asset_details[table_asset_id]
@@ -868,6 +877,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     
                     # Convert sets to comma-separated strings
                     table_asset_ids_str = ','.join(table_asset_ids)
+                    table_asset_ids_type_str = ','.join(table_asset_ids_type)
                     assembly_ids_str = ','.join(sorted(assembly_ids))
                     assembly_names_str = ','.join(sorted(assembly_names))
                     source_types_str = ','.join(sorted(source_types))
@@ -881,7 +891,8 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                         assembly_names_str,
                         source_types_str,
                         policy_sub_type,
-
+                        policy_name,
+                        table_asset_ids_type_str
                     ])
             
             return {
@@ -925,7 +936,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             writer = csv.writer(output_csv, quoting=csv.QUOTE_ALL)
             
             # Write header
-            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType'])
+            writer.writerow(['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType', 'policyName', 'tableAssetIdsTypes'])
             
             # Merge all temporary files
             for temp_file in temp_files:
@@ -980,6 +991,14 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 if row[7] == 'SQL':
                     writer.writerow(row)
         print(f"SQL based policies exported to {sql_policies_output_file}")
+        # Write SQL View based policies to separate file
+        with open(sql_view_policies_output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(header)
+            for row in rows:
+                if any(val.strip() == 'SQL_VIEW' for val in row[9].split(',')):
+                    writer.writerow(row)
+        print(f"SQL based policies exported to {sql_view_policies_output_file}")
         # Step 9: Print statistics
         if not quiet_mode:
             print("\n" + "="*80)
@@ -1089,7 +1108,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
             # Check if this is the new format with additional columns
             if len(header) >= 7 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
                 # New format with additional columns
-                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType']
+                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType', 'policyName', 'tableAssetIdsTypes']
                 if len(header) != len(expected_columns):
                     error_msg = f"Invalid CSV format. Expected {len(expected_columns)} columns, got {len(header)}"
                     print(f"❌ {error_msg}")
@@ -2222,7 +2241,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
             # Check if this is the new format with additional columns
             if len(header) >= 7 and header[0] == 'id' and header[1] == 'type' and header[2] == 'engineType':
                 # New format with additional columns
-                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType']
+                expected_columns = ['id', 'type', 'engineType', 'tableAssetIds', 'assemblyIds', 'assemblyNames', 'sourceTypes', 'subType', 'policyName', 'tableAssetIdsTypes']
                 if len(header) != len(expected_columns):
                     error_msg = f"Invalid CSV format.. Expected {len(expected_columns)} columns, got {len(header)}"
                     print(f"❌ {error_msg}")

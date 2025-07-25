@@ -1562,7 +1562,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                         use_target_auth=use_target,
                         use_target_tenant=use_target
                     )
-                    
+                    print(f"page_response::: {page_response}")
                     if verbose_mode:
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Page {page + 1} Response:")
@@ -1588,7 +1588,11 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                                 # Extract required fields
                                 asset_id = asset.get('id', '')
                                 asset_uid = asset.get('uid', '')
-                                
+                                assembly_id = asset.get('assemblyId', '')
+
+                                asset_type_definition = asset.get('assetType')
+                                if asset_type_definition:
+                                    asset_type = asset_type_definition.get('name')
                                 # Extract tags and concatenate with colon separator
                                 tags = []
                                 if 'tags' in asset_wrapper and asset_wrapper['tags']:
@@ -1602,7 +1606,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                                 tags_str = ':'.join(tags) if tags else ''
                                 
                                 # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
-                                writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
+                                writer.writerow([asset_uid, asset_id, asset_uid, tags_str, assembly_id, asset_type])
                         
                         total_assets += len(page_assets)
                         successful_pages += 1
@@ -1636,6 +1640,11 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                                                 # Extract required fields
                                                 asset_id = asset.get('id', '')
                                                 asset_uid = asset.get('uid', '')
+                                                assembly_id = asset.get('assemblyId', '')
+
+                                                asset_type_definition = asset.get('assetType')
+                                                if asset_type_definition:
+                                                    asset_type = asset_type_definition.get('name')
                                                 
                                                 # Extract tags and concatenate with colon separator
                                                 tags = []
@@ -1650,7 +1659,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                                                 tags_str = ':'.join(tags) if tags else ''
                                                 
                                                 # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
-                                                writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
+                                                writer.writerow([asset_uid, asset_id, asset_uid, tags_str, assembly_id, asset_type])
                                         
                                         total_assets += len(page_assets)
                                         successful_pages += 1
@@ -1722,7 +1731,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             writer = csv.writer(output_f, quoting=csv.QUOTE_ALL)
             
             # Write header
-            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags', 'assembly_id', 'asset_type'])
             
             # Combine all temporary files
             for temp_file in temp_files:
@@ -3474,7 +3483,7 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
             reader = csv.DictReader(f)
             for row in reader:
                 source_data.append(row)
-        
+
         if verbose_mode:
             print(f"📊 Read {len(source_data)} records from source file")
             
@@ -3491,7 +3500,7 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
             for row in reader:
                 # Use source_uid as key for matching
                 target_data[row['source_uid']] = row
-        
+
         if verbose_mode:
             print(f"📊 Read {len(target_data)} records from target file")
             
@@ -3505,9 +3514,9 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         # Create temporary source file with transformed target_uid
         temp_source_file = asset_export_dir / "temp_source_transformed.csv"
         transformed_count = 0
-        
+
         with open(temp_source_file, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = ['source_uid', 'source_id', 'target_uid', 'tags']
+            fieldnames = ['source_uid', 'source_id', 'target_uid', 'tags', 'asset_type']
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             
@@ -3515,8 +3524,8 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 # Apply string transformations to target_uid (C -> T)
                 original_target_uid = source_row['target_uid']
                 transformed_target_uid = original_target_uid
-                
                 # Apply all string replacements
+
                 for source_str, target_str in string_transforms.items():
                     if source_str in transformed_target_uid:
                         transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
@@ -3524,16 +3533,16 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                         if verbose_mode:
                             print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")
                             print(f"   Applied: '{source_str}' -> '{target_str}'")
-                
+
                 # Write transformed record to temporary file
                 temp_row = {
                     'source_uid': source_row['source_uid'],  # A
                     'source_id': source_row['source_id'],    # B
                     'target_uid': transformed_target_uid,    # T (transformed C)
-                    'tags': source_row['tags']              # D
+                    'tags': source_row['tags'],               # D
+                    'asset_type': source_row['asset_type']    # E
                 }
                 writer.writerow(temp_row)
-        
         if verbose_mode:
             print(f"📄 Created temporary source file: {temp_source_file}")
             print(f"🔄 Applied {transformed_count} transformations")
@@ -3562,7 +3571,8 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                         'source_uid': temp_row['source_uid'],    # A
                         'target_id': target_row['source_id'],    # F
                         'target_uid': target_row['source_uid'],  # E
-                        'tags': temp_row['tags']                 # D
+                        'tags': temp_row['tags'],                # D
+                        'source_asset_type': temp_row['asset_type']     # E
                     }
                     merged_data.append(merged_row)
                     
@@ -3571,7 +3581,7 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 else:
                     if verbose_mode:
                         print(f"❌ No match found for transformed UID: {transformed_target_uid}")
-        
+        print(f"merged_data : {merged_data}")
         # Clean up temporary file
         try:
             temp_source_file.unlink()
@@ -3584,7 +3594,7 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         # Write merged data to output file
         if merged_data:
             with open(output_file, 'w', newline='', encoding='utf-8') as f:
-                fieldnames = ['source_id', 'source_uid', 'target_id', 'target_uid', 'tags']
+                fieldnames = ['source_id', 'source_uid', 'target_id', 'target_uid', 'tags', 'source_asset_type']
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(merged_data)
