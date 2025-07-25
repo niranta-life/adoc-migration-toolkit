@@ -480,7 +480,6 @@ def parse_notifications_check_command(command: str) -> tuple:
         else:
             i += 1
 
-    print("arguments processed")
     return quiet_mode, verbose_mode, parallel_mode, page_size, source_context_id, target_context_id, assembly_ids
 
 def parse_policy_list_export_command(command: str) -> tuple:

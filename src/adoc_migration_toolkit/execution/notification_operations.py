@@ -1,16 +1,12 @@
 import csv
 import logging
 from datetime import datetime
-from pathlib import Path
 
 import requests
 
 from ..shared.file_utils import get_output_file_path
 
-SOURCE_CONTEXT_ID=1643800761
-TARGET_CONTEXT_ID=1080269831
-
-def fetch_all_rule_notification_group_ids(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def fetch_all_rule_notification_group_ids(client, logger: logging.Logger, source_assembly_ids, quiet_mode: bool = False, verbose_mode: bool = False):
     """
     Fetch all unique configuredNotificationGroupIds from rules API,
     and track which rules reference them.
@@ -24,14 +20,13 @@ def fetch_all_rule_notification_group_ids(client, logger: logging.Logger, quiet_
     print("🔍 Starting to fetch rules and extract notification group IDs...")
 
     while True:
-
         params = {
             "page": page,
             "size": size,
             "withLatestExecution": "true",
             "sortBy": "startedAt:DESC",
             "ruleStatus": "ENABLED,ACTIVE",
-            "assemblyIds": "6556"
+            f"assemblyIds": source_assembly_ids
         }
         query_string = "&".join([f"{k}={v}" for k, v in params.items()])
         try:
@@ -95,7 +90,7 @@ def fetch_all_rule_notification_group_ids(client, logger: logging.Logger, quiet_
     return unique_ids, group_id_to_rules
 
 
-def fetch_all_notification_groups(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def fetch_all_notification_groups(client, logger: logging.Logger, source_context_id, source_assembly_ids, quiet_mode: bool = False, verbose_mode: bool = False):
     """Fetch all source notification groups with pagination."""
     page = 1
     size = 20
@@ -109,7 +104,7 @@ def fetch_all_notification_groups(client, logger: logging.Logger, quiet_mode: bo
         query_string = "&".join([f"{k}={v}" for k, v in params.items()])
         try:
             response = client.make_api_call(
-                endpoint=f"/api/notifications/api/v1/{SOURCE_CONTEXT_ID}/notifications/channels/groups?{query_string}",
+                endpoint=f"/api/notifications/api/v1/{source_context_id}/notifications/channels/groups?{query_string}",
                 method='GET'
             )
             data = response
@@ -134,7 +129,7 @@ def fetch_all_notification_groups(client, logger: logging.Logger, quiet_mode: bo
     return all_groups
 
 
-def fetch_all_target_notification_groups(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def fetch_all_target_notification_groups(client, logger: logging.Logger, target_context_id, quiet_mode: bool = False, verbose_mode: bool = False):
     """Fetch all target notification groups with pagination."""
     page = 1
     size = 20
@@ -149,7 +144,7 @@ def fetch_all_target_notification_groups(client, logger: logging.Logger, quiet_m
 
         try:
             response = client.make_api_call(
-                endpoint=f"/api/notifications/api/v1/{TARGET_CONTEXT_ID}/notifications/channels/groups?{query_string}",
+                endpoint=f"/api/notifications/api/v1/{target_context_id}/notifications/channels/groups?{query_string}",
                 method='GET',
                 use_target_auth=True,
                 use_target_tenant=True
@@ -240,13 +235,13 @@ def generate_comparison_csv(source_groups, target_groups, filename):
 
     print(f"✅ Comparison report generated: {filename}")
 
-def precheck_on_notifications(client, logger: logging.Logger, source_context_id: str, target_context_id: str, quiet_mode: bool = False, verbose_mode: bool = False) -> bool:
-    print("🔄 Fetching configuredNotificationGroupIds from rules API...")
-    configured_ids, group_id_to_rules = fetch_all_rule_notification_group_ids(client, logger, source_context_id, target_context_id)
+def precheck_on_notifications(client, logger: logging.Logger, source_context_id: str, target_context_id: str, source_assembly_ids: str, quiet_mode: bool = False, verbose_mode: bool = False) -> bool:
+    print(f"🔄 Fetching configuredNotificationGroupIds from rules API... {source_assembly_ids}")
+    configured_ids, group_id_to_rules = fetch_all_rule_notification_group_ids(client, logger, source_assembly_ids, source_context_id, target_context_id)
     print(f"✅ Fetched {len(configured_ids)} unique Notification Group IDs.")
 
     print("🔄 Fetching all notification group definitions from source...")
-    all_notification_groups = fetch_all_notification_groups(client, logger, quiet_mode, verbose_mode)
+    all_notification_groups = fetch_all_notification_groups(client, logger, source_context_id, source_assembly_ids, quiet_mode, verbose_mode)
     print(f"✅ Retrieved {len(all_notification_groups)} total source notification group definitions.")
 
     # Filter notification groups to only those linked to rules
@@ -286,7 +281,7 @@ def precheck_on_notifications(client, logger: logging.Logger, source_context_id:
         print("\n✅ All Notification Group IDs matched successfully in source.")
 
     print("\n🔄 Fetching notification groups from target environment...")
-    target_notification_groups = fetch_all_target_notification_groups(client, logger, quiet_mode, verbose_mode)
+    target_notification_groups = fetch_all_target_notification_groups(client, logger, target_context_id, quiet_mode, verbose_mode)
     print(f"✅ Retrieved {len(target_notification_groups)} target notification group definitions.")
 
     # Generate default output file if not provided

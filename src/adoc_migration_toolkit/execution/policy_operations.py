@@ -3000,8 +3000,7 @@ def check_for_profiling_required_before_migration(client, logger: logging.Logger
                 if str(row[1]).strip() in policy_types_list:
                     tableAssetId = str(row[3])
                     asset_data.append(tableAssetId)
-                    asset_data.append(str(int(tableAssetId)+1))
-                
+
 
     if not asset_data:
         print("❌ No valid asset data found in CSV file...")
@@ -3010,7 +3009,6 @@ def check_for_profiling_required_before_migration(client, logger: logging.Logger
     print(f"Asset data: {asset_data}")
     assets_mapped_csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
     assets_mapping = get_source_to_target_asset_id_map(assets_mapped_csv_file, logger)
-
     un_profiled_assets = []
     for each_asset_id in asset_data:
         if each_asset_id not in assets_mapping:
@@ -3024,7 +3022,7 @@ def check_for_profiling_required_before_migration(client, logger: logging.Logger
                     use_target_auth=True,
                     use_target_tenant=True,
                 )
-            if not count_response:
+            if not count_response.get("profileRequests"):
                 un_profiled_assets.append(target_table_asset)
         except Exception as e:
             print(f"Error getting profiles for asset {target_table_asset}: {e}")

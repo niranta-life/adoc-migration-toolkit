@@ -3119,6 +3119,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
 
         assets_mapped_csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
         assets_mapping = get_source_to_target_asset_id_map(assets_mapped_csv_file, logger)
+        
         # Read CSV data
         asset_data = []
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
@@ -3682,7 +3683,6 @@ def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, q
                     use_target_auth=True,
                     use_target_tenant=True
                 )
-
                 rule_id = asset_profile_anomaly_response['rule']['id']
                 if verbose_mode:
                     print(f" AssetId : {asset_id} Rule ID: {rule_id} source ruleid :{profile_anomaly_config_dict['rule']['id']}")
@@ -3713,6 +3713,7 @@ def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, q
                         use_target_auth=True,
                         use_target_tenant=True
                     )
+                # print(f"asset_profile_anomaly_response : {asset_profile_anomaly_response}")
                 if verbose_mode:
                     print(f"............Rule {rule_id} done ............")
         except Exception as e:

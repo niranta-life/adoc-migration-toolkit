@@ -1397,9 +1397,9 @@ def run_interactive(args):
                     from .command_parsing import parse_notifications_check_command
                     quiet_mode, verbose_mode, parallel_mode, page_size, source_context_id, target_context_id, assembly_ids = parse_notifications_check_command(command)
                     if parallel_mode:
-                        precheck_on_notifications(client, logger, source_context_id, target_context_id, quiet_mode, verbose_mode)
+                        precheck_on_notifications(client, logger, source_context_id, target_context_id, assembly_ids, quiet_mode, verbose_mode)
                     else:
-                        precheck_on_notifications(client, logger, source_context_id, target_context_id, quiet_mode, verbose_mode)
+                        precheck_on_notifications(client, logger, source_context_id, target_context_id, assembly_ids, quiet_mode, verbose_mode)
                     continue
 
                 # Check if it's a transform-and-merge command
