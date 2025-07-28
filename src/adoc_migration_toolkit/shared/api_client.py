@@ -177,6 +177,7 @@ class AcceldataAPIClient:
             else:
                 sub_tenant = self.tenant
             self.host = self.host.replace("${tenant}", sub_tenant)
+            self.target_host = self.host_template.replace("${tenant}", self.target_tenant)
         # Validate required configuration
         if not self.host or not self.access_key or not self.secret_key or not self.tenant:
             raise ValueError(f"Missing required configuration in {env_file}. Need AD_HOST, AD_SOURCE_ACCESS_KEY, AD_SOURCE_SECRET_KEY, and AD_SOURCE_TENANT")

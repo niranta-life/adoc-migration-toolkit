@@ -1202,8 +1202,11 @@ def run_interactive(args):
             print(f"📁 Output Directory: {globals.GLOBAL_OUTPUT_DIR}")
             print(f"📁 Current Directory: {os.getcwd()}")
             print(f"📋 Config File: {args.env_file}")
-            print(f"🌍 Source Environment: {client.host}")
             print(f"🌍 Source Tenant: {client.tenant}")
+            print(f"🌍 Target Tenant: {client.target_tenant}")
+            print(f"🌍 Source Environment: {client.host}")
+            print(f"🌍 Target Environment: {client.target_host}")
+
         else:
             print(f"📁 Output Directory: Not set (will use default timestamped directories)")
             print(f"💡 Use 'set-output-dir <directory>' to set a persistent output directory")
