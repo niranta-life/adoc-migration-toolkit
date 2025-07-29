@@ -659,16 +659,16 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     if source_id:
                         existing_asset_ids.add(source_id)
 
-                        # Read the merged file to get existing asset IDs
-            with open(merged_file_sql_views, 'r', newline='', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    source_id = row.get('source_id')
-                    source_uid = row.get('source_uid')
-                    if source_id:
-                        existing_asset_ids_sql_views.add(source_id)
-                        if source_uid:
-                            source_id_to_uid_sql_views[source_id] = source_uid
+            if merged_file_sql_views.exists():
+                with open(merged_file_sql_views, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        source_id = row.get('source_id')
+                        source_uid = row.get('source_uid')
+                        if source_id:
+                            existing_asset_ids_sql_views.add(source_id)
+                            if source_uid:
+                                source_id_to_uid_sql_views[source_id] = source_uid
             
             if not existing_asset_ids:
                 error_msg = "No asset IDs found in merged file"
