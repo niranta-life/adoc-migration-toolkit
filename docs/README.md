@@ -18,7 +18,7 @@ The ADOC Migration Toolkit is a professional-grade tool for migrating Acceldata 
 
 1. **Clone the repository** (if not already done):
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/niranta-life/adoc-migration-toolkit.git
    cd adoc-migration-toolkit
    ```
 
@@ -289,6 +289,12 @@ policy-list-export --verbose
 - Check the main [README.md](../README.md) for installation and setup instructions
 - Review command-specific guides for detailed information
 - Follow cross-references to discover related functionality
+
+### Troubleshooting and FAQ
+- **[FAQ.md](FAQ.md)** - Comprehensive troubleshooting guide and frequently asked questions
+- Common issues and solutions
+- Performance optimization tips
+- Error message explanations
 
 ### Best Practices
 - Always test with `--dry-run` before production operations
