@@ -2813,13 +2813,16 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         print(json.dumps(asset_config, indent=2, ensure_ascii=False))
                     
                     asset_config_json = json.dumps(asset_config, ensure_ascii=False, separators=(',', ':'))
-
-                    asset_profile_anomaly_config = client.make_api_call(
-                        endpoint=f"/catalog-server/api/rules/profile-anomaly/byAsset/{source_id}",
-                        method='GET'
-                    )
-                    asset_profile_anomaly_config_json = json.dumps(asset_profile_anomaly_config, ensure_ascii=False, separators=(',', ':'))
-
+                    asset_profile_anomaly_config_json = {}
+                    try:
+                        asset_profile_anomaly_config = client.make_api_call(
+                            endpoint=f"/catalog-server/api/rules/profile-anomaly/byAsset/{source_id}",
+                            method='GET'
+                        )
+                        asset_profile_anomaly_config_json = json.dumps(asset_profile_anomaly_config, ensure_ascii=False, separators=(',', ':'))
+                    except Exception as e:
+                        error_msg = f"[Thread {thread_id}] Error exporting anomaly details source_id {source_id}: {e}"
+                        print(f"❌ {error_msg}")
                     # Get child assets of each asset
                     asset_child_assets_config = client.make_api_call(
                         endpoint=f"/catalog-server/api/assets/{source_id}/childAssets",
