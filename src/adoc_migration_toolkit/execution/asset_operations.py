@@ -1055,7 +1055,8 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         
     except Exception as e:
         error_msg = f"Error executing asset config import: {e}"
-        print(f"❌ {error_msg}")
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
         logger.error(error_msg)
 
 
@@ -2749,15 +2750,17 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
         successful = 0
         failed = 0
         total_assets_processed = 0
+        anomaly_config_export_failed = 0
         lock = threading.Lock()
         all_results = []
         
         def process_asset_chunk(thread_id, start_index, end_index):
             """Process a chunk of assets for a specific thread."""
-            nonlocal successful, failed, total_assets_processed
+            nonlocal successful, failed, total_assets_processed, anomaly_config_export_failed
             thread_results = []
             thread_successful = 0
             thread_failed = 0
+            thread_anomaly_failed = 0
             
             # Get thread name
             thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
@@ -2822,7 +2825,10 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         asset_profile_anomaly_config_json = json.dumps(asset_profile_anomaly_config, ensure_ascii=False, separators=(',', ':'))
                     except Exception as e:
                         error_msg = f"[Thread {thread_id}] Error exporting anomaly details source_id {source_id}: {e}"
-                        print(f"❌ {error_msg}")
+                        if verbose_mode or not quiet_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        thread_anomaly_failed += 1
                     # Get child assets of each asset
                     asset_child_assets_config = client.make_api_call(
                         endpoint=f"/catalog-server/api/assets/{source_id}/childAssets",
@@ -2883,6 +2889,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                 successful += thread_successful
                 failed += thread_failed
                 total_assets_processed += thread_successful
+                anomaly_config_export_failed += thread_anomaly_failed
                 all_results.extend(thread_results)
             
             return {
@@ -3075,6 +3082,8 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             print(f"Total assets processed: {len(asset_data)}")
             print(f"Successful: {successful}")
             print(f"Failed: {failed}")
+            print(f"Failed anomaly configs export: {anomaly_config_export_failed}")
+            
             print(f"Total assets processed: {total_assets_processed}")
             print(f"Threads used: {num_threads}")
             
@@ -3084,7 +3093,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             
             print("="*80)
         else:
-            print(f"✅ Asset config export completed: {successful} successful, {failed} failed")
+            print(f"✅ Asset config export completed: {successful} successful, {failed} failed, {anomaly_config_export_failed} anomaly configs failed")
             print(f"Output written to: {output_file}")
         
     except Exception as e:
@@ -3602,7 +3611,7 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(merged_data)
-            
+            execute_transform_and_merge_sql_view(quiet_mode, verbose_mode, logger)
             if not quiet_mode:
                 print("\n" + "="*80)
                 print("TRANSFORM AND MERGE COMPLETED")
@@ -3729,3 +3738,97 @@ def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, q
             if verbose_mode:
                 print(f"   ❌ {error_msg}")
             logger.error(error_msg)
+
+
+def execute_transform_and_merge_sql_view(quiet_mode: bool, verbose_mode: bool, logger: logging.Logger):
+    """Generate asset-merged-all_sql_views.csv with SQL views from asset-all-source-export.csv not present in asset-merged-all.csv."""
+    try:
+        # Determine input and output directories
+        if globals.GLOBAL_OUTPUT_DIR:
+            asset_export_dir = globals.GLOBAL_OUTPUT_DIR / "asset-export"
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+            if not toolkit_dirs:
+                logger.error("No adoc-migration-toolkit directory found")
+                print("❌ No adoc-migration-toolkit directory found")
+                print("💡 Please run asset-list-export first to generate the required CSV files")
+                return
+            toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+            latest_toolkit_dir = toolkit_dirs[0]
+            asset_export_dir = latest_toolkit_dir / "asset-export"
+
+        # Define file paths
+        source_file = asset_export_dir / "asset-all-source-export.csv"
+        asset_import_dir = asset_export_dir.parent / "asset-import"
+        asset_import_dir.mkdir(parents=True, exist_ok=True)
+        merged_file = asset_import_dir / "asset-merged-all.csv"
+        output_file = asset_import_dir / "asset-merged-all_sql_views.csv"
+
+        # Check if required files exist
+        if not source_file.exists():
+            logger.error(f"Source file not found: {source_file}")
+            print(f"❌ Source file not found: {source_file}")
+            print("💡 Please run 'asset-list-export' first to generate the source file")
+            return
+        if not merged_file.exists():
+            logger.error(f"Merged file not found: {merged_file}")
+            print(f"❌ Merged file not found: {merged_file}")
+            print("💡 Please run 'transform-and-merge' first to generate the merged file")
+            return
+
+        if not quiet_mode:
+            print(f"📁 Asset Export Directory: {asset_export_dir}")
+            print(f"📄 Source file: {source_file}")
+            print(f"📄 Merged file: {merged_file}")
+            print(f"📄 Output file: {output_file}")
+            print("="*80)
+
+        # Read merged file to get set of merged source_uids
+        merged_source_uids = set()
+        with open(merged_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Use source_uid from merged file
+                merged_source_uids.add(row['source_uid'])
+        if verbose_mode:
+            print(f"🔍 Found {len(merged_source_uids)} merged source_uids")
+
+        # Read source file and collect rows not in merged_source_uids
+        unmatched_rows = []
+        with open(source_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            for row in reader:
+                if row['source_uid'] not in merged_source_uids:
+                    unmatched_rows.append(row)
+        if verbose_mode:
+            print(f"🔍 Found {len(unmatched_rows)} unmatched SQL view rows")
+
+        # Write unmatched rows to output file (filter for SQL_VIEW)
+        sql_view_rows = [row for row in unmatched_rows if row.get('asset_type') == 'SQL_VIEW' or row.get('source_asset_type') == 'SQL_VIEW']
+        if sql_view_rows:
+            with open(output_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(sql_view_rows)
+            if not quiet_mode:
+                print("\n" + "="*80)
+                print("SQL VIEW DIFFERENCE EXPORT COMPLETED")
+                print("="*80)
+                print(f"Source file:   {source_file}")
+                print(f"Merged file:   {merged_file}")
+                print(f"Output file:   {output_file}")
+                print(f"Unmatched SQL views: {len(sql_view_rows)}")
+                print(f"Total source records: {sum(1 for _ in open(source_file, 'r', encoding='utf-8')) - 1}")
+                print("="*80)
+        else:
+            logger.info("No unmatched SQL views found.")
+            print("✅ All SQL views in source are present in merged file or none found. No output generated.")
+    except Exception as e:
+        logger.error(f"Error executing transform-and-merge-sql-view: {e}")
+        print(f"❌ Error executing transform-and-merge-sql-view: {e}")
+        if verbose_mode:
+            import traceback
+            traceback.print_exc()

@@ -557,6 +557,34 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         else:
             print(f"✅ Policies list export completed: {len(processed_policies)} policies exported to {output_file}")
         
+        # After all threads complete, aggregate excluded_policies_and_table_assets_mapping and write to CSV
+        excluded_policies_all = []
+        for thread_result in thread_results:
+            if 'excluded_policies_and_table_assets_mapping' in thread_result:
+                excluded_policies_all.extend(thread_result['excluded_policies_and_table_assets_mapping'])
+        if excluded_policies_all:
+            # Determine output directory (reuse logic from other exports)
+            if globals.GLOBAL_OUTPUT_DIR:
+                output_dir = globals.GLOBAL_OUTPUT_DIR / "policy-export"
+            else:
+                current_dir = Path.cwd()
+                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                if toolkit_dirs:
+                    toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                    latest_toolkit_dir = toolkit_dirs[0]
+                    output_dir = latest_toolkit_dir / "policy-export"
+                else:
+                    output_dir = Path("policy-export")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            excluded_file = output_dir / "excluded_sql_view_policies.csv"
+            with open(excluded_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                writer.writerow(["asset_id", "policy_id", "policy_name", "source_asset_uid"])
+                for asset_id, policy_id, policy_name, source_asset_uid in excluded_policies_all:
+                    writer.writerow([asset_id, policy_id, policy_name, source_asset_uid])
+            if not quiet_mode:
+                print(f"\nExcluded policies written to: {excluded_file}")
+        
     except Exception as e:
         error_msg = f"Error in policy-list-export: {e}"
         if not quiet_mode:
@@ -590,10 +618,13 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
         
         # If existing target assets mode is enabled, read the merged file first
         existing_asset_ids = set()  # Use set for faster lookups
+        existing_asset_ids_sql_views = set()  # Use set for faster lookups
+        source_id_to_uid_sql_views = {}  # Map source_id to source_uid for SQL views
         if existing_target_assets_mode:
             # Determine the merged file path
             if globals.GLOBAL_OUTPUT_DIR:
                 merged_file = globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv"
+                merged_file_sql_views = globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all_sql_views.csv"
             else:
                 # Look for the most recent adoc-migration-toolkit directory
                 current_dir = Path.cwd()
@@ -608,7 +639,8 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
                 latest_toolkit_dir = toolkit_dirs[0]
                 merged_file = latest_toolkit_dir / "asset-import" / "asset-merged-all.csv"
-            
+                merged_file_sql_views = latest_toolkit_dir / "asset-import" / "asset-merged-all_sql_views.csv"
+            print(f"merged_file_sql_views: {merged_file_sql_views}")
             if not merged_file.exists():
                 error_msg = f"Merged file not found: {merged_file}"
                 print(f"❌ {error_msg}")
@@ -626,6 +658,17 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     source_id = row.get('source_id')
                     if source_id:
                         existing_asset_ids.add(source_id)
+
+                        # Read the merged file to get existing asset IDs
+            with open(merged_file_sql_views, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    source_id = row.get('source_id')
+                    source_uid = row.get('source_uid')
+                    if source_id:
+                        existing_asset_ids_sql_views.add(source_id)
+                        if source_uid:
+                            source_id_to_uid_sql_views[source_id] = source_uid
             
             if not existing_asset_ids:
                 error_msg = "No asset IDs found in merged file"
@@ -741,6 +784,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             successful_asset_calls = 0
             failed_asset_calls = 0
             excluded_policies = 0  # Track policies excluded due to missing assets
+            excluded_policies_and_table_assets_mapping = []
             
             # Process each policy in this thread's range
             for policy in thread_policies:
@@ -762,6 +806,11 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                         if str(table_asset_id) in existing_asset_ids:
                             policy_has_existing_assets = True
                             matching_assets.append(str(table_asset_id))
+                        elif str(table_asset_id) in existing_asset_ids_sql_views:
+                            policy_has_existing_assets = True
+                            source_asset_uid = source_id_to_uid_sql_views.get(str(table_asset_id), "")
+                            excluded_policies_and_table_assets_mapping.append((table_asset_id, source_asset_uid, policy.get("id"), policy.get("name")))
+                            
                     
                     should_process_policy = policy_has_existing_assets
                     
@@ -824,7 +873,6 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 progress_bar.update(1)
             
             progress_bar.close()
-            
             # Write processed policies to temporary CSV file
             with open(temp_file.name, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f, quoting=csv.QUOTE_ALL)
@@ -901,7 +949,8 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 'failed_asset_calls': failed_asset_calls,
                 'temp_file': temp_file.name,
                 'sqlBasedPolicies': sqlBasedPolicies,
-                'columnBasedPolicies': columnBasedPolicies
+                'columnBasedPolicies': columnBasedPolicies,
+                'excluded_policies_and_table_assets_mapping': excluded_policies_and_table_assets_mapping
             }
         
         # Step 5: Start threads
@@ -1031,6 +1080,34 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             print(f"SQL based policies: {total_sql_based_policies}")
             print(f"Column based policies: {total_column_based_policies}")
             print("="*80)
+        
+        # After all threads complete, aggregate excluded_policies_and_table_assets_mapping and write to CSV
+        excluded_policies_all = []
+        for thread_result in thread_results:
+            if 'excluded_policies_and_table_assets_mapping' in thread_result:
+                excluded_policies_all.extend(thread_result['excluded_policies_and_table_assets_mapping'])
+        if excluded_policies_all:
+            # Determine output directory (reuse logic from other exports)
+            if globals.GLOBAL_OUTPUT_DIR:
+                output_dir = globals.GLOBAL_OUTPUT_DIR / "policy-export"
+            else:
+                current_dir = Path.cwd()
+                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                if toolkit_dirs:
+                    toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                    latest_toolkit_dir = toolkit_dirs[0]
+                    output_dir = latest_toolkit_dir / "policy-export"
+                else:
+                    output_dir = Path("policy-export")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            excluded_sql_view_policiesfile = output_dir / "excluded_sql_view_policies.csv"
+            with open(excluded_sql_view_policiesfile, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+                writer.writerow(["asset_id", "source_asset_uid", "policy_id", "policy_name"])
+                for asset_id, source_asset_uid, policy_id, policy_name in excluded_policies_all:
+                    writer.writerow([asset_id, source_asset_uid, policy_id, policy_name])
+            if not quiet_mode:
+                print(f"\nExcluded policies written to: {excluded_sql_view_policiesfile}")
         
     except Exception as e:
         error_msg = f"Failed to execute parallel policy list export: {e}"
