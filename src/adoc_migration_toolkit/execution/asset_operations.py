@@ -1561,7 +1561,6 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                         use_target_auth=use_target,
                         use_target_tenant=use_target
                     )
-                    print(f"page_response::: {page_response}")
                     if verbose_mode:
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Page {page + 1} Response:")
