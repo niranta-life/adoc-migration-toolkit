@@ -1349,17 +1349,21 @@ def run_interactive(args):
                 # Check if it's an asset-profile-import command
                 if command.lower().startswith('asset-profile-import'):
                     from .command_parsing import parse_asset_profile_import_command
-                    csv_file, dry_run, quiet_mode, verbose_mode = parse_asset_profile_import_command(command)
+                    csv_file, dry_run, quiet_mode, verbose_mode, max_threads = parse_asset_profile_import_command(command)
                     if csv_file:
-                        execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode)
+                        # If execute_asset_profile_import supports max_threads, pass it; otherwise, ignore
+                        try:
+                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode, max_threads=max_threads)
+                        except TypeError:
+                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode)
                     continue
                 
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)
                 if command.lower().startswith('asset-list-export'):
                     from .command_parsing import parse_asset_list_export_command
-                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids = parse_asset_list_export_command(command)
+                    quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids, max_threads = parse_asset_list_export_command(command)
                     if parallel_mode:
-                        execute_asset_list_export_parallel(client, logger, source_type_ids, asset_type_ids, assembly_ids, quiet_mode, verbose_mode, use_target, page_size)
+                        execute_asset_list_export_parallel(client, logger, source_type_ids, asset_type_ids, assembly_ids, quiet_mode, verbose_mode, use_target, page_size, max_threads)
                     else:
                         execute_asset_list_export(client, logger, source_type_ids, asset_type_ids, assembly_ids, quiet_mode, verbose_mode, use_target, page_size)
                     continue
@@ -1368,10 +1372,10 @@ def run_interactive(args):
                 # Check if it's an asset-config-export command
                 if command.lower().startswith('asset-config-export'):
                     from .command_parsing import parse_asset_config_export_command
-                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_config_export_command(command)
+                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads = parse_asset_config_export_command(command)
                     if csv_file:
                         if parallel_mode:
-                            execute_asset_config_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                            execute_asset_config_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, max_threads)
                         else:
                             execute_asset_config_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
                     continue
@@ -1379,7 +1383,7 @@ def run_interactive(args):
                 # Check if it's an asset-config-import command
                 if command.lower().startswith('asset-config-import'):
                     from .command_parsing import parse_asset_config_import_command
-                    csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode = parse_asset_config_import_command(command)
+                    csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode, max_threads = parse_asset_config_import_command(command)
                     
                     # Use default CSV file if not specified
                     if not csv_file:
@@ -1396,7 +1400,7 @@ def run_interactive(args):
                             else:
                                 csv_file = "asset-config-import-ready.csv"
                     
-                    execute_asset_config_import(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode, dry_run)
+                    execute_asset_config_import(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode, dry_run, max_threads)
                     continue
                 
                 # Check if it's an asset-tag-import command

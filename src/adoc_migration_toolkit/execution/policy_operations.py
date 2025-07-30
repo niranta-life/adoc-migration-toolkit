@@ -592,7 +592,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         logger.error(error_msg)
 
 
-def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, existing_target_assets_mode: bool = False):
+def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, existing_target_assets_mode: bool = False, max_threads: int = 5):
     """Execute the policy-list-export command with parallel processing.
     
     Args:
@@ -601,6 +601,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
         existing_target_assets_mode: Whether to filter policies to only include those with assets in merged file
+        max_threads: Maximum number of threads to use (default: 5)
     """
     try:
         # Determine output file path using the policy-export category
@@ -733,9 +734,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             print(f"Retrieved {len(all_policies)} policies")
         
         # Step 3: Calculate thread configuration for asset processing
-        max_threads = 5
         min_policies_per_thread = 10
-        
         if len(all_policies) < min_policies_per_thread:
             num_threads = 1
             policies_per_thread = len(all_policies)
@@ -2249,7 +2248,7 @@ def execute_rule_tag_export(client, logger: logging.Logger, quiet_mode: bool = F
         logger.error(error_msg)
 
 
-def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None):
+def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None, max_threads: int = 5):
     """Execute the policy-export command with parallel processing.
     
     Args:
@@ -2260,6 +2259,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
         batch_size: Number of policies to export in each batch
         export_type: Type of export (rule-types, engine-types, assemblies, source-types)
         filter_value: Optional filter value within the export type
+        max_threads: Maximum number of threads to use (default: 5)
     """
     try:
         # Determine input and output file paths
@@ -2421,9 +2421,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
         timestamp = datetime.now().strftime("%m-%d-%Y-%H-%M")
         
         # Step 3: Calculate thread configuration
-        max_threads = 5
         min_categories_per_thread = 1
-        
         if len(policies_by_category) < min_categories_per_thread:
             num_threads = 1
             categories_per_thread = len(policies_by_category)
@@ -2676,7 +2674,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
         raise 
 
 
-def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5):
     """Execute the rule-tag-export command with parallel processing.
     
     Args:
@@ -2684,6 +2682,7 @@ def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode:
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        max_threads: Maximum number of threads to use (default: 5)
     """
     try:
         # Determine output file path using the policy-export category
@@ -2766,9 +2765,7 @@ def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode:
             print(f"Found {len(rule_ids)} rules to process")
         
         # Step 3: Calculate thread configuration
-        max_threads = 5
         min_rules_per_thread = 10
-        
         if len(rule_ids) < min_rules_per_thread:
             num_threads = 1
             rules_per_thread = len(rule_ids)

@@ -212,20 +212,21 @@ def parse_asset_profile_import_command(command: str) -> tuple:
     """Parse an asset-profile-import command string into components.
     
     Args:
-        command: Command string like "asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose]"
+        command: Command string like "asset-profile-import [<csv_file>] [--dry-run] [--quiet] [--verbose] [--max-threads <num>]"
         
     Returns:
-        Tuple of (csv_file, dry_run, quiet_mode, verbose_mode)
+        Tuple of (csv_file, dry_run, quiet_mode, verbose_mode, max_threads)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-profile-import':
-        return None, False, True, False
-    
+        return None, False, True, False, 5
+
     csv_file = None
     dry_run = False
     quiet_mode = True  # Default to quiet mode
     verbose_mode = False
-    
+    max_threads = 5
+
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -240,13 +241,24 @@ def parse_asset_profile_import_command(command: str) -> tuple:
             quiet_mode = True
             verbose_mode = False  # Quiet overrides verbose
             parts.remove('--quiet')
+        elif parts[i] == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads <= 0:
+                    raise ValueError("Max threads must be positive")
+                parts.pop(i)
+                parts.pop(i)
+            except (ValueError, IndexError):
+                raise ValueError("Invalid max threads. Must be a positive integer")
         elif i == 1 and not parts[i].startswith('--'):
             # This is the CSV file argument (first non-flag argument)
             csv_file = parts[i]
             parts.remove(parts[i])
         else:
             i += 1
-    
+
     # If no CSV file specified, use default from output directory
     if not csv_file:
         if globals.GLOBAL_OUTPUT_DIR:
@@ -255,36 +267,34 @@ def parse_asset_profile_import_command(command: str) -> tuple:
             # Look for the most recent adoc-migration-toolkit directory
             current_dir = Path.cwd()
             toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
-            
             if toolkit_dirs:
-                # Sort by creation time and use the most recent
                 toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
                 latest_toolkit_dir = toolkit_dirs[0]
                 csv_file = str(latest_toolkit_dir / "asset-import" / "asset-profiles-import-ready.csv")
             else:
                 csv_file = "asset-import/asset-profiles-import-ready.csv"  # Fallback
-    
-    return csv_file, dry_run, quiet_mode, verbose_mode
+
+    return csv_file, dry_run, quiet_mode, verbose_mode, max_threads
 
 def parse_asset_config_export_command(command: str) -> tuple:
     """Parse an asset-config-export command string into components.
     
     Args:
-        command: Command string like "asset-config-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]"
+        command: Command string like "asset-config-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel] [--max-threads <num>]"
         
     Returns:
-        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode)
+        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-config-export':
-        return None, None, False, False, False
+        return None, None, False, False, False, 5   # Default max threads is 5  
     
     csv_file = None
     output_file = None
     quiet_mode = False
     verbose_mode = False
     parallel_mode = False
-    
+    max_threads = 5
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -292,6 +302,17 @@ def parse_asset_config_export_command(command: str) -> tuple:
             output_file = parts[i + 1]
             parts.pop(i)  # Remove --output-file
             parts.pop(i)  # Remove the file path
+        elif parts[i] == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads <= 0:
+                    raise ValueError("Max threads must be positive")
+                parts.pop(i)  # Remove --max-threads
+                parts.pop(i)  # Remove the max threads value
+            except (ValueError, IndexError):
+                raise ValueError("Invalid max threads. Must be a positive integer")
         elif parts[i] == '--quiet':
             quiet_mode = True
             verbose_mode = False  # Quiet overrides verbose
@@ -338,21 +359,21 @@ def parse_asset_config_export_command(command: str) -> tuple:
     if parallel_mode and not verbose_mode and not quiet_mode:
         quiet_mode = True
     
-    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode
+    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads
 
 def parse_asset_list_export_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
 
     Args:
-        command: Command string like "asset-list-export [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]"
+        command: Command string like "asset-list-export [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>] [--max-threads <num>]"
 
     Returns:
-        Tuple of (quiet_mode, verbose_mode, parallel_mode, use_target, page_size)
+        Tuple of (quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids, max_threads)
     """
     parts = command.strip().split()
     print(f"Command arguments {parts}")
     if not parts or parts[0].lower() != 'asset-list-export':
-        return False, False, False, False, 500
+        return False, False, False, False, 500, None, None, None, 5
 
     quiet_mode = False
     verbose_mode = False
@@ -362,6 +383,7 @@ def parse_asset_list_export_command(command: str) -> tuple:
     source_type_ids = None
     asset_type_ids = None
     assembly_ids = None
+    max_threads = 5
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -376,6 +398,17 @@ def parse_asset_list_export_command(command: str) -> tuple:
                 parts.pop(i)  # Remove the page size value
             except (ValueError, IndexError):
                 raise ValueError("Invalid page size. Must be a positive integer")
+        elif parts[i] == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads <= 0:
+                    raise ValueError("Max threads must be positive")
+                parts.pop(i)  # Remove --max-threads
+                parts.pop(i)  # Remove the max threads value
+            except (ValueError, IndexError):
+                raise ValueError("Invalid max threads. Must be a positive integer")
         elif parts[i] == '--quiet':
             quiet_mode = True
             verbose_mode = False  # Quiet overrides verbose
@@ -411,7 +444,7 @@ def parse_asset_list_export_command(command: str) -> tuple:
         else:
             i += 1
 
-    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids
+    return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids, max_threads
 
 def parse_notifications_check_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
@@ -875,10 +908,10 @@ def parse_asset_config_import_command(command: str) -> tuple:
     """Parse an asset-config-import command string into components.
     
     Args:
-        command: Command string like "asset-config-import [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]"
+        command: Command string like "asset-config-import [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel] [--max-threads <num>]"
         
     Returns:
-        Tuple of (csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode)
+        Tuple of (csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode, max_threads)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-config-import':
@@ -889,7 +922,7 @@ def parse_asset_config_import_command(command: str) -> tuple:
     quiet_mode = False
     verbose_mode = False
     parallel_mode = False
-    
+    max_threads = 5
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -906,6 +939,17 @@ def parse_asset_config_import_command(command: str) -> tuple:
         elif arg == '--parallel':
             parallel_mode = True
             i += 1
+        elif arg == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads <= 0:
+                    raise ValueError("Max threads must be positive")
+                parts.pop(i)  # Remove --max-threads
+                parts.pop(i)  # Remove the max threads value
+            except (ValueError, IndexError):
+                raise ValueError("Invalid max threads. Must be a positive integer")
         elif arg == '--help' or arg == '-h':
             print("\n" + "="*60)
             print("ASSET-CONFIG-IMPORT COMMAND HELP")
@@ -936,7 +980,7 @@ def parse_asset_config_import_command(command: str) -> tuple:
                 print("💡 Use 'asset-config-import --help' for usage information")
                 return None, False, False, False, False
     
-    return csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode 
+    return csv_file, dry_run, quiet_mode, verbose_mode, parallel_mode, max_threads
 
 def parse_profile_command(command: str) -> tuple:
     """Parse a profile command string into components.
