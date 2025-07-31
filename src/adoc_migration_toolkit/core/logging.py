@@ -73,7 +73,18 @@ def setup_logging(verbose: bool = False, log_level: str = "DEBUG") -> logging.Lo
     log_file = f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d')}.log"
     file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')  # Append mode
     file_handler.setFormatter(formatter)
-    handlers.append(file_handler)
+    # handlers.append(file_handler)
+
+
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    # Create a console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
+    console_handler.setFormatter(formatter)
+    handlers.append(console_handler)
     
     # Console handler - REMOVED to prevent breaking progress bars
     # console_handler = logging.StreamHandler(sys.stdout)

@@ -114,7 +114,7 @@ def setup_logging(verbose: bool = False, log_level: str = "INFO", log_file_path:
     # Configure root logger
     logging.basicConfig(
         level=actual_level,
-        handlers=handlers,
+        # handlers=handlers,
         force=True
     )
     
