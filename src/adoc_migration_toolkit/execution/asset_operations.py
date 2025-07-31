@@ -178,7 +178,7 @@ def execute_asset_profile_export_guided(
         return False, error_msg
 
 
-def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view']):
     """Execute the asset-profile-export command.
     
     Args:
@@ -188,6 +188,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         output_file: Path to output file for writing results
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        allowed_types: List of asset types to export
     """
     try:
         # Check if CSV file exists
@@ -202,10 +203,16 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                 print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-export/asset_uids.csv")
             logger.error(error_msg)
             return
-        
+
         # Read source-env and target-env mappings from CSV file
-        env_mappings = read_csv_uids(csv_file, logger)
-        
+        env_mappings = []  # read_csv_uids(csv_file, logger)
+
+        asset_data = read_csv_asset_data(csv_file, logger, allowed_types)
+        env_mappings = [
+                (entry['source_uid'], entry['target_uid'])
+                for entry in asset_data
+                if entry.get('source_uid') and entry.get('target_uid')
+            ]
         if not env_mappings:
             logger.warning("No environment mappings found in CSV file")
             return
@@ -1811,7 +1818,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         logger.error(error_msg)
 
 
-def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view']):
     """Execute the asset-profile-export command with parallel processing.
     
     Args:
@@ -1821,6 +1828,7 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         output_file: Path to output file for writing results
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        allowed_types: List of asset types to export
     """
     try:
         # Check if CSV file exists
@@ -1837,8 +1845,17 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             return
         
         # Read source-env and target-env mappings from CSV file
-        env_mappings = read_csv_uids(csv_file, logger)
-        
+        env_mappings = [] #read_csv_uids(csv_file, logger)
+
+        asset_data = read_csv_asset_data(csv_file, logger, allowed_types)
+
+        env_mappings = [
+                (entry['source_uid'], entry['target_uid'])
+                for entry in asset_data
+                if entry.get('source_uid') and entry.get('target_uid')
+            ]
+
+        print(f" env mappings: {env_mappings}")
         if not env_mappings:
             logger.warning("No environment mappings found in CSV file")
             return
@@ -2690,7 +2707,7 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
 
 
 def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None,
-                                         quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5):
+                                         quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5, allowed_types: list[str] = ['table', 'sql_view']):
     """Execute the asset-config-export command with parallel processing.
 
     Args:
@@ -2704,7 +2721,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
     """
     try:
         # Read asset data from CSV file with 4 columns
-        asset_data = read_csv_asset_data(csv_file, logger)
+        asset_data = read_csv_asset_data(csv_file, logger, allowed_types)
 
         if not asset_data:
             logger.warning("No asset data found in CSV file")
@@ -2827,6 +2844,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         if verbose_mode or not quiet_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
+                        print(f"❌ {error_msg}")
                         thread_anomaly_failed += 1
                     # Get child assets of each asset
                     asset_child_assets_config = client.make_api_call(

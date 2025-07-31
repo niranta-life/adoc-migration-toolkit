@@ -126,7 +126,7 @@ def read_csv_uids_single_column(csv_file: str, logger: logging.Logger) -> List[s
         raise 
 
 
-def read_csv_asset_data(csv_file: str, logger: logging.Logger) -> List[Dict[str, str]]:
+def read_csv_asset_data(csv_file: str, logger: logging.Logger, allowed_types: list[str] = ['table', 'sql_view']) -> List[Dict[str, str]]:
     """Read asset data from CSV file with 5 columns: source_id, source_uid, target_id, target_uid, tags.
     
     Args:
@@ -155,8 +155,9 @@ def read_csv_asset_data(csv_file: str, logger: logging.Logger) -> List[Dict[str,
                     target_id = row[2].strip()
                     target_uid = row[3].strip()
                     tags = row[4].strip()
+                    asset_type = row[5].strip().lower() if row[5] else None
                     
-                    if source_id and target_uid:  # Skip rows with empty required fields
+                    if source_id and target_uid and (tags or (asset_type in allowed_types)):  # Skip rows with empty required fields
                         asset_data.append({
                             'source_uid': source_uid,
                             'source_id': source_id,
