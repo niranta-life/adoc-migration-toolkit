@@ -148,7 +148,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
         command: Command string like "asset-profile-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]"
         
     Returns:
-        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode)
+        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-profile-export':
@@ -159,7 +159,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     quiet_mode = False  # Default to showing progress bar and status
     verbose_mode = False
     parallel_mode = False
-    
+    allowed_types = ['table', 'sql_view', 'view']
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -178,6 +178,12 @@ def parse_asset_profile_export_command(command: str) -> tuple:
         elif parts[i] == '--parallel':
             parallel_mode = True
             parts.remove('--parallel')
+        elif parts[i] == '--allowed-types':
+            if i + 1 >= len(parts):
+                raise ValueError("--allowed-types requires a value")
+            allowed_types = parts[i + 1].split(',')
+            parts.pop(i)  # Remove --allowed-types
+            parts.pop(i)  # Remove the allowed types value
         elif i == 1 and not parts[i].startswith('--'):
             # This is the CSV file argument (first non-flag argument)
             csv_file = parts[i]
@@ -186,27 +192,55 @@ def parse_asset_profile_export_command(command: str) -> tuple:
             i += 1
     
     # If no CSV file specified, use default from output directory
+    # if not csv_file:
+    #     if globals.GLOBAL_OUTPUT_DIR:
+    #         csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset_uids.csv")
+    #     else:
+    #         # Look for the most recent adoc-migration-toolkit directory
+    #         current_dir = Path.cwd()
+    #         toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+    #
+    #         if toolkit_dirs:
+    #             # Sort by creation time and use the most recent
+    #             toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+    #             latest_toolkit_dir = toolkit_dirs[0]
+    #             csv_file = str(latest_toolkit_dir / "asset-export" / "asset_uids.csv")
+    #         else:
+    #             csv_file = "asset-export/asset_uids.csv"  # Fallback
+    #
+    # # Generate default output file if not provided - use asset-import category
+    # if not output_file:
+    #     output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
+
+    # Set default CSV file if not provided
     if not csv_file:
+        from ..shared import globals
         if globals.GLOBAL_OUTPUT_DIR:
-            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-export" / "asset_uids.csv")
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
         else:
-            # Look for the most recent adoc-migration-toolkit directory
-            current_dir = Path.cwd()
-            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
-            
-            if toolkit_dirs:
-                # Sort by creation time and use the most recent
-                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
-                latest_toolkit_dir = toolkit_dirs[0]
-                csv_file = str(latest_toolkit_dir / "asset-export" / "asset_uids.csv")
+            csv_file = "asset-import/asset-merged-all.csv"
+
+        # Check if the default file exists
+        import os
+        if not os.path.exists(csv_file):
+            error_msg = f"Default CSV file not found: {csv_file}"
+            if globals.GLOBAL_OUTPUT_DIR:
+                error_msg += f"\n💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file"
+                error_msg += f"\n   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv"
             else:
-                csv_file = "asset-export/asset_uids.csv"  # Fallback
-    
-    # Generate default output file if not provided - use asset-import category
+                error_msg += f"\n💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file"
+                error_msg += f"\n   Expected location: asset-import/asset-merged-all.csv"
+            raise FileNotFoundError(error_msg)
+
+    # # Generate default output file if not provided - use asset-import category
     if not output_file:
         output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
-    
-    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode
+
+    # For parallel mode, default to quiet mode unless verbose is explicitly specified
+    if parallel_mode and not verbose_mode and not quiet_mode:
+        quiet_mode = True
+
+    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types
 
 def parse_asset_profile_import_command(command: str) -> tuple:
     """Parse an asset-profile-import command string into components.
@@ -283,7 +317,7 @@ def parse_asset_config_export_command(command: str) -> tuple:
         command: Command string like "asset-config-export [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel] [--max-threads <num>]"
         
     Returns:
-        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads)
+        Tuple of (csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads, allowed_types)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'asset-config-export':
@@ -295,6 +329,7 @@ def parse_asset_config_export_command(command: str) -> tuple:
     verbose_mode = False
     parallel_mode = False
     max_threads = 5
+    allowed_types = ['table', 'sql_view', 'view']
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -302,6 +337,12 @@ def parse_asset_config_export_command(command: str) -> tuple:
             output_file = parts[i + 1]
             parts.pop(i)  # Remove --output-file
             parts.pop(i)  # Remove the file path
+        elif parts[i] == '--allowed-types':
+            if i + 1 >= len(parts):
+                raise ValueError("--allowed-types requires a value")
+            allowed_types = parts[i + 1].split(',')
+            parts.pop(i)  # Remove --allowed-types
+            parts.pop(i)  # Remove the allowed types value
         elif parts[i] == '--max-threads':
             if i + 1 >= len(parts):
                 raise ValueError("--max-threads requires a value")
@@ -359,7 +400,7 @@ def parse_asset_config_export_command(command: str) -> tuple:
     if parallel_mode and not verbose_mode and not quiet_mode:
         quiet_mode = True
     
-    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads
+    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads, allowed_types
 
 def parse_asset_list_export_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.

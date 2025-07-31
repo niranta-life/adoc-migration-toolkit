@@ -114,9 +114,9 @@ def show_interactive_help():
     print("    Import segments to target environment from CSV file")
     
     print(f"\n{BOLD}🔧 ASSET PROFILE COMMANDS:{RESET}")
-    print(f"  {BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
+    print(f"  {BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel] [--allowed-types <types>]")
     print("    Export asset profiles from source environment to CSV file")
-    print(f"  {BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose]")
+    print(f"  {BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--allowed-types <types>]")
     print("    Import asset profiles to target environment from CSV file")
     print(f"  {BOLD}profile-check{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose]")
     print("    Checks the assets configured with the provided policy type and not yet profiled.")
@@ -124,9 +124,9 @@ def show_interactive_help():
     print("    Triggers the profiling[Changes the engine type to Pushdown] for the given assets supplied from CSV file.")
     
     print(f"\n{BOLD}🔍 ASSET CONFIGURATION COMMANDS:{RESET}")
-    print(f"  {BOLD}asset-config-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
+    print(f"  {BOLD}asset-config-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel] [--allowed-types <types>]")
     print("    Export asset configurations from source environment to CSV file")
-    print(f"  {BOLD}asset-config-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel]")
+    print(f"  {BOLD}asset-config-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--parallel] [--allowed-types <types>]")
     print("    Import asset configurations to target environment from CSV file")
     print(f"  {BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]")
     print("    Export all assets from source or target environment to CSV file")
@@ -1338,12 +1338,12 @@ def run_interactive(args):
                 # Check if it's an asset-profile-export command
                 if command.lower().startswith('asset-profile-export'):
                     from .command_parsing import parse_asset_profile_export_command
-                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_profile_export_command(command)
+                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types = parse_asset_profile_export_command(command)
                     if csv_file:
                         if parallel_mode:
-                            execute_asset_profile_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                            execute_asset_profile_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types)
                         else:
-                            execute_asset_profile_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
+                            execute_asset_profile_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types)
                     continue
                 
                 # Check if it's an asset-profile-import command
@@ -1372,10 +1372,10 @@ def run_interactive(args):
                 # Check if it's an asset-config-export command
                 if command.lower().startswith('asset-config-export'):
                     from .command_parsing import parse_asset_config_export_command
-                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads = parse_asset_config_export_command(command)
+                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, max_threads, allowed_types = parse_asset_config_export_command(command)
                     if csv_file:
                         if parallel_mode:
-                            execute_asset_config_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, max_threads)
+                            execute_asset_config_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, max_threads, allowed_types)
                         else:
                             execute_asset_config_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode)
                     continue
