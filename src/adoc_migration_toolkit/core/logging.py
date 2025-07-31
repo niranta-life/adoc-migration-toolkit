@@ -84,7 +84,7 @@ def setup_logging(verbose: bool = False, log_level: str = "DEBUG") -> logging.Lo
     console_handler.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
     console_handler.setFormatter(formatter)
-    handlers.append(console_handler)
+    # handlers.append(console_handler)
     
     # Console handler - REMOVED to prevent breaking progress bars
     # console_handler = logging.StreamHandler(sys.stdout)
