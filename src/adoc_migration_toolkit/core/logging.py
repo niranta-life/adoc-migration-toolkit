@@ -74,12 +74,12 @@ def setup_logging(verbose: bool = False, log_level: str = "DEBUG") -> logging.Lo
     file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')  # Append mode
     file_handler.setFormatter(formatter)
     handlers.append(file_handler)
-    
+
     # Console handler - REMOVED to prevent breaking progress bars
     # console_handler = logging.StreamHandler(sys.stdout)
     # console_handler.setFormatter(formatter)
     # handlers.append(console_handler)
-    
+
     # Configure root logger
     logging.basicConfig(
         level=actual_level,

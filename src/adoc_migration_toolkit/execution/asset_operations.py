@@ -178,7 +178,7 @@ def execute_asset_profile_export_guided(
         return False, error_msg
 
 
-def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view']):
     """Execute the asset-profile-export command.
     
     Args:
@@ -188,6 +188,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         output_file: Path to output file for writing results
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        allowed_types: List of asset types to export
     """
     try:
         # Check if CSV file exists
@@ -202,10 +203,16 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                 print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-export/asset_uids.csv")
             logger.error(error_msg)
             return
-        
+
         # Read source-env and target-env mappings from CSV file
-        env_mappings = read_csv_uids(csv_file, logger)
-        
+        env_mappings = []  # read_csv_uids(csv_file, logger)
+
+        asset_data = read_csv_asset_data(csv_file, logger, allowed_types)
+        env_mappings = [
+                (entry['source_uid'], entry['target_uid'])
+                for entry in asset_data
+                if entry.get('source_uid') and entry.get('target_uid')
+            ]
         if not env_mappings:
             logger.warning("No environment mappings found in CSV file")
             return
@@ -876,7 +883,7 @@ def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, o
         logger.error(error_msg)
 
 
-def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, parallel_mode: bool = False, dry_run: bool = False):
+def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, parallel_mode: bool = False, dry_run: bool = False, max_threads: int = 1):
     """Execute the asset-config-import command.
     
     Args:
@@ -889,7 +896,7 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         dry_run: If True, print the request and payload instead of making the API call
     """
     if parallel_mode:
-        execute_asset_config_import_parallel(csv_file, client, logger, quiet_mode, verbose_mode, dry_run)
+        execute_asset_config_import_parallel(csv_file, client, logger, quiet_mode, verbose_mode, dry_run, max_threads)
         return
     
     try:
@@ -1361,9 +1368,8 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
         logger.error(error_msg)
 
 
-def execute_asset_list_export_parallel(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
+def execute_asset_list_export_parallel(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500, max_threads: int = 5):
     """Execute the asset-list-export command with parallel processing.
-    
     Args:
         client: API client instance
         logger: Logger instance
@@ -1371,6 +1377,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         verbose_mode: Whether to enable verbose logging
         use_target: Whether to use target environment instead of source
         page_size: Number of assets per page (default: 500)
+        max_threads: Maximum number of threads to use (default: 5)
     """
     try:
         # Determine output file path based on environment
@@ -1463,9 +1470,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             print(f"Total pages to retrieve: {total_pages}")
         
         # Calculate thread configuration
-        max_threads = 5
         min_pages_per_thread = 2
-        
         if total_pages < min_pages_per_thread:
             num_threads = 1
             pages_per_thread = total_pages
@@ -1563,7 +1568,6 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                         use_target_auth=use_target,
                         use_target_tenant=use_target
                     )
-                    print(f"page_response::: {page_response}")
                     if verbose_mode:
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Page {page + 1} Response:")
@@ -1814,7 +1818,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         logger.error(error_msg)
 
 
-def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view']):
     """Execute the asset-profile-export command with parallel processing.
     
     Args:
@@ -1824,6 +1828,7 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         output_file: Path to output file for writing results
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        allowed_types: List of asset types to export
     """
     try:
         # Check if CSV file exists
@@ -1840,8 +1845,17 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             return
         
         # Read source-env and target-env mappings from CSV file
-        env_mappings = read_csv_uids(csv_file, logger)
-        
+        env_mappings = [] #read_csv_uids(csv_file, logger)
+
+        asset_data = read_csv_asset_data(csv_file, logger, allowed_types)
+
+        env_mappings = [
+                (entry['source_uid'], entry['target_uid'])
+                for entry in asset_data
+                if entry.get('source_uid') and entry.get('target_uid')
+            ]
+
+        print(f" env mappings: {env_mappings}")
         if not env_mappings:
             logger.warning("No environment mappings found in CSV file")
             return
@@ -2434,20 +2448,18 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
         print(f"✅ Asset tag import completed: {successful_assets}/{total_assets} assets successful, {total_tags_imported} tags imported")
 
 
-def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5):
     """Execute asset tag import in parallel mode.
-    
     Args:
         assets_with_tags: List of asset data dictionaries
         client: API client instance
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        max_threads: Maximum number of threads to use (default: 5)
     """
     # Calculate thread configuration
-    max_threads = 5
     min_assets_per_thread = 10
-    
     if len(assets_with_tags) < min_assets_per_thread:
         num_threads = 1
         assets_per_thread = len(assets_with_tags)
@@ -2691,12 +2703,13 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
         print(f"Threads used: {num_threads}")
         print("="*80)
     else:
-        print(f"✅ Asset tag import completed: {total_successful_assets}/{len(assets_with_tags)} assets successful, {total_tags_imported} tags imported") 
+        print(f"✅ Asset tag import completed: {total_successful_assets}/{len(assets_with_tags)} assets successful, {total_tags_imported} tags imported")
 
 
-def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None,
+                                         quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5, allowed_types: list[str] = ['table', 'sql_view', 'view']):
     """Execute the asset-config-export command with parallel processing.
-    
+
     Args:
         csv_file: Path to the CSV file containing asset data with 5 columns: source_id, source_uid, target_id, target_uid, tags
         client: API client instance
@@ -2704,19 +2717,20 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
         output_file: Path to output file for writing results
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        max_threads: Maximum number of threads to use for parallel processing
     """
     try:
         # Read asset data from CSV file with 4 columns
-        asset_data = read_csv_asset_data(csv_file, logger)
-        
+        asset_data = read_csv_asset_data(csv_file, logger, allowed_types)
+
         if not asset_data:
             logger.warning("No asset data found in CSV file")
             return
-        
+
         # Generate default output file if not provided
         if not output_file:
             output_file = get_output_file_path(csv_file, "asset-config-export.csv", category="asset-export")
-        
+
         if not quiet_mode:
             print(f"\nProcessing {len(asset_data)} asset config exports from CSV file (Parallel Mode)")
             print(f"Output will be written to: {output_file}")
@@ -2725,27 +2739,27 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("🚀 PARALLEL MODE - Using multiple threads for faster processing")
-            print("="*80)
-        
-        # Determine number of threads (max 5, min 1)
-        num_threads = min(5, max(1, len(asset_data)))
-        
+            print("=" * 80)
+
+        # Determine number of threads
+        num_threads = min(max_threads, max(1, len(asset_data)))
+
         if not quiet_mode:
             print(f"Using {num_threads} threads for processing")
-        
+
         # Thread names for progress indicators
         thread_names = [
             "Rocket Thread     ",
-            "Lightning Thread  ", 
+            "Lightning Thread  ",
             "Unicorn Thread    ",
             "Dragon Thread     ",
             "Shark Thread      "
         ]
-        
+
         # Open output file for writing
         output_path = Path(output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Thread-safe counters
         successful = 0
         failed = 0
@@ -2753,7 +2767,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
         anomaly_config_export_failed = 0
         lock = threading.Lock()
         all_results = []
-        
+
         def process_asset_chunk(thread_id, start_index, end_index):
             """Process a chunk of assets for a specific thread."""
             nonlocal successful, failed, total_assets_processed, anomaly_config_export_failed
@@ -2761,10 +2775,10 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             thread_successful = 0
             thread_failed = 0
             thread_anomaly_failed = 0
-            
+
             # Get thread name
             thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
-            
+
             # Create progress bar for this thread if in quiet mode (not verbose)
             if quiet_mode and not verbose_mode:
                 progress_bar = tqdm(
@@ -2776,25 +2790,26 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                 )
             else:
                 progress_bar = None
-            
+
             for i in range(start_index, end_index):
                 asset = asset_data[i]
                 source_uid = asset['source_uid']
                 source_id = asset['source_id']
                 target_uid = asset['target_uid']
                 target_id = asset['target_id']
-                
+
                 if verbose_mode:
                     print(f"\n[Thread {thread_id}] Processing asset - source_uid: {source_uid}, source_id: {source_id}")
                     print("-" * 60)
                 elif not quiet_mode:
-                    print(f"[Thread {thread_id}] Processing [{i-start_index+1}/{end_index-start_index}] source_id: {source_id}")
-                
+                    print(
+                        f"[Thread {thread_id}] Processing [{i - start_index + 1}/{end_index - start_index}] source_id: {source_id}")
+
                 try:
                     # Get asset configuration using source_id directly
                     if verbose_mode:
                         print(f"[Thread {thread_id}] Getting asset configuration for ID: {source_id}")
-                    
+
                     # Show headers in verbose mode
                     if verbose_mode:
                         print(f"\n[Thread {thread_id}] GET Request Headers:")
@@ -2804,17 +2819,17 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         print(f"  Authorization: Bearer [REDACTED]")
                         if hasattr(client, 'tenant') and client.tenant:
                             print(f"  X-Tenant: {client.tenant}")
-                    
+
                     asset_config = client.make_api_call(
                         endpoint=f"/catalog-server/api/assets/{source_id}/config",
                         method='GET'
                     )
-                    
+
                     # Show response in verbose mode
                     if verbose_mode:
                         print(f"\n[Thread {thread_id}] Config Response:")
                         print(json.dumps(asset_config, indent=2, ensure_ascii=False))
-                    
+
                     asset_config_json = json.dumps(asset_config, ensure_ascii=False, separators=(',', ':'))
                     asset_profile_anomaly_config_json = {}
                     try:
@@ -2822,12 +2837,14 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                             endpoint=f"/catalog-server/api/rules/profile-anomaly/byAsset/{source_id}",
                             method='GET'
                         )
-                        asset_profile_anomaly_config_json = json.dumps(asset_profile_anomaly_config, ensure_ascii=False, separators=(',', ':'))
+                        asset_profile_anomaly_config_json = json.dumps(asset_profile_anomaly_config, ensure_ascii=False,
+                                                                       separators=(',', ':'))
                     except Exception as e:
                         error_msg = f"[Thread {thread_id}] Error exporting anomaly details source_id {source_id}: {e}"
                         if verbose_mode or not quiet_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
+                        print(f"❌ {error_msg}")
                         thread_anomaly_failed += 1
                     # Get child assets of each asset
                     asset_child_assets_config = client.make_api_call(
@@ -2835,13 +2852,15 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         method='GET'
                     )
 
-                    asset_child_assets_config_json = json.dumps(asset_child_assets_config, ensure_ascii=False, separators=(',', ':'))
+                    asset_child_assets_config_json = json.dumps(asset_child_assets_config, ensure_ascii=False,
+                                                                separators=(',', ':'))
                     asset_child_assets_config_dict = json.loads(asset_child_assets_config_json)
 
                     # Build a dictionary of assetId -> uid
-                    asset_id_to_uid_map = {item["assetId"]: item["uid"] for item in asset_child_assets_config_dict["childAssets"]}
-                    asset_id_to_uid_map_json = json.dumps(asset_id_to_uid_map, ensure_ascii=False, separators=(',', ':'))
-
+                    asset_id_to_uid_map = {item["assetId"]: item["uid"] for item in
+                                           asset_child_assets_config_dict["childAssets"]}
+                    asset_id_to_uid_map_json = json.dumps(asset_id_to_uid_map, ensure_ascii=False,
+                                                          separators=(',', ':'))
 
                     # Get child assets of each asset
                     asset_target_child_assets_config = client.make_api_call(
@@ -2851,39 +2870,44 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         use_target_tenant=True
                     )
 
-                    asset_target_child_assets_config_json = json.dumps(asset_target_child_assets_config, ensure_ascii=False, separators=(',', ':'))
+                    asset_target_child_assets_config_json = json.dumps(asset_target_child_assets_config,
+                                                                       ensure_ascii=False, separators=(',', ':'))
                     asset_target_child_assets_config_dict = json.loads(asset_target_child_assets_config_json)
 
                     # Build a dictionary of assetId -> uid
-                    asset_target_id_to_uid_map = {item["assetId"]: item["uid"] for item in asset_target_child_assets_config_dict["childAssets"]}
-                    asset_target_id_to_uid_map_json = json.dumps(asset_target_id_to_uid_map, ensure_ascii=False, separators=(',', ':'))
-
+                    asset_target_id_to_uid_map = {item["assetId"]: item["uid"] for item in
+                                                  asset_target_child_assets_config_dict["childAssets"]}
+                    asset_target_id_to_uid_map_json = json.dumps(asset_target_id_to_uid_map, ensure_ascii=False,
+                                                                 separators=(',', ':'))
 
                     # Write the compressed JSON response to CSV with target_uid
-                    thread_results.append([target_uid, asset_config_json, asset_profile_anomaly_config_json, asset_id_to_uid_map_json, asset_target_id_to_uid_map_json])
-                    
+                    thread_results.append(
+                        [target_uid, asset_config_json, asset_profile_anomaly_config_json, asset_id_to_uid_map_json,
+                         asset_target_id_to_uid_map_json])
+
                     if verbose_mode:
                         print(f"[Thread {thread_id}] ✅ Written to file: {target_uid}")
                     elif not quiet_mode:
-                        print(f"[Thread {thread_id}] ✅ [{i-start_index+1}/{end_index-start_index}] {target_uid}: Config exported successfully")
-                    
+                        print(
+                            f"[Thread {thread_id}] ✅ [{i - start_index + 1}/{end_index - start_index}] {target_uid}: Config exported successfully")
+
                     thread_successful += 1
-                    
+
                 except Exception as e:
                     error_msg = f"[Thread {thread_id}] Error processing source_id {source_id}: {e}"
                     if verbose_mode or not quiet_mode:
                         print(f"❌ {error_msg}")
                     logger.error(error_msg)
                     thread_failed += 1
-                
+
                 # Update progress bar
                 if progress_bar:
                     progress_bar.update(1)
-            
+
             # Close progress bar
             if progress_bar:
                 progress_bar.close()
-            
+
             # Update global counters thread-safely
             with lock:
                 successful += thread_successful
@@ -2891,82 +2915,87 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                 total_assets_processed += thread_successful
                 anomaly_config_export_failed += thread_anomaly_failed
                 all_results.extend(thread_results)
-            
+
             return {
                 'thread_id': thread_id,
                 'successful': thread_successful,
                 'failed': thread_failed,
                 'total_assets': end_index - start_index
             }
-        
+
         # Calculate chunk sizes
         chunk_size = len(asset_data) // num_threads
         remainder = len(asset_data) % num_threads
-        
+
         # Create thread pool
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = []
             start_index = 0
-            
+
             for thread_id in range(num_threads):
                 # Calculate end index for this thread
                 end_index = start_index + chunk_size
                 if thread_id < remainder:
                     end_index += 1
-                
+
                 if start_index < end_index:
                     future = executor.submit(process_asset_chunk, thread_id, start_index, end_index)
                     futures.append(future)
-                
+
                 start_index = end_index
-            
+
             # Wait for all threads to complete
             thread_results = []
             for future in as_completed(futures):
                 thread_results.append(future.result())
-        
+
         # Write all results to CSV file
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-            
+
             # Write header
-            writer.writerow(['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json', 'asset_target_id_to_uid_map_json'])
-            
+            writer.writerow(
+                ['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json',
+                 'asset_target_id_to_uid_map_json'])
+
             # Write all results
             writer.writerows(all_results)
-        
+
         # Verify the CSV file can be read correctly
         if verbose_mode or not quiet_mode:
             print("\nVerifying CSV file can be read correctly...")
-        
+
         try:
             with open(output_path, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 header = next(reader)
                 row_count = 0
                 validation_errors = []
-                
+
                 # Validate header
                 if len(header) != 4:
                     validation_errors.append(f"Invalid header: expected 4 columns, got {len(header)}")
-                elif header[0] != 'target_uid' or header[1] != 'asset_config_json' or header[2] != 'asset_profile_anomaly_config_json' or header[3] != 'asset_id_to_uid_map_json' or header[4] != 'asset_target_id_to_uid_map_json':
-                    validation_errors.append(f"Invalid header: expected ['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json', 'asset_target_id_to_uid_map_json], got {header}")
-                
+                elif header[0] != 'target_uid' or header[1] != 'asset_config_json' or header[
+                    2] != 'asset_profile_anomaly_config_json' or header[3] != 'asset_id_to_uid_map_json' or header[
+                    4] != 'asset_target_id_to_uid_map_json':
+                    validation_errors.append(
+                        f"Invalid header: expected ['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json', 'asset_target_id_to_uid_map_json], got {header}")
+
                 # Validate each row
                 for row_num, row in enumerate(reader, start=2):
                     row_count += 1
-                    
+
                     # Check column count
                     if len(row) != 4:
                         validation_errors.append(f"Row {row_num}: Expected 4 columns, got {len(row)}")
                         continue
-                    
+
                     target_uid, config_json_str, asset_profile_anomaly_config_json_str, asset_id_to_uid_map_json_str, asset_target_id_to_uid_map_json_str = row
-                    
+
                     # Check for empty values
                     if not target_uid.strip():
                         validation_errors.append(f"Row {row_num}: Empty target_uid value")
-                    
+
                     if not config_json_str.strip():
                         validation_errors.append(f"Row {row_num}: Empty asset_config_json value")
 
@@ -2984,13 +3013,13 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                     # Verify JSON is parsable
                     try:
                         config_data = json.loads(config_json_str)
-                        
+
                         # Additional validation: check if it's a valid config response
                         if not isinstance(config_data, dict):
                             validation_errors.append(f"Row {row_num}: asset_config_json is not a valid JSON object")
                         elif not config_data:  # Empty object
                             validation_errors.append(f"Row {row_num}: asset_config_json is empty")
-                        
+
                     except json.JSONDecodeError as e:
                         validation_errors.append(f"Row {row_num}: Invalid JSON in asset_config_json - {e}")
                     except Exception as e:
@@ -3002,14 +3031,17 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
 
                         # Additional validation: check if it's a valid config response
                         if not isinstance(config_data, dict):
-                            validation_errors.append(f"Row {row_num}: asset_profile_anomaly_config_json is not a valid JSON object")
+                            validation_errors.append(
+                                f"Row {row_num}: asset_profile_anomaly_config_json is not a valid JSON object")
                         elif not config_data:  # Empty object
                             validation_errors.append(f"Row {row_num}: asset_profile_anomaly_config_json is empty")
 
                     except json.JSONDecodeError as e:
-                        validation_errors.append(f"Row {row_num}: Invalid JSON in asset_profile_anomaly_config_json - {e}")
+                        validation_errors.append(
+                            f"Row {row_num}: Invalid JSON in asset_profile_anomaly_config_json - {e}")
                     except Exception as e:
-                        validation_errors.append(f"Row {row_num}: Error parsing asset_profile_anomaly_config_json - {e}")
+                        validation_errors.append(
+                            f"Row {row_num}: Error parsing asset_profile_anomaly_config_json - {e}")
 
                     # Verify asset_id_to_uid_map_json JSON is parsable
                     try:
@@ -3017,7 +3049,8 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
 
                         # Additional validation: check if it's a valid config response
                         if not isinstance(config_data, dict):
-                            validation_errors.append(f"Row {row_num}: asset_id_to_uid_map_json is not a valid JSON object")
+                            validation_errors.append(
+                                f"Row {row_num}: asset_id_to_uid_map_json is not a valid JSON object")
                         elif not config_data:  # Empty object
                             validation_errors.append(f"Row {row_num}: asset_id_to_uid_map_json is empty")
 
@@ -3038,7 +3071,8 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                             validation_errors.append(f"Row {row_num}: asset_target_id_to_uid_map_json is empty")
 
                     except json.JSONDecodeError as e:
-                        validation_errors.append(f"Row {row_num}: Invalid JSON in asset_target_id_to_uid_map_json - {e}")
+                        validation_errors.append(
+                            f"Row {row_num}: Invalid JSON in asset_target_id_to_uid_map_json - {e}")
                     except Exception as e:
                         validation_errors.append(f"Row {row_num}: Error parsing asset_target_id_to_uid_map_json - {e}")
                 # Report validation results
@@ -3056,7 +3090,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         print(f"   Expected columns: target_uid, asset_config_json")
                         print(f"   All JSON entries are valid and parseable")
                         logger.info(f"CSV validation successful: {row_count} rows validated")
-                
+
         except FileNotFoundError:
             error_msg = f"Output file not found: {output_path}"
             if verbose_mode or not quiet_mode:
@@ -3072,30 +3106,33 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             if verbose_mode or not quiet_mode:
                 print(f"❌ {error_msg}")
             logger.error(error_msg)
-        
+
         # Print summary
         if verbose_mode or not quiet_mode:
-            print("\n" + "="*80)
+            print("\n" + "=" * 80)
             print("ASSET CONFIG EXPORT COMPLETED (PARALLEL MODE)")
-            print("="*80)
+            print("=" * 80)
             print(f"Output file: {output_file}")
             print(f"Total assets processed: {len(asset_data)}")
             print(f"Successful: {successful}")
             print(f"Failed: {failed}")
             print(f"Failed anomaly configs export: {anomaly_config_export_failed}")
-            
+
             print(f"Total assets processed: {total_assets_processed}")
             print(f"Threads used: {num_threads}")
-            
+
             for result in thread_results:
-                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
-                print(f"{thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets']} assets")
-            
-            print("="*80)
+                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(
+                    thread_names) else f"Thread {result['thread_id']}"
+                print(
+                    f"{thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets']} assets")
+
+            print("=" * 80)
         else:
-            print(f"✅ Asset config export completed: {successful} successful, {failed} failed, {anomaly_config_export_failed} anomaly configs failed")
+            print(
+                f"✅ Asset config export completed: {successful} successful, {failed} failed, {anomaly_config_export_failed} anomaly configs failed")
             print(f"Output written to: {output_file}")
-        
+
     except Exception as e:
         error_msg = f"Error in parallel asset-config-export: {e}"
         if verbose_mode or not quiet_mode:
@@ -3104,9 +3141,10 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
         raise
 
 
-def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, dry_run: bool = False):
+def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False,
+                                         verbose_mode: bool = False, dry_run: bool = False, max_threads: int = 5):
     """Execute the asset-config-import command with parallel processing.
-    
+
     Args:
         csv_file: Path to the CSV file containing target_uid and config_json
         client: API client instance
@@ -3114,6 +3152,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
         quiet_mode: Whether to show progress bars
         verbose_mode: Whether to enable verbose logging
         dry_run: If True, print the request and payload instead of making the API call
+
     """
     try:
         # Check if CSV file exists
@@ -3125,7 +3164,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             if globals.GLOBAL_OUTPUT_DIR:
                 print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-config-import-ready.csv")
             else:
-                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-config-import-ready.csv")
+                print(
+                    f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-config-import-ready.csv")
             logger.error(error_msg)
             return
 
@@ -3159,7 +3199,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         asset_data.append({
                             'target_uid': target_uid,
                             'config_json': config_json,
-                            'asset_profile_anomaly_config_json' : asset_profile_anomaly_config_json,
+                            'asset_profile_anomaly_config_json': asset_profile_anomaly_config_json,
                             'asset_id_to_uid_map_json': asset_id_to_uid_map_json,
                             'asset_target_id_to_uid_map_json': asset_target_id_to_uid_map_json,
                         })
@@ -3168,42 +3208,42 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             print("❌ No valid asset data found in CSV file")
             logger.warning("No valid asset data found in CSV file")
             return
-        
+
         if not quiet_mode:
             print(f"📊 Found {len(asset_data)} assets to process")
-        
+
         # Determine number of threads (max 5, min 1)
-        num_threads = min(5, max(1, len(asset_data)))
-        
+        num_threads = min(max_threads, max(1, len(asset_data)))
+
         if not quiet_mode:
             print(f"Using {num_threads} threads for processing")
-        
+
         # Thread names for progress indicators
         thread_names = [
             "Rocket Thread     ",
-            "Lightning Thread  ", 
+            "Lightning Thread  ",
             "Unicorn Thread    ",
             "Dragon Thread     ",
             "Shark Thread      "
         ]
-        
+
         # Thread-safe counters
         successful = 0
         failed = 0
         total_assets_processed = 0
         lock = threading.Lock()
         all_results = []
-        
+
         # Create progress bar if in quiet mode
         if quiet_mode and not verbose_mode:
             pbar = tqdm(total=len(asset_data), desc="Processing assets", colour='green')
-        
+
         def process_asset_chunk(thread_id, start_index, end_index):
             nonlocal successful, failed, total_assets_processed
             thread_successful = 0
             thread_failed = 0
             thread_results = []
-            
+
             # Create progress bar for this thread if in quiet mode
             if quiet_mode and not verbose_mode:
                 thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
@@ -3214,29 +3254,29 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                     position=thread_id,
                     leave=False
                 )
-            
+
             for i in range(start_index, end_index):
                 asset = asset_data[i]
                 target_uid = asset['target_uid']
                 config_json = asset['config_json']
                 # profile_anomaly_config_json = asset['asset_profile_anomaly_config_json']
-                
+
                 try:
                     # Step 1: Get asset ID from target_uid
                     if verbose_mode:
-                        print(f"\n[Thread {thread_id}] 🔍 Processing asset {i+1}/{len(asset_data)}: {target_uid}")
+                        print(f"\n[Thread {thread_id}] 🔍 Processing asset {i + 1}/{len(asset_data)}: {target_uid}")
                         print(f"   GET /catalog-server/api/assets?uid={target_uid}")
-                    
+
                     response = client.make_api_call(
                         endpoint=f'/catalog-server/api/assets?uid={target_uid}',
                         method='GET',
                         use_target_auth=True,
                         use_target_tenant=True
                     )
-                    
+
                     if verbose_mode:
                         print(f"   Response: {response}")
-                    
+
                     if not response or 'data' not in response or not response['data']:
                         error_msg = f"No asset found for UID: {target_uid}"
                         if verbose_mode:
@@ -3244,25 +3284,26 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         thread_failed += 1
                         thread_results.append({'target_uid': target_uid, 'error': error_msg, 'status': 'failed'})
                         continue
-                    
+
                     asset_id = response['data'][0]['id']
-                    
+
                     if verbose_mode:
                         print(f"   Asset ID: {asset_id}")
                         print(f"   PUT /catalog-server/api/assets/{asset_id}/config")
                         print(f"   Data: {config_json}")
-                    
+
                     config_data = json.loads(config_json)
                     transformed_config = transform_config_json_to_asset_configuration(config_data, asset_id)
-                    
+
                     if dry_run:
-                        print(f"\n[DRY RUN][Thread {thread_id}] Would send PUT to /catalog-server/api/assets/{asset_id}/config")
+                        print(
+                            f"\n[DRY RUN][Thread {thread_id}] Would send PUT to /catalog-server/api/assets/{asset_id}/config")
                         print(f"[DRY RUN][Thread {thread_id}] Payload:")
                         print(json.dumps(transformed_config, indent=2))
                         thread_successful += 1
                         thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'dry_run'})
                         continue
-                    
+
                     config_response = client.make_api_call(
                         endpoint=f'/catalog-server/api/assets/{asset_id}/config',
                         method='PUT',
@@ -3270,10 +3311,10 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         use_target_auth=True,
                         use_target_tenant=True
                     )
-                    
+
                     if verbose_mode:
                         print(f"   Config Response: {config_response}")
-                    
+
                     if config_response:
                         thread_successful += 1
                         thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'success'})
@@ -3284,7 +3325,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         if verbose_mode:
                             print(f"   ❌ {error_msg}")
                         thread_failed += 1
-                        thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
+                        thread_results.append(
+                            {'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
 
                     import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, quiet_mode, verbose_mode,
                                                    dry_run)
@@ -3294,22 +3336,22 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         print(f"   ❌ {error_msg}")
                     thread_failed += 1
                     thread_results.append({'target_uid': target_uid, 'status': 'failed', 'error': error_msg})
-                
+
                 # Update progress bar
                 if quiet_mode and not verbose_mode:
                     thread_pbar.update(1)
-            
+
             # Close thread progress bar
             if quiet_mode and not verbose_mode:
                 thread_pbar.close()
-            
+
             # Update global counters
             with lock:
                 successful += thread_successful
                 failed += thread_failed
                 total_assets_processed += (end_index - start_index)
                 all_results.extend(thread_results)
-            
+
             return {
                 'thread_id': thread_id,
                 'successful': thread_successful,
@@ -3317,64 +3359,66 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                 'total_assets': end_index - start_index,
                 'results': thread_results
             }
-        
+
         # Calculate chunk sizes
         chunk_size = len(asset_data) // num_threads
         remainder = len(asset_data) % num_threads
-        
+
         # Create and start threads
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = []
             start_index = 0
-            
+
             for i in range(num_threads):
                 # Calculate end index for this thread
                 end_index = start_index + chunk_size
                 if i < remainder:  # Distribute remainder across first few threads
                     end_index += 1
-                
+
                 if start_index < end_index:  # Only create thread if there's work to do
                     future = executor.submit(process_asset_chunk, i, start_index, end_index)
                     futures.append(future)
-                
+
                 start_index = end_index
-            
+
             # Collect results
             thread_results = []
             for future in as_completed(futures):
                 thread_results.append(future.result())
-        
+
         # Close main progress bar
         if quiet_mode and not verbose_mode:
             pbar.close()
-        
+
         # Print summary
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("ASSET CONFIG IMPORT SUMMARY")
-        print("="*60)
+        print("=" * 60)
         print(f"Total assets processed: {total_assets_processed}")
         print(f"Successful: {successful}")
         print(f"Failed: {failed}")
-        
+
         if thread_results:
             print(f"\nPer-thread breakdown:")
             for result in thread_results:
-                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
-                print(f"{thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets']} assets")
-        
+                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(
+                    thread_names) else f"Thread {result['thread_id']}"
+                print(
+                    f"{thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets']} assets")
+
         if failed > 0:
             print(f"\nFailed assets:")
             for result in all_results:
                 if result['status'] == 'failed':
                     print(f"  - {result['target_uid']}: {result.get('error', 'Unknown error')}")
-        
-        print("="*60)
-        
+
+        print("=" * 60)
+
         if failed == 0:
             print("✅ Asset config import completed successfully!")
         else:
             print(f"⚠️  Asset config import completed with {failed} failures. Check the details above.")
-        
+
     except Exception as e:
         error_msg = f"Error executing asset config import: {e}"
         print(f"❌ {error_msg}")
