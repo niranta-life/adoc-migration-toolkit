@@ -107,10 +107,17 @@ python -m adoc_migration_toolkit interactive --env-file=config/config.env --verb
 
 ### 🔍 Asset Configuration Commands
 - [asset-config-export](asset-config-export.md) - Export asset configurations from source environment
+- [asset-config-import](asset-config-import.md) - Import asset configurations to target environment
 - [asset-list-export](asset-list-export.md) - Export all assets from source or target environment
+- [asset-tag-import](asset-tag-import.md) - Import asset tags to target environment
+- [transform-and-merge](transform-and-merge.md) - Transform and merge asset CSV files
 
 ### 📋 Policy Commands
 - [policy-list-export](policy-list-export.md) - Export all policies from source environment
+- [policy-export](policy-export.md) - Export policy definitions by different categories
+- [policy-import](policy-import.md) - Import policy definitions from ZIP files
+- [policy-xfr](policy-xfr.md) - Format policy export files with string replacements
+- [rule-tag-export](rule-tag-export.md) - Export rule tags for all policies
 
 ### 🔧 Notification Commands
 - [notifications-check](notifications-check.md) - Compare notification groups between environments
@@ -119,8 +126,16 @@ python -m adoc_migration_toolkit interactive --env-file=config/config.env --verb
 - [GET](api-get.md) - Make GET requests to API endpoints
 - [PUT](api-put.md) - Make PUT requests to API endpoints
 
+### 🔧 VCS Commands
+- [vcs-config](vcs-config.md) - Configure enterprise VCS settings
+- [vcs-init](vcs-init.md) - Initialize a VCS repository
+- [vcs-pull](vcs-pull.md) - Pull updates from remote repository
+- [vcs-push](vcs-push.md) - Push changes to remote repository
+
 ### 🛠️ Utility Commands
 - [set-output-dir](set-output-dir.md) - Set global output directory
+- [set-log-level](set-log-level.md) - Change log level dynamically
+- [set-http-config](set-http-config.md) - Configure HTTP settings
 - [show-config](show-config.md) - Display current configuration
 - [help](help.md) - Show help information
 - [history](history.md) - Show command history
@@ -168,6 +183,9 @@ transform-and-merge --string-transform "PROD_DB":"DEV_DB"
 
 # Format policy exports
 policy-xfr --string-transform "PROD_URL":"DEV_URL"
+
+# Export policy definitions by category
+policy-export --type rule-types --parallel
 ```
 
 ### 5. Import to Target Environment
@@ -189,6 +207,9 @@ profile-check --config assets.csv --parallel
 
 # Trigger profiling
 profile-run --config assets.csv --parallel
+
+# Import asset tags
+asset-tag-import --verbose
 
 # Verify notifications
 notifications-check --source-context 1 --target-context 2 --assembly-ids 100,101
@@ -231,6 +252,7 @@ asset-profile-import --dry-run --verbose
 Add `--parallel` for faster operations on large datasets:
 ```bash
 asset-list-export --parallel
+policy-export --type rule-types --parallel
 ```
 
 ### 3. **Set Output Directory Once**
@@ -245,13 +267,19 @@ Use `show-config` to verify your environment settings:
 show-config
 ```
 
-### 5. **Use Command History**
+### 5. **Configure HTTP Settings**
+Use `set-http-config` to optimize network performance:
+```bash
+set-http-config --timeout 30 --retry 5
+```
+
+### 6. **Use Command History**
 Use `history` to see and reuse previous commands:
 ```bash
 history
 ```
 
-### 6. **Monitor Progress**
+### 7. **Monitor Progress**
 Use `--verbose` to see detailed API request/response information:
 ```bash
 policy-list-export --verbose
@@ -268,6 +296,7 @@ policy-list-export --verbose
 - Use `set-http-config` to adjust timeout and retry settings
 - Check proxy configuration if behind corporate firewall
 - Verify SSL certificate validity
+- Use `set-log-level DEBUG` for detailed network debugging
 
 ### File Not Found
 - Ensure the output directory is set correctly with `set-output-dir`
@@ -323,6 +352,22 @@ GET /catalog-server/api/assets?uid=123
 
 # Update configurations
 PUT /catalog-server/api/assets/456 {"key": "value"}
+```
+
+### VCS Integration
+Version control for migration data:
+```bash
+# Configure repository
+vcs-config --vcs-type git --remote-url https://github.com/user/repo.git
+
+# Initialize repository
+vcs-init
+
+# Pull latest changes
+vcs-pull
+
+# Push changes
+vcs-push
 ```
 
 ### Configuration Management
