@@ -409,6 +409,8 @@ class PolicyExportFormatter:
             
             # Read the CSV file
             rows = []
+            # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
+            csv.field_size_limit(sys.maxsize)
             with open(asset_config_export_csv, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 rows = list(reader)

@@ -101,7 +101,7 @@ def setup_logging(verbose: bool = False, log_level: str = "INFO", log_file_path:
     
     # Use ReadOnlyRotatingFileHandler for log rotation and permissions
     file_handler = ReadOnlyRotatingFileHandler(
-        log_file, maxBytes=1_048_576, backupCount=5, encoding='utf-8', mode='a'
+        log_file, maxBytes=2_048_576_00, backupCount=50, encoding='utf-8', mode='a'
     )
     file_handler.setFormatter(formatter)
     handlers = [file_handler]
