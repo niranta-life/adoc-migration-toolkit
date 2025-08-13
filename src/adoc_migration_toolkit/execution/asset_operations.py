@@ -16,7 +16,7 @@ from typing import Dict, Any, List, Tuple
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from adoc_migration_toolkit.execution.utils import create_progress_bar, read_csv_uids, read_csv_uids_single_column, read_csv_asset_data
+from adoc_migration_toolkit.execution.utils import create_progress_bar, read_csv_uids, read_csv_uids_single_column, read_csv_asset_data, get_thread_names
 from ..shared.file_utils import get_output_file_path
 from ..shared import globals
 from .utils import get_source_to_target_asset_id_map
@@ -392,16 +392,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
 
 
 def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, dry_run: bool = False, quiet_mode: bool = True, verbose_mode: bool = False, max_threads: int = 5):
-    """Execute the asset-profile-import command.
-    
-    Args:
-        csv_file: Path to the CSV file containing target-env and profile_json
-        client: API client instance
-        logger: Logger instance
-        dry_run: Whether to perform a dry run (no actual API calls)
-        quiet_mode: Whether to suppress console output
-        verbose_mode: Whether to enable verbose logging
-    """
+    """Execute the asset-profile-import command with parallel processing."""
+    import threading
     try:
         # Check if CSV file exists
         csv_path = Path(csv_file)
@@ -416,7 +408,6 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-profiles-import-ready.csv")
             logger.error(error_msg)
             return
-        
         if not quiet_mode:
             print(f"\nProcessing asset profile import from CSV file: {csv_file}")
             if dry_run:
@@ -427,7 +418,6 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
-            
             # Show environment information in dry-run mode
             if dry_run:
                 print("\n🌍 TARGET ENVIRONMENT INFORMATION:")
@@ -438,232 +428,227 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     print(f"  Source Tenant: {client.tenant} (will be used as target)")
                 print(f"  Authentication: Target access key and secret key")
                 print("="*80)
-        
         # Read CSV file
         import_mappings = []
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             header = next(reader)
-            
             if len(header) != 2 or header[0] != 'target-env' or header[1] != 'profile_json':
                 error_msg = f"Invalid CSV format. Expected header: ['target-env', 'profile_json'], got: {header}"
                 if not quiet_mode:
                     print(f"❌ {error_msg}")
                 logger.error(error_msg)
                 return
-            
             for row_num, row in enumerate(reader, start=2):
                 if len(row) != 2:
                     logger.warning(f"Row {row_num}: Expected 2 columns, got {len(row)}")
                     continue
-                
                 target_env = row[0].strip()
                 profile_json = row[1].strip()
-                
                 if target_env and profile_json:
                     import_mappings.append((target_env, profile_json))
                     logger.debug(f"Row {row_num}: Found target-env: {target_env}")
                 else:
                     logger.warning(f"Row {row_num}: Empty target-env or profile_json value")
-        
         if not import_mappings:
             logger.warning("No valid import mappings found in CSV file")
             return
-        
         logger.info(f"Read {len(import_mappings)} import mappings from CSV file: {csv_file}")
+ 
+        # Threading setup
+        num_threads = max_threads
+        min_assets_per_thread = 10
+        if len(import_mappings) < min_assets_per_thread:
+            num_threads = 1
+            assets_per_thread = len(import_mappings)
+        else:
+            num_threads = min(max_threads, (len(import_mappings) + min_assets_per_thread - 1) // min_assets_per_thread)
+            assets_per_thread = (len(import_mappings) + num_threads - 1) // num_threads
+
+        if not quiet_mode:
+            print(f"Using {num_threads} threads to process {len(import_mappings)} imports")
+            print(f"Assets per thread: {assets_per_thread}")
+            print("="*80)
         
-        successful = 0
-        failed = 0
+        thread_names = get_thread_names()
         
-        # Create progress bar using tqdm utility
-        progress_bar = create_progress_bar(
-            total=len(import_mappings),
-            desc="Importing asset profiles",
-            unit="assets",
-            disable=verbose_mode
-        )
-        
-        for i, (target_env, profile_json) in enumerate(import_mappings, 1):
-            # Update progress bar with current asset UID using set_postfix
-            progress_bar.set_postfix(asset=target_env)
-            if not quiet_mode:
-                print(f"\n[{i}/{len(import_mappings)}] Processing target-env: {target_env}")
-                print("-" * 60)
-            
-            try:
-                # Step 1: Get asset details by target-env (UID)
-                if not quiet_mode:
-                    print(f"Getting asset details for UID: {target_env}")
-                
-                if not dry_run:
-                    asset_response = client.make_api_call(
-                        endpoint=f"/catalog-server/api/assets?uid={target_env}",
-                        method='GET',
-                        use_target_auth=True,
-                        use_target_tenant=True
-                    )
-                else:
-                    # Mock response for dry run
-                    asset_response = {
-                        "data": [
-                            {
-                                "id": 12345,
-                                "name": "MOCK_ASSET",
-                                "uid": target_env
-                            }
-                        ]
-                    }
-                    
-                    # Show detailed dry-run information for first API call
-                    if not quiet_mode:
-                        print(f"\n🔍 DRY RUN - API CALL #1: Get Asset Details")
-                        print(f"  Method: GET")
-                        print(f"  Endpoint: /catalog-server/api/assets?uid={target_env}")
-                        print(f"  Headers:")
-                        print(f"    Content-Type: application/json")
-                        print(f"    Authorization: Bearer [REDACTED]")
-                        if hasattr(client, 'target_tenant') and client.target_tenant:
-                            print(f"    X-Tenant: {client.target_tenant}")
-                        else:
-                            print(f"    X-Tenant: {client.tenant}")
-                        print(f"  Expected Response: Asset details with ID field")
-                        print(f"  Mock Response: {json.dumps(asset_response, indent=2, ensure_ascii=False)}")
-                
-                # Show response in verbose mode (only for non-dry-run)
-                if verbose_mode and not dry_run:
-                    print("\nAsset Response:")
-                    print(json.dumps(asset_response, indent=2, ensure_ascii=False))
-                
-                # Step 2: Extract the asset ID
-                if not asset_response or 'data' not in asset_response:
-                    error_msg = f"No 'data' field found in asset response for UID: {target_env}"
-                    if not quiet_mode:
-                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
-                    logger.error(error_msg)
-                    failed += 1
-                    progress_bar.update(1)
-                    continue
-                
-                data_array = asset_response['data']
-                if not data_array or len(data_array) == 0:
-                    error_msg = f"Empty 'data' array in asset response for UID: {target_env}"
-                    if not quiet_mode:
-                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
-                    logger.error(error_msg)
-                    failed += 1
-                    progress_bar.update(1)
-                    continue
-                
-                first_asset = data_array[0]
-                if 'id' not in first_asset:
-                    error_msg = f"No 'id' field found in first asset for UID: {target_env}"
-                    if not quiet_mode:
-                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
-                    logger.error(error_msg)
-                    failed += 1
-                    progress_bar.update(1)
-                    continue
-                
-                asset_id = first_asset['id']
-                if not quiet_mode:
-                    print(f"Extracted asset ID: {asset_id}")
-                
-                # Step 3: Parse profile JSON
+        thread_results = []
+        def process_chunk(thread_id, chunk):
+            thread_successful = 0
+            thread_failed = 0
+            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+            progress_bar = create_progress_bar(
+                total=len(chunk),
+                desc=thread_name,
+                unit="assets",
+                disable=quiet_mode,
+                position=thread_id,
+                leave=False
+            )
+
+            for i, (target_env, profile_json) in enumerate(chunk):
                 try:
-                    profile_data = json.loads(profile_json)
-                except json.JSONDecodeError as e:
-                    error_msg = f"Invalid JSON in profile_json for UID {target_env}: {e}"
-                    if not quiet_mode:
-                        print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
-                    logger.error(error_msg)
-                    failed += 1
-                    progress_bar.update(1)
-                    continue
-                
-                # Step 4: Make PUT request to update profile configuration
-                if not quiet_mode:
-                    print(f"Updating profile configuration for asset ID: {asset_id}")
-                
-                if not dry_run:
-                    # Show headers in verbose mode
-                    if verbose_mode:
-                        print("\nPUT Request Headers:")
-                        print(f"  Endpoint: /catalog-server/api/profile/{asset_id}/config")
-                        print(f"  Method: PUT")
-                        print(f"  Content-Type: application/json")
-                        print(f"  Authorization: Bearer [REDACTED]")
-                        if hasattr(client, 'target_tenant') and client.target_tenant:
-                            print(f"  X-Tenant: {client.target_tenant}")
-                        print(f"  Payload: {json.dumps(profile_data, ensure_ascii=False)}")
-                    
-                    import_response = client.make_api_call(
-                        endpoint=f"/catalog-server/api/profile/{asset_id}/config",
-                        method='PUT',
-                        json_payload=profile_data,
-                        use_target_auth=True,
-                        use_target_tenant=True
-                    )
-                    
-                    # Show response in verbose mode
-                    if verbose_mode:
-                        print("\nImport Response:")
-                        print(json.dumps(import_response, indent=2, ensure_ascii=False))
-                    
-                    if not quiet_mode:
-                        print("✅ Import successful")
-                else:
-                    # Show detailed dry-run information for second API call
-                    if not quiet_mode:
-                        print(f"\n🔍 DRY RUN - API CALL #2: Update Profile Configuration")
-                        print(f"  Method: PUT")
-                        print(f"  Endpoint: /catalog-server/api/profile/{asset_id}/config")
-                        print(f"  Headers:")
-                        print(f"    Content-Type: application/json")
-                        print(f"    Authorization: Bearer [REDACTED]")
-                        if hasattr(client, 'target_tenant') and client.target_tenant:
-                            print(f"    X-Tenant: {client.target_tenant}")
-                        else:
-                            print(f"    X-Tenant: {client.tenant}")
-                        print(f"  Payload:")
-                        print(json.dumps(profile_data, indent=4, ensure_ascii=False))
-                        print(f"  Expected Action: Update profile configuration for asset {asset_id}")
-                        print(f"  Status: Would be executed in live mode")
+                    if not quiet_mode and verbose_mode:
+                        print(f"[Thread {thread_name}] Processing target-env: {target_env}")
+                    if not dry_run:
+                        asset_response = client.make_api_call(
+                            endpoint=f"/catalog-server/api/assets?uid={target_env}",
+                            method='GET',
+                            use_target_auth=True,
+                            use_target_tenant=True
+                        )
                     else:
-                        print(f"🔍 [{i}/{len(import_mappings)}] {target_env}: Would update profile (dry-run)")
-                
-                successful += 1
-                progress_bar.update(1)
-                logger.info(f"Successfully processed target-env {target_env} (asset ID: {asset_id})")
-                
-            except Exception as e:
-                error_msg = f"Failed to process UID {target_env}: {e}"
-                if not quiet_mode:
-                    print(f"❌ [{i}/{len(import_mappings)}] {target_env}: {error_msg}")
-                logger.error(error_msg)
-                failed += 1
-                progress_bar.update(1)
+                        asset_response = {
+                            "data": [
+                                {
+                                    "id": 12345,
+                                    "name": "MOCK_ASSET",
+                                    "uid": target_env
+                                }
+                            ]
+                        }
+                        if not quiet_mode:
+                            print(f"[Thread {thread_name}] DRY RUN - Would get asset details for UID: {target_env}")
+                    if verbose_mode and not dry_run:
+                        print(f"[Thread {thread_name}] Asset Response: {json.dumps(asset_response, indent=2, ensure_ascii=False)}")
+                    if not asset_response or 'data' not in asset_response:
+                        error_msg = f"No 'data' field found in asset response for UID: {target_env}"
+                        if not quiet_mode:
+                            print(f"❌ [Thread {thread_name}] {target_env}: {error_msg}")
+                        logger.error(error_msg)
+                        thread_failed += 1
+                        progress_bar.update(1)
+                        continue
+                    data_array = asset_response['data']
+                    if not data_array or len(data_array) == 0:
+                        error_msg = f"Empty 'data' array in asset response for UID: {target_env}"
+                        if not quiet_mode:
+                            print(f"❌ [Thread {thread_name}] {target_env}: {error_msg}")
+                        logger.error(error_msg)
+                        thread_failed += 1
+                        progress_bar.update(1)
+                        continue
+                    first_asset = data_array[0]
+                    if 'id' not in first_asset:
+                        error_msg = f"No 'id' field found in first asset for UID: {target_env}"
+                        if not quiet_mode:
+                            print(f"❌ [Thread {thread_name}] {target_env}: {error_msg}")
+                        logger.error(error_msg)
+                        thread_failed += 1
+                        progress_bar.update(1)
+                        continue
+                    asset_id = first_asset['id']
+                    if not quiet_mode:
+                        print(f"[Thread {thread_name}] Extracted asset ID: {asset_id}")
+                    try:
+                        profile_data = json.loads(profile_json)
+                    except json.JSONDecodeError as e:
+                        error_msg = f"Invalid JSON in profile_json for UID {target_env}: {e}"
+                        if not quiet_mode:
+                            print(f"❌ [Thread {thread_name}] {target_env}: {error_msg}")
+                        logger.error(error_msg)
+                        thread_failed += 1
+                        progress_bar.update(1)
+                        continue
+                    if not quiet_mode:
+                        print(f"[Thread {thread_name}] Updating profile configuration for asset ID: {asset_id}")
+                    if not dry_run:
+                        import_response = client.make_api_call(
+                            endpoint=f"/catalog-server/api/profile/{asset_id}/config",
+                            method='PUT',
+                            json_payload=profile_data,
+                            use_target_auth=True,
+                            use_target_tenant=True
+                        )
+                        if verbose_mode:
+                            print(f"[Thread {thread_name}] Import Response: {json.dumps(import_response, indent=2, ensure_ascii=False)}")
+                        if not quiet_mode:
+                            print(f"[Thread {thread_name}] ✅ Import successful")
+                    else:
+                        if not quiet_mode:
+                            print(f"[Thread {thread_name}] DRY RUN - Would update profile for asset {asset_id}")
+                    thread_successful += 1
+                    progress_bar.update(1)
+                    logger.info(f"Successfully processed target-env {target_env} (asset ID: {asset_id})")
+                except Exception as e:
+                    error_msg = f"Failed to process UID {target_env}: {e}"
+                    if not quiet_mode:
+                        print(f"❌ [Thread {thread_name}] {target_env}: {error_msg}")
+                    logger.error(error_msg)
+                    thread_failed += 1
+                    progress_bar.update(1)
+
+            progress_bar.close()       
+            print(f"Thread {thread_name} completed")
+
+            return {
+                'thread_id': thread_id,
+                'successful': thread_successful,
+                'failed': thread_failed
+            }
         
-        # Close progress bar
-        progress_bar.close()
+        # Split import_mappings into chunks
+        threads = []
         
-        # Print summary
+        for i in range(num_threads):
+            start_index = i * assets_per_thread
+            end_index = min(start_index + assets_per_thread, len(import_mappings))
+            chunk = import_mappings[start_index:end_index]
+            t = threading.Thread(target=process_chunk, args=(i, chunk))
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
+
+                # Execute parallel processing
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            # Submit tasks for each thread
+            futures = []
+            for thread_id in range(num_threads):
+                start_index = thread_id * assets_per_thread
+                end_index = min(start_index + assets_per_thread, len(import_mappings))
+                
+                if start_index < len(import_mappings):  # Only submit if there are pages to process
+                    future = executor.submit(process_chunk, thread_id, chunk)
+                    futures.append(future)
+            
+            # Collect results
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    thread_results.append(result)
+                except Exception as e:
+                    logger.error(f"Thread failed with exception: {e}")
+        
+
+        print("thread_results", thread_results)
+        total_successful = sum(r['successful'] for r in thread_results)
+        total_failed = sum(r['failed'] for r in thread_results)
+
         if not quiet_mode:
             print("\n" + "="*80)
-            print("ASSET PROFILE IMPORT COMPLETED")
+            print("ASSET PROFILE IMPORT COMPLETED (PARALLEL)")
             print("="*80)
             if dry_run:
                 print("🔍 DRY RUN MODE - No actual changes were made")
             print(f"Total mappings processed: {len(import_mappings)}")
-            print(f"Successful: {successful}")
-            print(f"Failed: {failed}")
+            print(f"Successful: {total_successful}")
+            print(f"Failed: {total_failed}")
+            print("="*80)        
+            # Print thread statistics
+            print(f"\nThread Statistics:")
+            for result in thread_results:
+                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(thread_names) else f"Thread {result['thread_id']}"
+                print(f"  {thread_name}: {result['successful']} successful, {result['failed']} failed")
+
             print("="*80)
         else:
-            print(f"✅ Asset profile import completed: {successful} successful, {failed} failed")
+            print(f"✅ Asset profile import completed: {total_successful} successful, {total_failed} failed")
             if dry_run:
                 print("🔍 DRY RUN MODE - No actual changes were made")
-        
+
     except Exception as e:
-        error_msg = f"Error in asset-profile-import: {e}"
+        error_msg = f"Error in asset-profile-import (parallel): {e}"
         if not quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
@@ -1041,27 +1026,23 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
             pbar.close()
         
         # Print summary
-        print("\n" + "="*60)
-        print("ASSET CONFIG IMPORT SUMMARY")
-        print("="*60)
-        print(f"Total assets processed: {len(asset_data)}")
-        print(f"Successful: {successful}")
-        print(f"Failed: {failed}")
-        
-        if failed > 0:
-            print(f"\nFailed assets:")
-            for failed_asset in failed_assets:
-                print(f"  - {failed_asset['target_uid']}: {failed_asset['error']}")
-        
-        print("="*60)
-        
-        if failed == 0:
-            print("✅ Asset config import completed successfully!")
+        if not quiet_mode:
+            print("\n" + "="*80)
+            print("ASSET CONFIG IMPORT COMPLETED")
+            print("="*80)
+            if dry_run:
+                print("🔍 DRY RUN MODE - No actual changes were made")
+            print(f"Total mappings processed: {len(asset_data)}")
+            print(f"Successful: {successful}")
+            print(f"Failed: {failed}")
+            print("="*80)
         else:
-            print(f"⚠️  Asset config import completed with {failed} failures. Check the details above.")
+            print(f"✅ Asset config import completed: {successful} successful, {failed} failed")
+            if dry_run:
+                print("🔍 DRY RUN MODE - No actual changes were made")
         
     except Exception as e:
-        error_msg = f"Error executing asset config import: {e}"
+        error_msg = f"Error in asset-config-import: {e}"
         if not quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
@@ -1488,13 +1469,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         temp_files = []
         
         # Funny thread names for progress indicators (all same length)
-        thread_names = [
-            "Rocket Thread     ",
-            "Lightning Thread  ", 
-            "Unicorn Thread    ",
-            "Dragon Thread     ",
-            "Shark Thread      "
-        ]
+        thread_names = get_thread_names()
         
         def process_page_chunk(thread_id, start_page, end_page):
             """Process a chunk of pages for a specific thread."""
@@ -1895,13 +1870,7 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         temp_files = []
         
         # Funny thread names for progress indicators (all same length)
-        thread_names = [
-            "Rocket Thread     ",
-            "Lightning Thread  ", 
-            "Unicorn Thread    ",
-            "Dragon Thread     ",
-            "Shark Thread      "
-        ]
+        thread_names = get_thread_names()
         
         def process_asset_chunk(thread_id, start_index, end_index):
             """Process a chunk of assets for a specific thread."""
@@ -1925,11 +1894,11 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             # Create temporary file for this thread
             temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
             temp_files.append(temp_file.name)
-            
+            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
             # Create progress bar for this thread
             progress_bar = create_progress_bar(
                 total=end_page - start_page,
-                desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+                desc= thread_name,
                 unit="assets",
                 disable=quiet_mode,
                 position=thread_id,
@@ -1945,14 +1914,12 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             for i, (source_env, target_env) in enumerate(thread_env_mappings):
                 try:
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Processing source-env: {source_env}")
                         print(f"Target-env: {target_env}")
                         print("-" * 60)
                     
                     # Step 1: Get asset details by source-env (UID)
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Getting asset details for UID: {source_env}")
                         print(f"GET Request Headers:")
                         print(f"  Endpoint: /catalog-server/api/assets?uid={source_env}")
@@ -1968,7 +1935,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                     )
                     
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Asset Response:")
                         print(json.dumps(asset_response, indent=2, ensure_ascii=False))
                     
@@ -1976,7 +1942,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                     if not asset_response or 'data' not in asset_response:
                         error_msg = f"No 'data' field found in asset response for UID: {source_env}"
                         if verbose_mode:
-                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                             print(f"\n{thread_name} - ❌ {error_msg}")
                         logger.error(f"Thread {thread_id}: {error_msg}")
                         failed += 1
@@ -1987,7 +1952,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                     if not data_array or len(data_array) == 0:
                         error_msg = f"Empty 'data' array in asset response for UID: {source_env}"
                         if verbose_mode:
-                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                             print(f"\n{thread_name} - ❌ {error_msg}")
                         logger.error(f"Thread {thread_id}: {error_msg}")
                         failed += 1
@@ -1998,7 +1962,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                     if 'id' not in first_asset:
                         error_msg = f"No 'id' field found in first asset for UID: {source_env}"
                         if verbose_mode:
-                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                             print(f"\n{thread_name} - ❌ {error_msg}")
                         logger.error(f"Thread {thread_id}: {error_msg}")
                         failed += 1
@@ -2007,12 +1970,10 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                     
                     asset_id = first_asset['id']
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"{thread_name} - Extracted asset ID: {asset_id}")
                     
                     # Step 3: Get profile configuration for the asset
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Getting profile configuration for asset ID: {asset_id}")
                         print(f"GET Request Headers:")
                         print(f"  Endpoint: /catalog-server/api/profile/{asset_id}/config")
@@ -2028,7 +1989,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                     )
                     
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Profile Response:")
                         print(json.dumps(profile_response, indent=2, ensure_ascii=False))
                     
@@ -2039,7 +1999,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                         writer.writerow([target_env, profile_json])
                     
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"{thread_name} - ✅ Written to file: {target_env}")
                     
                     successful += 1
@@ -2048,7 +2007,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                 except Exception as e:
                     error_msg = f"Failed to process source-env {source_env}: {e}"
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - ❌ {error_msg}")
                     logger.error(f"Thread {thread_id}: {error_msg}")
                     failed += 1
@@ -2066,27 +2024,7 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                 'temp_file': temp_file.name
             }
         
-        # Start threads
-        # print(f"Starting {num_threads} threads to process {len(env_mappings)} assets")
-        # threads = []
-        # for i in range(num_threads):
-        #     start_index = i * assets_per_thread
-        #     end_index = min(start_index + assets_per_thread, len(env_mappings))
-            
-        #     thread = threading.Thread(
-        #         target=lambda tid=i, start=start_index, end=end_index: thread_results.append(
-        #             process_asset_chunk(tid, start, end)
-        #         )
-        #     )
-        #     threads.append(thread)
-        #     thread.start()
-        # print(f"Started {len(threads)} threads to process {len(env_mappings)} assets")
-
-        # # Wait for all threads to complete
-        # for thread in threads:
-        #     thread.join()
-        
-                # Execute parallel processing
+        # Execute parallel processing
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             # Submit tasks for each thread
             futures = []
@@ -2499,13 +2437,7 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
     thread_results = []
     
     # Funny thread names for progress indicators (all same length)
-    thread_names = [
-        "Rocket Thread     ",
-        "Lightning Thread  ", 
-        "Unicorn Thread    ",
-        "Dragon Thread     ",
-        "Shark Thread      "
-    ]
+    thread_names = get_thread_names()
     
     def process_asset_chunk(thread_id, start_index, end_index):
         """Process a chunk of assets for a specific thread."""
@@ -2771,13 +2703,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             print(f"Using {num_threads} threads for processing")
 
         # Thread names for progress indicators
-        thread_names = [
-            "Rocket Thread     ",
-            "Lightning Thread  ",
-            "Unicorn Thread    ",
-            "Dragon Thread     ",
-            "Shark Thread      "
-        ]
+        thread_names = get_thread_names()
 
         # Open output file for writing
         output_path = Path(output_file)
@@ -3242,13 +3168,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             print(f"Using {num_threads} threads for processing")
 
         # Thread names for progress indicators
-        thread_names = [
-            "Rocket Thread     ",
-            "Lightning Thread  ",
-            "Unicorn Thread    ",
-            "Dragon Thread     ",
-            "Shark Thread      "
-        ]
+        thread_names = get_thread_names()
 
         # Thread-safe counters
         successful = 0

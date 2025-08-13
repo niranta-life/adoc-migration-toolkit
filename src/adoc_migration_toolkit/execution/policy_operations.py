@@ -15,7 +15,7 @@ from datetime import datetime
 from glob import glob
 from pathlib import Path
 
-from .utils import create_progress_bar
+from .utils import create_progress_bar, get_thread_names
 from ..shared import globals
 from ..shared.file_utils import get_output_file_path
 
@@ -767,11 +767,12 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             
             # Get policies for this thread
             thread_policies = all_policies[start_index:end_index]
-            
+            thread_names = get_thread_names()
+            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
             # Create progress bar for this thread using utility function
             progress_bar = create_progress_bar(
                 total=len(thread_policies),
-                desc=f"Thread {thread_id}",
+                desc= thread_name,
                 unit="policies",
                 disable=quiet_mode,
                 position=thread_id,
@@ -815,9 +816,9 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                     
                     if verbose_mode:
                         if policy_has_existing_assets:
-                            print(f"✅ Thread {thread_id}: Processing policy {policy.get('id')}: Found matching assets {matching_assets}")
+                            print(f"✅ Thread {thread_name}: Processing policy {policy.get('id')}: Found matching assets {matching_assets}")
                         else:
-                            print(f"❌ Thread {thread_id}: Skipping policy {policy.get('id')}: No matching assets in target environment (assets: {table_asset_ids})")
+                            print(f"❌ Thread {thread_name}: Skipping policy {policy.get('id')}: No matching assets in target environment (assets: {table_asset_ids})")
                     
                     if not policy_has_existing_assets:
                         excluded_policies += 1
@@ -860,7 +861,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                         
                     except Exception as e:
                         failed_asset_calls += 1
-                        logger.error(f"Thread {thread_id}: Failed to retrieve asset details for policy {policy.get('id')}: {e}")
+                        logger.error(f"Thread {thread_name}: Failed to retrieve asset details for policy {policy.get('id')}: {e}")
 
                 # Add asset and assembly details to the policy
                 policy['_asset_details'] = asset_details
@@ -2438,13 +2439,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
         thread_results = []
         
         # Funny thread names for progress indicators (all same length)
-        thread_names = [
-            "Rocket Thread     ",
-            "Lightning Thread  ", 
-            "Unicorn Thread    ",
-            "Dragon Thread     ",
-            "Shark Thread      "
-        ]
+        thread_names = get_thread_names()
         
         def process_category_chunk(thread_id, start_index, end_index):
             """Process a chunk of categories for a specific thread."""
@@ -2463,10 +2458,11 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
             total_batches = 0
             for _, policy_ids in category_items:
                 total_batches += (len(policy_ids) + batch_size - 1) // batch_size
-            
+            thread_names = get_thread_names()
+            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
             progress_bar = create_progress_bar(
                 total=total_batches,
-                desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
+                desc=thread_name,
                 unit="batches",
                 disable=quiet_mode,
                 position=thread_id,
@@ -2507,7 +2503,6 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                     full_endpoint = f"{endpoint}?{query_string}"
                     
                     if verbose_mode:
-                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - GET Request Headers:")
                         print(f"  Endpoint: {full_endpoint}")
                         print(f"  Method: GET")
@@ -2531,7 +2526,6 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                         )
                         
                         if verbose_mode:
-                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                             print(f"\n{thread_name} - Response:")
                             print(f"  Status: Success")
                             print(f"  Content-Type: application/zip")
@@ -2555,9 +2549,8 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                         else:
                             error_msg = f"Empty response for {policy_type} batch {batch_num + 1}"
                             if verbose_mode:
-                                thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                                 print(f"\n{thread_name} - ❌ {error_msg}")
-                            logger.error(f"Thread {thread_id}: {error_msg}")
+                            logger.error(f"Thread {thread_name}: {error_msg}")
                             
                             batch_key = f"{policy_type}_batch_{batch_num + 1}"
                             export_results[batch_key] = {
@@ -2572,9 +2565,8 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                     except Exception as e:
                         error_msg = f"Failed to export {policy_type} batch {batch_num + 1}: {e}"
                         if verbose_mode:
-                            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                             print(f"\n{thread_name} - ❌ {error_msg}")
-                        logger.error(f"Thread {thread_id}: {error_msg}")
+                        logger.error(f"Thread {thread_name}: {error_msg}")
                         
                         batch_key = f"{policy_type}_batch_{batch_num + 1}"
                         export_results[batch_key] = {

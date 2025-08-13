@@ -234,3 +234,61 @@ def get_source_to_target_asset_id_map(csv_file: str, logger, quiet_mode: bool = 
             print(f"❌ {error_msg}")
         logger.error(error_msg)
         return None 
+
+
+def get_thread_names():
+    """Return a list of thread names for progress bars."""
+    thread_names = [
+        "Aryabhata Thread    ",
+        "Bhaskara Thread     ",
+        "Chandrayaan Thread  ",
+        "Mangalyaan Thread   ",
+        "INSAT Thread        ",
+        "GSAT Thread         ",
+        "RISAT Thread        ",
+        "Astrosat Thread     ",
+        "Oceansat Thread     ",
+        "Aditya Thread       ",
+        "PSLV Thread         ",
+        "GSLV Thread         ",
+        "SSLV Thread         ",
+        "Antrix Thread       ",
+        "HysIS Thread        ",
+        "TES Thread          ",
+        "Microsat Thread     ",
+        "Rocket Thread       ",
+        "Lightning Thread    ",
+        "Unicorn Thread      ",
+        "Dragon Thread       ",
+        "Shark Thread        ",
+        "Mercury Thread      ",
+        "Venus Thread        ",
+        "Earth Thread        ",
+        "Mars Thread         ",
+        "Jupiter Thread      ",
+        "Saturn Thread       ",
+        "Uranus Thread       ",
+        "Neptune Thread      ",
+        "Pluto Thread        ",
+        "Agni Thread         ",
+        "Prithvi Thread      ",
+        "BrahMos Thread      ",
+        "Nirbhay Thread      ",
+        "Akash Thread        ",
+        "Trishul Thread      ",
+        "Dhanush Thread      ",
+        "Nag Thread          ",
+        "Helina Thread       ",
+        "Shaurya Thread      ",
+        "Falcon Thread       ",
+        "Thunderbolt Thread  ",
+        "Phoenix Thread      ",
+        "Tornado Thread      ",
+        "Viper Thread        ",
+        "Titan Thread        ",
+        "Comet Thread        ",
+        "Cyclone Thread      ",
+        "Predator Thread     ",
+        "Blizzard Thread     "
+    ]
+    return thread_names
