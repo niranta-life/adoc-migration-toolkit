@@ -3377,8 +3377,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
         print(f"Total assets processed: {total_assets_processed}")
         print(f"Successful: {successful}")
         print(f"Failed: {failed}")
-        print(f"[Failed due to] Asset not found :{asset_not_found}")
-        print(f"[Failed dur to] Asset configs not found :{asset_configs_not_found}")
+        print(f"Asset not found in the target:{asset_not_found}")
+        print(f"List of Asset's with default config not to be migrated :{asset_configs_not_found}")
 
     except Exception as e:
         error_msg = f"Error executing asset config import: {e}"
