@@ -1338,10 +1338,10 @@ def run_interactive(args):
                 # Check if it's an asset-profile-export command
                 if command.lower().startswith('asset-profile-export'):
                     from .command_parsing import parse_asset_profile_export_command
-                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types = parse_asset_profile_export_command(command)
+                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types, max_threads = parse_asset_profile_export_command(command)
                     if csv_file:
                         if parallel_mode:
-                            execute_asset_profile_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types)
+                            execute_asset_profile_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types, max_threads)
                         else:
                             execute_asset_profile_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types)
                     continue
@@ -1355,7 +1355,7 @@ def run_interactive(args):
                         try:
                             execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode, max_threads=max_threads)
                         except TypeError:
-                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode)
+                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode, max_threads=max_threads)
                     continue
                 
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)

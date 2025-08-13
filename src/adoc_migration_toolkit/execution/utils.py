@@ -139,6 +139,7 @@ def read_csv_asset_data(csv_file: str, logger: logging.Logger, allowed_types: li
     asset_data = []
     
     try:
+        print(f"Reading asset data from CSV file allowed types :{allowed_types}")
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             
@@ -157,7 +158,8 @@ def read_csv_asset_data(csv_file: str, logger: logging.Logger, allowed_types: li
                     tags = row[4].strip()
                     asset_type = row[5].strip().lower() if row[5] else None
                     
-                    if source_id and target_uid and (tags or (asset_type in allowed_types)):  # Skip rows with empty required fields
+                    if source_id and target_uid and (tags or (asset_type in allowed_types)):
+                        logger.debug(f"Row {row_num} is processed")# Skip rows with empty required fields
                         asset_data.append({
                             'source_uid': source_uid,
                             'source_id': source_id,
@@ -168,6 +170,7 @@ def read_csv_asset_data(csv_file: str, logger: logging.Logger, allowed_types: li
                         logger.debug(f"Row {row_num}: Found asset - source_id: {source_id}, source_uid: {source_uid}, target_uid: {target_uid}, target_id: {target_id}, tags: {tags}")
                     else:
                         logger.warning(f"Row {row_num}: Empty required fields (source_id or target_uid)")
+                        logger.warning(f"Row {row_num}: Empty required fields {source_id} {target_id} {tags}")
                 else:
                     logger.warning(f"Row {row_num}: Insufficient columns (need at least 5, got {len(row) if row else 0})")
         

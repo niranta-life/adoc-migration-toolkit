@@ -160,6 +160,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     verbose_mode = False
     parallel_mode = False
     allowed_types = ['table', 'sql_view', 'view']
+    max_threads = 5
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -188,6 +189,17 @@ def parse_asset_profile_export_command(command: str) -> tuple:
             # This is the CSV file argument (first non-flag argument)
             csv_file = parts[i]
             parts.remove(parts[i])
+        elif parts[i] == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads <= 0:
+                    raise ValueError("Max threads must be positive")
+                parts.pop(i)
+                parts.pop(i)
+            except (ValueError, IndexError):
+                raise ValueError("Invalid max threads. Must be a positive integer")
         else:
             i += 1
     
@@ -236,11 +248,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     if not output_file:
         output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
 
-    # For parallel mode, default to quiet mode unless verbose is explicitly specified
-    if parallel_mode and not verbose_mode and not quiet_mode:
-        quiet_mode = True
-
-    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types
+    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types, max_threads
 
 def parse_asset_profile_import_command(command: str) -> tuple:
     """Parse an asset-profile-import command string into components.
@@ -257,7 +265,7 @@ def parse_asset_profile_import_command(command: str) -> tuple:
 
     csv_file = None
     dry_run = False
-    quiet_mode = True  # Default to quiet mode
+    quiet_mode = False  # Default to quiet mode
     verbose_mode = False
     max_threads = 5
 

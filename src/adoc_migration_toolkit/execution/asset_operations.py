@@ -391,7 +391,7 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         logger.error(error_msg)
 
 
-def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, dry_run: bool = False, quiet_mode: bool = True, verbose_mode: bool = False):
+def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, dry_run: bool = False, quiet_mode: bool = True, verbose_mode: bool = False, max_threads: int = 5):
     """Execute the asset-profile-import command.
     
     Args:
@@ -1818,7 +1818,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         logger.error(error_msg)
 
 
-def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view']):
+def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view'], max_threads: int = 5):
     """Execute the asset-profile-export command with parallel processing.
     
     Args:
@@ -1831,6 +1831,7 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         allowed_types: List of asset types to export
     """
     try:
+        print(f"Assset profile export parallel starting with threads : {max_threads}")
         # Check if CSV file exists
         csv_path = Path(csv_file)
         if not csv_path.exists():
@@ -1855,7 +1856,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                 if entry.get('source_uid') and entry.get('target_uid')
             ]
 
-        print(f" env mappings: {env_mappings}")
         if not env_mappings:
             logger.warning("No environment mappings found in CSV file")
             return
@@ -1864,6 +1864,7 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         if not output_file:
             output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
         
+        print(f"quiet_mode : {quiet_mode}")
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file (Parallel Mode)")
             print(f"Input file: {csv_file}")
@@ -1875,7 +1876,6 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             print("="*80)
         
         # Calculate thread configuration
-        max_threads = 5
         min_assets_per_thread = 10
         
         if len(env_mappings) < min_assets_per_thread:
@@ -1928,13 +1928,14 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             
             # Create progress bar for this thread
             progress_bar = create_progress_bar(
-                total=len(thread_env_mappings),
+                total=end_page - start_page,
                 desc=thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}",
                 unit="assets",
                 disable=quiet_mode,
                 position=thread_id,
                 leave=False
             )
+
             
             successful = 0
             failed = 0
@@ -2066,23 +2067,45 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             }
         
         # Start threads
-        threads = []
-        for i in range(num_threads):
-            start_index = i * assets_per_thread
-            end_index = min(start_index + assets_per_thread, len(env_mappings))
+        # print(f"Starting {num_threads} threads to process {len(env_mappings)} assets")
+        # threads = []
+        # for i in range(num_threads):
+        #     start_index = i * assets_per_thread
+        #     end_index = min(start_index + assets_per_thread, len(env_mappings))
             
-            thread = threading.Thread(
-                target=lambda tid=i, start=start_index, end=end_index: thread_results.append(
-                    process_asset_chunk(tid, start, end)
-                )
-            )
-            threads.append(thread)
-            thread.start()
+        #     thread = threading.Thread(
+        #         target=lambda tid=i, start=start_index, end=end_index: thread_results.append(
+        #             process_asset_chunk(tid, start, end)
+        #         )
+        #     )
+        #     threads.append(thread)
+        #     thread.start()
+        # print(f"Started {len(threads)} threads to process {len(env_mappings)} assets")
+
+        # # Wait for all threads to complete
+        # for thread in threads:
+        #     thread.join()
         
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-        
+                # Execute parallel processing
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            # Submit tasks for each thread
+            futures = []
+            for thread_id in range(num_threads):
+                start_page = thread_id * assets_per_thread
+                end_page = min(start_page + assets_per_thread, len(env_mappings))
+                
+                if start_page < len(env_mappings):  # Only submit if there are pages to process
+                    future = executor.submit(process_asset_chunk, thread_id, start_page, end_page)
+                    futures.append(future)
+            
+            # Collect results
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    thread_results.append(result)
+                except Exception as e:
+                    logger.error(f"Thread failed with exception: {e}")
+
         # Merge temporary files
         if not quiet_mode:
             print("\nMerging temporary files...")
@@ -2722,7 +2745,6 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
     try:
         # Read asset data from CSV file with 4 columns
         asset_data = read_csv_asset_data(csv_file, logger, allowed_types)
-
         if not asset_data:
             logger.warning("No asset data found in CSV file")
             return
@@ -2732,6 +2754,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             output_file = get_output_file_path(csv_file, "asset-config-export.csv", category="asset-export")
 
         if not quiet_mode:
+            print(f"\nReading asset config exports from CSV file :{csv_file}")
             print(f"\nProcessing {len(asset_data)} asset config exports from CSV file (Parallel Mode)")
             print(f"Output will be written to: {output_file}")
             if globals.GLOBAL_OUTPUT_DIR:
@@ -3231,6 +3254,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
         successful = 0
         failed = 0
         total_assets_processed = 0
+        asset_configs_not_found = 0
+        asset_not_found = 0
         lock = threading.Lock()
         all_results = []
 
@@ -3239,9 +3264,11 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             pbar = tqdm(total=len(asset_data), desc="Processing assets", colour='green')
 
         def process_asset_chunk(thread_id, start_index, end_index):
-            nonlocal successful, failed, total_assets_processed
+            nonlocal successful, failed, total_assets_processed, asset_configs_not_found, asset_not_found
             thread_successful = 0
             thread_failed = 0
+            asset_configs_not_per_thread = 0
+            asset_not_found_thread = 0
             thread_results = []
 
             # Create progress bar for this thread if in quiet mode
@@ -3282,6 +3309,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         if verbose_mode:
                             print(f"   ❌ {error_msg}")
                         thread_failed += 1
+                        asset_not_found_thread += 1
                         thread_results.append({'target_uid': target_uid, 'error': error_msg, 'status': 'failed'})
                         continue
 
@@ -3293,41 +3321,50 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                         print(f"   Data: {config_json}")
 
                     config_data = json.loads(config_json)
-                    transformed_config = transform_config_json_to_asset_configuration(config_data, asset_id)
+                    if "assetConfiguration" in config_data and config_data["assetConfiguration"] is not None:
+                        transformed_config = transform_config_json_to_asset_configuration(config_data, asset_id)
+                        if dry_run:
+                            print(
+                                f"\n[DRY RUN][Thread {thread_id}] Would send PUT to /catalog-server/api/assets/{asset_id}/config")
+                            print(f"[DRY RUN][Thread {thread_id}] Payload:")
+                            print(json.dumps(transformed_config, indent=2))
+                            thread_successful += 1
+                            thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'dry_run'})
+                            continue
 
-                    if dry_run:
-                        print(
-                            f"\n[DRY RUN][Thread {thread_id}] Would send PUT to /catalog-server/api/assets/{asset_id}/config")
-                        print(f"[DRY RUN][Thread {thread_id}] Payload:")
-                        print(json.dumps(transformed_config, indent=2))
-                        thread_successful += 1
-                        thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'dry_run'})
-                        continue
+                        config_response = client.make_api_call(
+                            endpoint=f'/catalog-server/api/assets/{asset_id}/config',
+                            method='PUT',
+                            json_payload=transformed_config,
+                            use_target_auth=True,
+                            use_target_tenant=True
+                        )
 
-                    config_response = client.make_api_call(
-                        endpoint=f'/catalog-server/api/assets/{asset_id}/config',
-                        method='PUT',
-                        json_payload=transformed_config,
-                        use_target_auth=True,
-                        use_target_tenant=True
-                    )
-
-                    if verbose_mode:
-                        print(f"   Config Response: {config_response}")
-
-                    if config_response:
-                        thread_successful += 1
-                        thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'success'})
                         if verbose_mode:
-                            print(f"   ✅ Successfully updated config for {target_uid}")
+                            print(f"   Config Response: {config_response}")
+
+                        if config_response:
+                            thread_successful += 1
+                            thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'success'})
+                            if verbose_mode:
+                                print(f"   ✅ Successfully updated config for {target_uid}")
+                        else:
+                            error_msg = f"Failed to update config for asset ID: {asset_id}"
+                            if verbose_mode:
+                                print(f"   ❌ {error_msg}")
+                            thread_failed += 1
+                            thread_results.append(
+                                {'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
                     else:
-                        error_msg = f"Failed to update config for asset ID: {asset_id}"
+                        error_msg = f"Asset configuration not found: {asset_id}"
                         if verbose_mode:
                             print(f"   ❌ {error_msg}")
                         thread_failed += 1
-                        thread_results.append(
-                            {'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
+                        asset_configs_not_per_thread += 1
+                        thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
+                        continue
 
+                    # Anomaly config exists only when asset configurations are present
                     import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, quiet_mode, verbose_mode,
                                                    dry_run)
                 except Exception as e:
@@ -3351,6 +3388,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                 failed += thread_failed
                 total_assets_processed += (end_index - start_index)
                 all_results.extend(thread_results)
+                asset_configs_not_found += asset_configs_not_per_thread
+                asset_not_found += asset_not_found_thread
 
             return {
                 'thread_id': thread_id,
@@ -3390,14 +3429,6 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
         if quiet_mode and not verbose_mode:
             pbar.close()
 
-        # Print summary
-        print("\n" + "=" * 60)
-        print("ASSET CONFIG IMPORT SUMMARY")
-        print("=" * 60)
-        print(f"Total assets processed: {total_assets_processed}")
-        print(f"Successful: {successful}")
-        print(f"Failed: {failed}")
-
         if thread_results:
             print(f"\nPer-thread breakdown:")
             for result in thread_results:
@@ -3418,6 +3449,16 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             print("✅ Asset config import completed successfully!")
         else:
             print(f"⚠️  Asset config import completed with {failed} failures. Check the details above.")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("ASSET CONFIG IMPORT SUMMARY")
+        print("=" * 60)
+        print(f"Total assets processed: {total_assets_processed}")
+        print(f"Successful: {successful}")
+        print(f"Failed: {failed}")
+        print(f"[Failed due to] Asset not found :{asset_not_found}")
+        print(f"[Failed dur to] Asset configs not found :{asset_configs_not_found}")
 
     except Exception as e:
         error_msg = f"Error executing asset config import: {e}"
@@ -3451,13 +3492,14 @@ def transform_config_json_to_asset_configuration(config_data_dict: dict, asset_i
 
     # print(f"config_data::: {json.dumps(config_data_dict, indent=2)}")
     # Update assetId in the main assetConfiguration
-    if "assetConfiguration" in config_data_dict:
+    if "assetConfiguration" in config_data_dict and config_data_dict["assetConfiguration"] is not None:
         config_data_dict["assetConfiguration"]["assetId"] = asset_id
         # Update assetId in freshnessColumnInfo if it exists
         freshness = config_data_dict["assetConfiguration"].get("freshnessColumnInfo")
         if freshness and "assetId" in freshness:
             freshness["assetId"] = asset_id
-    # print(f"transform_config_json_to_asset_configuration : {json.dumps(config_data_dict, indent=2)}")
+    else:
+        print(f"Asset configuration not found: {asset_id}")
 
     return config_data_dict
 
@@ -3584,6 +3626,7 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 # Apply all string replacements
 
                 for source_str, target_str in string_transforms.items():
+                    # Check if the source_str provided by user exists in source uid (transformed_target_uid)
                     if source_str in transformed_target_uid:
                         transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
                         transformed_count += 1
@@ -3741,7 +3784,7 @@ def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, q
                 )
                 rule_id = asset_profile_anomaly_response['rule']['id']
                 if verbose_mode:
-                    print(f" AssetId : {asset_id} Rule ID: {rule_id} source ruleid :{profile_anomaly_config_dict['rule']['id']}")
+                    logger.info(f" AssetId : {asset_id} Rule ID: {rule_id} source ruleid :{profile_anomaly_config_dict['rule']['id']}")
                 # Extract monitorColumns from details -> items
                 source_items = profile_anomaly_config_dict['details']['items']
                 each_item_monitor_columns = []
@@ -3776,7 +3819,7 @@ def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, q
                     )
                 # print(f"asset_profile_anomaly_response : {asset_profile_anomaly_response}")
                 if verbose_mode:
-                    print(f"............Rule {rule_id} done ............")
+                    logger.info(f"Asset config anomaly Rule {rule_id} done")
         except Exception as e:
             error_msg = f"Error processing {target_uid}: {str(e)}"
             if verbose_mode:
