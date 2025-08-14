@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ADOC Interactive Migration Toolkit — Runbook</title>
+<style>
+  :root{
+    --bg: #0b0d10;
+    --fg: #e7edf4;
+    --muted:#9fb3c8;
+    --prime:#59a5ff;
+    --card:#12161c;
+    --line:#1d2733;
+    --accent:#2dd4bf;
+    --warn:#f59e0b;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f7fafc; --fg:#0f1720; --muted:#40566f; --card:#ffffff; --line:#e5eef6; --prime:#2563eb; --accent:#0ea5a4; }
+  }
+  *{ box-sizing:border-box }
+  html,body{ height:100% }
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  }
+  a{ color:var(--prime); text-decoration:none }
+  a:hover{ text-decoration:underline }
+  code,kbd{ background:rgba(255,255,255,.06); padding:.15rem .35rem; border-radius:.35rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: .95em }
+  pre{ background:var(--card); border:1px solid var(--line); padding:1rem; border-radius:12px; overflow:auto }
+  header.topbar{
+    position:sticky; top:0; z-index:50; background:rgba(0,0,0,.35);
+    backdrop-filter: blur(6px); border-bottom:1px solid var(--line);
+  }
+  .topbar-inner{ display:flex; align-items:center; gap:12px; padding:10px 14px; max-width:1320px; margin:0 auto }
+  .brand{ font-weight:700; letter-spacing:.2px }
+  .brand span{ color:var(--accent) }
+  .grow{ flex:1 }
+  .search{
+    position:relative; display:flex; align-items:center; gap:8px;
+    background:var(--card); border:1px solid var(--line);
+    border-radius:10px; padding:6px 10px; max-width:520px; width:100%;
+  }
+  .search input{
+    background:transparent; border:0; outline:0; color:var(--fg); width:100%;
+  }
+  .search kbd{ border:1px solid var(--line); background:transparent; color:var(--muted) }
+
+  .layout{ display:grid; grid-template-columns: 280px 1fr; gap:18px; max-width:1320px; margin:0 auto; padding:18px }
+  aside.nav{
+    position:sticky; top:64px; align-self:start; height:calc(100vh - 64px);
+    border-right:1px solid var(--line); padding-right:14px; overflow:auto
+  }
+  .nav h3{ margin:8px 0 6px; font-size:.9rem; color:var(--muted); text-transform:uppercase; letter-spacing:.1em }
+  .nav a{
+    display:block; padding:6px 8px; border-radius:8px; color:var(--fg);
+  }
+  .nav a.active{ background:rgba(45,212,191,.12); color:var(--accent) }
+  .nav .sub{ margin-left:10px; border-left:2px dotted var(--line); padding-left:10px }
+  
+  /* Updated Jump to Command grid styles */
+  .nav .cmd-grid{ 
+    display: grid; 
+    grid-template-columns: 1fr; 
+    gap: 6px; 
+    margin-left: 10px; 
+    border-left: 2px dotted var(--line); 
+    padding-left: 10px;
+  }
+  .nav .cmd-grid a{ 
+    font-size: 0.8rem; 
+    padding: 4px 6px; 
+    text-align: left;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--card);
+    transition: all 0.2s ease;
+  }
+  .cmd-group-title {
+    font-weight:600;
+    margin:8px 0 4px 0;
+    color:var(--muted);
+    font-size:.92em;
+  }
+  .nav .cmd-grid a:hover{ 
+    background: rgba(45,212,191,.08);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+  .nav .cmd-grid a.active{
+    background: rgba(45,212,191,.15);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  
+  main{ min-width:0 }
+  section{ margin:18px 0 32px }
+  section h2{
+    scroll-margin-top:84px; display:flex; align-items:center; gap:10px;
+    font-size:1.35rem; margin:0 0 10px;
+  }
+  .pill{ font-size:.75rem; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:.1rem .5rem }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin:12px 0;
+  }
+  .grid{ display:grid; gap:12px }
+  .grid.cols-2{ grid-template-columns: repeat(2, minmax(0,1fr)) }
+  .grid.cols-3{ grid-template-columns: repeat(3, minmax(0,1fr)) }
+  @media (max-width: 980px){
+    .layout{ grid-template-columns: 1fr }
+    aside.nav{ position:static; height:auto; border-right:0; padding-right:0 }
+    .nav .cmd-grid{ grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px){
+    .nav .cmd-grid{ grid-template-columns: 1fr; }
+  }
+
+  .cmd-toolbar{ display:flex; align-items:center; gap:8px; margin:4px 0 12px }
+  .cmd-toolbar .hint{ color:var(--muted); font-size:.9rem }
+  .cmd-list{ display:grid; grid-template-columns: 1fr; gap:12px }
+  .cmd{ border:1px solid var(--line); border-radius:12px; background:var(--card); padding:12px }
+  .cmd h4{ margin:0 0 6px; font-size:1rem }
+  .cmd .small{ color:var(--muted); font-size:.9rem }
+  .cmd .chip{ display:inline-block; border:1px solid var(--line); border-radius:999px; padding:.05rem .45rem; font-size:.75rem; margin:.15rem .25rem 0 0 }
+  .muted{ color:var(--muted) }
+  .btn{
+    background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:6px 10px; cursor:pointer
+  }
+  .btn:hover{ border-color:var(--prime) }
+  .toc{ display:flex; flex-wrap:wrap; gap:8px }
+  .toc a{ border:1px solid var(--line); border-radius:999px; padding:.25rem .6rem }
+  .kbd{ border:1px solid var(--line); padding:.12rem .38rem; border-radius:.35rem; color:var(--muted) }
+
+  .foot{
+    margin:28px 0 18px; color:var(--muted); font-size:.9rem; border-top:1px dashed var(--line); padding-top:12px;
+  }
+  .cmd-highlight {
+    box-shadow: 0 0 0 3px var(--accent), 0 2px 12px rgba(45,212,191,0.10);
+    border-color: var(--accent);
+    background: rgba(45,212,191,.08);
+    transition: box-shadow 0.2s, border-color 0.2s, background 0.2s;
+  }
+  .section-highlight {
+    box-shadow: 0 0 0 3px var(--accent), 0 2px 12px rgba(45,212,191,0.10);
+    border-radius: 16px;
+    background: rgba(45,212,191,.06);
+    transition: box-shadow 0.2s, background 0.2s;
+  }
+  .card pre {
+    padding-left: 2rem;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar" role="banner">
+  <div class="topbar-inner">
+    <button id="toggleNav" class="btn" aria-controls="sidebar" aria-expanded="false" title="Toggle navigation">☰</button>
+    <div class="brand">ADOC <span>Migration Toolkit</span> — Runbook</div>
+    <div class="grow"></div>
+    <label class="search" aria-label="Search commands">
+      🔎
+      <input id="search" type="search" placeholder="Find a command (e.g., policy-export, set-output-dir)…" />
+      <kbd> / </kbd>
+    </label>
+  </div>
+</header>
+
+<div class="layout">
+  <aside id="sidebar" class="nav" role="navigation" aria-label="Section navigation">
+    <h3>Sections</h3>
+    <a href="#setup">Quick Start</a>
+    <a href="#recipes">Migration Recipes</a>
+    <a href="#catalog">Command Catalog</a>
+    <a href="#io">I/O Conventions</a>
+    <a href="#perf">Performance Tips</a>
+    <a href="#safety">Safety & Gotchas</a>
+    <a href="#vcs">VCS Workflow</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+
+    <h3 style="margin-top:16px">Jump to Command</h3>
+    <div class="cmd-grid" id="cmdJump">
+      <!-- Filled by JS -->
+    </div>
+  </aside>
+
+  <main id="content">
+    <div id="setup">
+      <section id="clone" aria-labelledby="h-clone">
+        <h2 id="h-clone"> Clone the Code <span class="pill">Setup</span></h2>
+        <div class="card">
+          <h3>Get the ADOC Migration Toolkit source code</h3>
+          <pre><code>git clone https://github.com/niranta-life/adoc-migration-toolkit.git</code></pre>
+          <p class="muted">Clone the official repository to get started with the toolkit on your local machine.</p>
+        </div>
+      </section>
+      <section id="quickstart" aria-labelledby="h-quickstart">
+        <h2 id="h-quickstart">Quick Start <span class="pill">Begin here</span></h2>
+        <div class="card grid cols-2">
+          <div>
+            <h3 style="margin:.2rem 0">1) Verify environment</h3>
+            <pre><code>show-config
+set-output-dir ./adoc-out
+set-log-level INFO</code></pre>
+            <p class="muted">Confirm host/tenants/keys, then set a dated output directory per migration.</p>
+          </div>
+          <div>
+            <h3 style="margin:.2rem 0">2) Typical flow</h3>
+            <pre><code>asset-list-export
+asset-list-export --target
+transform-and-merge --string-transform "PROD_DB":"DEV_DB", "PROD_URL":"DEV_URL"
+asset-config-export --parallel
+asset-profile-export --parallel
+policy-list-export --parallel
+policy-export --type rule-types --parallel
+policy-import *.zip
+segments-export && segments-import <csv>
+profile-check --config profile-assets.csv --run-profile
+asset-tag-import --parallel
+rule-tag-export --parallel</code></pre>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section id="recipes" aria-labelledby="h-recipes">
+      <h2 id="h-recipes">Migration Recipes</h2>
+      <div class="card">
+        <h3>End-to-end (source ➜ target)</h3>
+        <ol>
+          <li>Discover assets (source & target): <code>asset-list-export</code>, <code>asset-list-export --target</code></li>
+          <li>Map UIDs: <code>transform-and-merge --string-transform "A":"B", "C":"D"</code></li>
+          <li>Export configs/profiles: <code>asset-config-export --parallel</code>, <code>asset-profile-export --parallel</code></li>
+          <li>Import to target: <code>asset-config-import --parallel</code>, <code>asset-profile-import</code></li>
+          <li>Policies: <code>policy-list-export --parallel</code> → <code>policy-export --type ...</code> → <code>policy-import *.zip</code></li>
+          <li>Segments (Spark): <code>segments-export</code> → <code>segments-import</code></li>
+          <li>Profiling: <code>profile-check --config profile-assets.csv --run-profile</code> or <code>profile-run --config</code></li>
+          <li>Tags & rule-tags: <code>asset-tag-import</code>, <code>rule-tag-export</code></li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3>Compare Profile runs and trigger if-required on target env</h3>
+        <pre><code>profile-check --config profile-assets.csv --run-profile</code></pre>
+        <pre><code>profile-run --config profile-assets.csv </code></pre>
+      </div>
+    </section>
+      <div class="card">
+        <h3>Compare notifications across envs</h3>
+        <pre><code>notifications-check --source-context 1 --target-context 2 --assembly-ids 100,101 --parallel --page-size 200</code></pre>
+      </div>
+    </section>
+
+    <section id="catalog" aria-labelledby="h-catalog">
+      <h2 id="h-catalog">Command Catalog <span class="pill">Filterable</span></h2>
+      <br>
+
+      <div class="cmd-toolbar">
+        <span class="hint">Type in the top search box or click a chip below:</span>
+      </div>
+
+      <!-- Quick chips -->
+      <div class="toc" id="chips">
+        <br>
+        <a href="#cmd-asset-list-export">asset-list-export</a>
+        <a href="#cmd-transform-and-merge">transform-and-merge</a>
+        <a href="#cmd-asset-config-export">asset-config-export</a>
+        <a href="#cmd-asset-config-import">asset-config-import</a>
+        <a href="#cmd-policy-list-export">policy-list-export</a>
+        <a href="#cmd-policy-export">policy-export</a>
+        <a href="#cmd-policy-import">policy-import</a>
+        <a href="#cmd-segments-export">segments-export</a>
+        <a href="#cmd-segments-import">segments-import</a>
+        <a href="#cmd-profile-check">profile-check</a>
+        <a href="#cmd-profile-run">profile-run</a>
+        <a href="#cmd-asset-profile-export">asset-profile-export</a>
+        <a href="#cmd-asset-profile-import">asset-profile-import</a>
+        <a href="#cmd-asset-tag-import">asset-tag-import</a>
+        <a href="#cmd-rule-tag-export">rule-tag-export</a>
+        <a href="#cmd-notifications-check">notifications-check</a>
+        <a href="#cmd-set-output-dir">set-output-dir</a>
+        <a href="#cmd-set-log-level">set-log-level</a>
+        <a href="#cmd-set-http-config">set-http-config</a>
+        <a href="#cmd-show-config">show-config</a>
+        <a href="#cmd-get">GET</a>
+        <a href="#cmd-put">PUT</a>
+        <a href="#cmd-vcs-config">vcs-config</a>
+        <a href="#cmd-vcs-init">vcs-init</a>
+        <a href="#cmd-vcs-pull">vcs-pull</a>
+        <a href="#cmd-vcs-push">vcs-push</a>
+        <a href="#cmd-help">help</a>
+        <a href="#cmd-history">history</a>
+        <a href="#cmd-exit">exit / quit / q</a>
+      </div>
+      
+      <!-- Command cards -->
+      <div class="cmd-list" id="cmdList">
+        <!-- Assets -->
+        <article class="cmd" id="cmd-asset-list-export" data-name="asset-list-export assets discover pagination">
+          <h4>asset-list-export</h4>
+          <div class="small">Discover assets via <code>/assets/discover</code> with pagination.</div>
+          <div class="small"><span class="chip">--target</span><span class="chip">--page-size N</span><span class="chip">--parallel</span><span class="chip">--source_type_ids</span><span class="chip">--asset_type_ids</span><span class="chip">--assembly_ids</span></div>
+          <pre><code>asset-list-export --page-size 500
+asset-list-export --target --parallel</code></pre>
+          <div class="small muted">Outputs: <code>&lt;out&gt;/asset-export/asset-all-{source|target}-export.csv</code></div>
+        </article>
+
+        <article class="cmd" id="cmd-asset-config-export" data-name="asset-config-export configs export parallel">
+          <h4>asset-config-export</h4>
+          <div class="small">Export asset configuration JSON (source).</div>
+          <div class="small"><span class="chip">--parallel</span><span class="chip">--output-file</span></div>
+          <pre><code>asset-config-export
+asset-config-export --parallel</code></pre>
+          <div class="small muted">Outputs: <code>asset-import/asset-config-import-ready.csv</code></div>
+        </article>
+
+        <article class="cmd" id="cmd-asset-config-import" data-name="asset-config-import configs import put">
+          <h4>asset-config-import</h4>
+          <div class="small">PUT configs to target assets.</div>
+          <div class="small"><span class="chip">--parallel</span><span class="chip">--dry-run</span><span class="chip">--verbose</span></div>
+          <pre><code>asset-config-import --parallel
+asset-config-import --dry-run</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-asset-profile-export" data-name="asset-profile-export profiles export">
+          <h4>asset-profile-export</h4>
+          <div class="small">Export profile JSONs (source).</div>
+          <div class="small"><span class="chip">--parallel</span><span class="chip">--allowed-types</span></div>
+          <pre><code>asset-profile-export --parallel</code></pre>
+          <div class="small muted">Outputs: <code>asset-import/asset-profiles-import-ready.csv</code></div>
+        </article>
+
+        <article class="cmd" id="cmd-asset-profile-import" data-name="asset-profile-import profiles import">
+          <h4>asset-profile-import</h4>
+          <div class="small">Update target profiles from CSV.</div>
+          <div class="small"><span class="chip">--dry-run</span><span class="chip">--verbose</span></div>
+          <pre><code>asset-profile-import
+asset-profile-import --dry-run</code></pre>
+        </article>
+
+        <!-- Policies -->
+        <article class="cmd" id="cmd-policy-list-export" data-name="policy-list-export policies list export pagination">
+          <h4>policy-list-export</h4>
+          <div class="small">List all policies with pagination.</div>
+          <div class="small"><span class="chip">--parallel</span><span class="chip">--existing-target-assets</span></div>
+          <pre><code>policy-list-export --parallel
+policy-list-export --existing-target-assets</code></pre>
+          <div class="small muted">Outputs: <code>policy-export/policies-all-export.csv</code></div>
+        </article>
+
+        <article class="cmd" id="cmd-policy-export" data-name="policy-export policies export zip groups types batches">
+          <h4>policy-export</h4>
+          <div class="small">Export policy definitions into ZIPs by grouping.</div>
+          <div class="small"><span class="chip">--type rule-types|engine-types|assemblies|source-types</span><span class="chip">--filter</span><span class="chip">--batch-size</span><span class="chip">--parallel</span></div>
+          <pre><code>policy-export --type rule-types --parallel</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-policy-import" data-name="policy-import policies import zip upload">
+          <h4>policy-import</h4>
+          <div class="small">Import policy ZIPs to target.</div>
+          <div class="small"><span class="chip">*.zip</span><span class="chip">--verbose</span></div>
+          <pre><code>policy-import *.zip</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-policy-xfr" data-name="policy-xfr transform replace json zip surgery">
+          <h4>policy-xfr</h4>
+          <div class="small">Multi-string transform across exported JSON & ZIPs.</div>
+          <div class="small"><span class="chip">--string-transform "A":"B", …</span><span class="chip">--input</span><span class="chip">--output-dir</span></div>
+          <pre><code>policy-xfr --string-transform "PROD_DB":"DEV_DB", "PROD_URL":"DEV_URL"</code></pre>
+        </article>
+
+        <!-- Profile -->
+        <article class="cmd" id="cmd-profile-check" data-name="profile-check profiling precheck run-profile">
+          <h4>profile-check</h4>
+          <div class="small">Check assets requiring profiling; optional trigger.</div>
+          <div class="small"><span class="chip">--config profile-assets.csv</span><span class="chip">--run-profile</span><span class="chip">--parallel</span></div>
+          <pre><code>profile-check --config profile-assets.csv --run-profile</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-profile-run" data-name="profile-run profiling trigger">
+          <h4>profile-run</h4>
+          <div class="small">Trigger profiling for listed assets.</div>
+          <div class="small"><span class="chip">--config profile-assets.csv</span><span class="chip">--parallel</span></div>
+          <pre><code>profile-run --config profile-assets.csv</code></pre>
+        </article>
+
+        <!-- Tags -->
+        <article class="cmd" id="cmd-asset-tag-import" data-name="asset-tag-import tags import target">
+          <h4>asset-tag-import</h4>
+          <div class="small">Import tags to target assets.</div>
+          <div class="small"><span class="chip">--parallel</span><span class="chip">--verbose</span></div>
+          <pre><code>asset-tag-import --parallel</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-rule-tag-export" data-name="rule-tag-export policies rule tags export">
+          <h4>rule-tag-export</h4>
+          <div class="small">Export rule tags for all policy IDs.</div>
+          <div class="small"><span class="chip">--parallel</span></div>
+          <pre><code>rule-tag-export --parallel</code></pre>
+        </article>
+
+        <!-- Segments -->
+        <article class="cmd" id="cmd-segments-export" data-name="segments-export spark segmented assets csv">
+          <h4>segments-export</h4>
+          <div class="small">Export segments for segmented Spark assets.</div>
+          <div class="small"><span class="chip">--output-file</span><span class="chip">--quiet</span></div>
+          <pre><code>segments-export</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-segments-import" data-name="segments-import spark apply import">
+          <h4>segments-import</h4>
+          <div class="small">Import segments into target (creates fresh IDs).</div>
+          <div class="small"><span class="chip">--dry-run</span><span class="chip">--verbose</span></div>
+          <pre><code>segments-import policy-import/segments_output.csv</code></pre>
+        </article>
+
+        <!-- Others -->
+        <article class="cmd" id="cmd-transform-and-merge" data-name="transform-and-merge mapping merge source target exact replace">
+          <h4>transform-and-merge</h4>
+          <div class="small">Transform UIDs and merge source/target inventories.</div>
+          <div class="small"><span class="chip">--string-transform "A":"B", "C":"D"</span><span class="chip">--verbose</span></div>
+          <pre><code>transform-and-merge --string-transform "PROD_DB":"DEV_DB", "PROD_URL":"DEV_URL"</code></pre>
+          <div class="small muted">Outputs: <code>asset-import/asset-merged-all.csv</code>, helper CSVs.</div>
+        </article>
+
+        <article class="cmd" id="cmd-notifications-check" data-name="notifications-check compare notification groups source target">
+          <h4>notifications-check</h4>
+          <div class="small">Compare notification groups across envs, report diffs.</div>
+          <div class="small"><span class="chip">--source-context</span><span class="chip">--target-context</span><span class="chip">--assembly-ids</span><span class="chip">--parallel</span><span class="chip">--page-size</span></div>
+          <pre><code>notifications-check --source-context 1 --target-context 2 --assembly-ids 100,101</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-set-output-dir" data-name="set-output-dir output directory">
+          <h4>set-output-dir</h4>
+          <div class="small">Set global output directory for all operations.</div>
+          <pre><code>set-output-dir ./adoc-out</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-set-log-level" data-name="set-log-level logging debug info warning error">
+          <h4>set-log-level</h4>
+          <div class="small">Change log level immediately.</div>
+          <pre><code>set-log-level INFO</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-set-http-config" data-name="set-http-config http timeout retry proxy">
+          <h4>set-http-config</h4>
+          <div class="small">Tune HTTP timeouts, retries, and proxy.</div>
+          <pre><code>set-http-config --timeout 30 --retry 5 --proxy http://proxy:8080</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-show-config" data-name="show-config print configuration tenants keys output">
+          <h4>show-config</h4>
+          <div class="small">Display HTTP, logging, env, and output settings.</div>
+          <pre><code>show-config</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-get" data-name="get GET rest api">
+          <h4>GET</h4>
+          <div class="small">Ad-hoc GET request (source by default; add <code>--target</code>).</div>
+          <pre><code>GET /catalog-server/api/assets?uid=DB.SCHEMA.TABLE --target</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-put" data-name="put PUT rest api">
+          <h4>PUT</h4>
+          <div class="small">Ad-hoc PUT with JSON payload (source by default).</div>
+          <pre><code>PUT /catalog-server/api/assets {"name":"my-asset"}</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-vcs-config" data-name="vcs-config git hg svn https ssh proxy">
+          <h4>vcs-config</h4>
+          <div class="small">Configure Git/Mercurial/Subversion + auth/proxy.</div>
+          <pre><code>vcs-config --vcs-type git --remote-url https://example/repo.git</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-vcs-init" data-name="vcs-init init repository output directory git hg">
+          <h4>vcs-init</h4>
+          <div class="small">Initialize a VCS repo in output dir (or provided dir).</div>
+          <pre><code>vcs-init</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-vcs-pull" data-name="vcs-pull pull repository">
+          <h4>vcs-pull</h4>
+          <div class="small">Pull updates (uses configured repo auth).</div>
+          <pre><code>vcs-pull</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-vcs-push" data-name="vcs-push push repository">
+          <h4>vcs-push</h4>
+          <div class="small">Commit & push changes (uses configured repo auth).</div>
+          <pre><code>vcs-push</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-help" data-name="help">
+          <h4>help</h4>
+          <div class="small">Show help or detailed help for a command.</div>
+          <pre><code>help
+help policy-export</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-history" data-name="history">
+          <h4>history</h4>
+          <div class="small">Show last 25 commands with numbers; pick to re-run.</div>
+          <pre><code>history</code></pre>
+        </article>
+
+        <article class="cmd" id="cmd-exit" data-name="exit quit q">
+          <h4>exit / quit / q</h4>
+          <div class="small">Exit the interactive client.</div>
+          <pre><code>exit</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section id="io" aria-labelledby="h-io">
+      <h2 id="h-io">I/O Conventions</h2>
+      <div class="card grid cols-3">
+        <div>
+          <h4>Output root</h4>
+          <p>Set once with <code>set-output-dir</code>. Exports → <code>asset-export/</code>, <code>policy-export/</code>. Import-ready → <code>asset-import/</code>, <code>policy-import/</code>.</p>
+        </div>
+        <div>
+          <h4>Key CSVs</h4>
+          <ul>
+            <li><code>asset-all-{source|target}-export.csv</code></li>
+            <li><code>asset-merged-all.csv</code></li>
+            <li><code>asset-config/profiles-import-ready.csv</code></li>
+            <li><code>policies-all-export.csv</code>, <code>rule-tags-export.csv</code></li>
+            <li><code>segments_output.csv</code></li>
+          </ul>
+        </div>
+        <div>
+          <h4>REST utilities</h4>
+          <p><code>GET</code>/<code>PUT</code> help debug live API behavior; use <code>--target</code> to switch auth/tenant.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="perf" aria-labelledby="h-perf">
+      <h2 id="h-perf">Performance Tips</h2>
+      <div class="card">
+        <ul>
+          <li>Prefer <code>--parallel</code> (up to 5 threads) on long exports/imports.</li>
+          <li>Increase <code>--page-size</code> for <code>asset-list-export</code> (e.g., 1000).</li>
+          <li>Tune networking: <code>set-http-config --timeout 60 --retry 5</code>.</li>
+          <li>Use <code>--verbose</code> only while diagnosing; it slows I/O.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="safety" aria-labelledby="h-safety">
+      <h2 id="h-safety">Safety & Gotchas</h2>
+      <div class="card">
+        <ul>
+          <li>Dry run first where supported (<code>--dry-run</code>).</li>
+          <li><code>transform-and-merge</code> applies <em>exact</em> replacements only—be precise.</li>
+          <li><code>segments-import</code> creates fresh segments (drops existing IDs).</li>
+          <li>Run profiling after config imports: <code>profile-check --run-profile</code> or <code>profile-run</code>.</li>
+          <li>Confirm creds/hosts via <code>show-config</code> before mutating target.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="vcs" aria-labelledby="h-vcs">
+      <h2 id="h-vcs">VCS Workflow</h2>
+      <div class="card grid cols-3">
+        <div><h4>Configure</h4><pre><code>vcs-config --vcs-type git --remote-url https://example/repo.git</code></pre></div>
+        <div><h4>Initialize</h4><pre><code>vcs-init</code></pre></div>
+        <div><h4>Commit & Push</h4><pre><code>vcs-push</code></pre></div>
+      </div>
+    </section>
+
+    <section id="troubleshooting" aria-labelledby="h-troubleshooting">
+      <h2 id="h-troubleshooting">Troubleshooting</h2>
+      <div class="card">
+        <ul>
+          <li><strong>File not found</strong> → ensure <code>set-output-dir</code> and expected CSV paths.</li>
+          <li><strong>401/403</strong> → recheck target creds/tenant; corporate proxy via <code>set-http-config --proxy</code>.</li>
+          <li><strong>Stalls</strong> → raise timeout, reduce verbosity; check network.</li>
+          <li><strong>UID mismatches</strong> → fix mapping and rerun <code>transform-and-merge</code>.</li>
+        </ul>
+      </div>
+      <p class="foot">Built for the ADOC Interactive Migration Toolkit • Handy shortcuts: <span class="kbd">/</span> to focus search, <span class="kbd">Home</span> to jump to top.</p>
+    </section>
+  </main>
+</div>
+
+<script>
+  // Smooth scrolling & active link highlighting
+  const links = Array.from(document.querySelectorAll('aside.nav a[href^="#"]'));
+  const sections = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+
+  function setActive(){
+    let idx = sections.findIndex(sec => sec.getBoundingClientRect().top - 100 > 0);
+    if(idx === -1) idx = sections.length - 1;
+    else idx = Math.max(0, idx - 1);
+    links.forEach(l => l.classList.remove('active'));
+    if(links[idx]) links[idx].classList.add('active');
+  }
+  document.addEventListener('scroll', setActive, {passive:true});
+  setActive();
+
+  // Build "Jump to Command" list with 3x3 grid
+  const cmdJump = document.getElementById('cmdJump');
+  const cmdCards = Array.from(document.querySelectorAll('.cmd'));
+  const cmdMap = cmdCards.map(card => {
+    const id = card.id, name = card.querySelector('h4').textContent.trim();
+    return { id, name };
+  });
+  
+  // Grouped Jump to Command rendering
+  function groupCommands(cmdMap) {
+    const groups = {
+      'Assets': [],
+      'Policies': [],
+      'Profile': [],
+      'Tags': [],
+      'Segments': [],
+      'Transformations': [],
+      'Notifications': [],  
+      'Others': []
+    };
+    const assetIds = [
+      'cmd-asset-list-export', 'cmd-asset-config-export', 'cmd-asset-config-import', 'cmd-asset-profile-export', 'cmd-asset-profile-import'
+    ];
+    const policyIds = [
+      'cmd-policy-list-export', 'cmd-policy-export', 'cmd-policy-import', 'cmd-policy-xfr'
+    ];
+    const profileIds = [
+      'cmd-profile-check', 'cmd-profile-run'
+    ];
+    const tagIds = [
+      'cmd-asset-tag-import', 'cmd-rule-tag-export'
+    ];
+    const segmentIds = [
+      'cmd-segments-export', 'cmd-segments-import'
+    ];
+    const transformationIds = [
+      'cmd-transform-and-merge', 'cmd-transform-and-merge-dry-run'
+    ];
+    const notificationIds = [
+      'cmd-notifications-check', 'cmd-notifications-check-dry-run'
+    ];
+    cmdMap.forEach(c => {
+      if(tagIds.includes(c.id)) groups['Tags'].push(c);
+      else if(assetIds.includes(c.id)) groups['Assets'].push(c);
+      else if(policyIds.includes(c.id)) groups['Policies'].push(c);
+      else if(profileIds.includes(c.id)) groups['Profile'].push(c);
+      else if(segmentIds.includes(c.id)) groups['Segments'].push(c);
+      else if(transformationIds.includes(c.id)) groups['Transformations'].push(c);
+      else if(notificationIds.includes(c.id)) groups['Notifications'].push(c);
+      else groups['Others'].push(c);
+    });
+    return groups;
+  }
+  // Replace the previous cmdJump.innerHTML assignment with grouped rendering
+  const grouped = groupCommands(cmdMap);
+  cmdJump.innerHTML = Object.entries(grouped).map(([group, cmds]) => {
+    if(cmds.length === 0) return '';
+    return `<div class="cmd-group"><div class="cmd-group-title">${group}</div>`
+      + cmds.map(c => `<a href="#${c.id}">${c.name}</a>`).join('') + '</div>';
+  }).join('');
+  
+  // Add click handlers for command grid links to show active state and highlight card
+  const cmdGridLinks = Array.from(cmdJump.querySelectorAll('a'));
+  cmdGridLinks.forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = link.getAttribute('href');
+      const targetEl = document.querySelector(targetId);
+      if(targetEl) {
+        // Remove active from all command grid links
+        cmdGridLinks.forEach(l => l.classList.remove('active'));
+        // Add active to clicked link
+        link.classList.add('active');
+        // Remove highlight from all cards
+        cmdCards.forEach(card => card.classList.remove('cmd-highlight'));
+        // Add highlight to the target card
+        targetEl.classList.add('cmd-highlight');
+        // Smooth scroll to target
+        targetEl.scrollIntoView({behavior:'smooth', block:'start'});
+        history.replaceState(null,'', targetId);
+      }
+    });
+  });
+
+  // Search filter (Cmd+/ focus)
+  const search = document.getElementById('search');
+  const cmdList = document.getElementById('cmdList');
+  function filterCommands(q){
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    let visible = 0;
+    cmdCards.forEach(card => {
+      const hay = (card.dataset.name + ' ' + card.textContent).toLowerCase();
+      const ok = terms.every(t => hay.includes(t));
+      card.style.display = ok ? '' : 'none';
+      if(ok) visible++;
+    });
+    cmdList.dataset.count = visible;
+  }
+  search.addEventListener('input', e => filterCommands(e.target.value));
+  window.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== search) {
+      e.preventDefault(); search.focus();
+    }
+  });
+
+  // Sidebar toggle (mobile)
+  const toggleNav = document.getElementById('toggleNav');
+  const sidebar = document.getElementById('sidebar');
+  toggleNav.addEventListener('click', () => {
+    const open = sidebar.style.display !== 'none' && getComputedStyle(sidebar).display !== 'none';
+    if(open){ sidebar.style.display = 'none'; toggleNav.setAttribute('aria-expanded','false'); }
+    else{ sidebar.style.display = ''; toggleNav.setAttribute('aria-expanded','true'); }
+  });
+
+  // Smooth scroll behavior for nav links
+  links.forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const el = document.querySelector(a.getAttribute('href'));
+      if(!el) return;
+      el.scrollIntoView({behavior:'smooth', block:'start'});
+      history.replaceState(null,'',a.getAttribute('href'));
+    });
+  });
+
+  // Highlight a card when it is clicked (independent of Jump to Command)
+  cmdCards.forEach(card => {
+    card.addEventListener('click', () => {
+      cmdCards.forEach(c => c.classList.remove('cmd-highlight'));
+      card.classList.add('cmd-highlight');
+    });
+  });
+
+  // Highlight main sections when clicking sidebar section links, but skip Command Catalog
+  const sectionLinks = Array.from(document.querySelectorAll('aside.nav a[href^="#"]'));
+  const mainSections = sectionLinks.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  sectionLinks.forEach((link, idx) => {
+    // Skip Command Catalog section for section highlight
+    if (link.getAttribute('href') === '#catalog') return;
+    link.addEventListener('click', (e) => {
+      if (!mainSections[idx]) return;
+      mainSections.forEach(sec => sec.classList.remove('section-highlight'));
+      mainSections[idx].classList.add('section-highlight');
+    });
+  });
+  // Also highlight section when clicking on the section itself, but skip Command Catalog
+  mainSections.forEach((section, idx) => {
+    if (!section || section.id === 'catalog') return;
+    section.addEventListener('click', (e) => {
+      mainSections.forEach(sec => sec.classList.remove('section-highlight'));
+      section.classList.add('section-highlight');
+    });
+  });
+</script>
+</body>
+</html>
