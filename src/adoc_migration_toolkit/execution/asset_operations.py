@@ -8,6 +8,7 @@ including profile export/import, config export/import, and list export.
 import csv
 import json
 import logging
+import sys
 import threading
 import tempfile
 import os
@@ -3123,6 +3124,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
 
         # Read CSV data
         asset_data = []
+        # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
+        csv.field_size_limit(sys.maxsize)
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             # Skip header row if it exists
