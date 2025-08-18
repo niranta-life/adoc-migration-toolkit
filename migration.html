@@ -177,6 +177,7 @@
     <a href="#safety">Safety & Gotchas</a>
     <a href="#vcs">VCS Workflow</a>
     <a href="#troubleshooting">Troubleshooting</a>
+    <a href="#limitations">Known Limitations</a>
 
     <h3 style="margin-top:16px">Jump to Command</h3>
     <div class="cmd-grid" id="cmdJump">
@@ -576,6 +577,39 @@ help policy-export</code></pre>
           <li><strong>401/403</strong> → recheck target creds/tenant; corporate proxy via <code>set-http-config --proxy</code>.</li>
           <li><strong>Stalls</strong> → raise timeout, reduce verbosity; check network.</li>
           <li><strong>UID mismatches</strong> → fix mapping and rerun <code>transform-and-merge</code>.</li>
+        </ul>
+      </div>
+      <p class="foot">Built for the ADOC Interactive Migration Toolkit • Handy shortcuts: <span class="kbd">/</span> to focus search, <span class="kbd">Home</span> to jump to top.</p>
+    </section>
+    <section id="limitations" aria-labelledby="h-limitations">
+      <h2 id="h-limitations">Known Limitations</h2>
+      <div class="card">
+        <ul>
+          <li>
+            <p><strong>Scenario 1 — Reconciliation policies (rowcount check)</strong>: For reconciliation policies with a rowcount check configured, the <code>leftEngineType</code> and <code>rightEngineType</code> will not get updated automatically in the target environment.</p>
+            <p class="muted"><strong>Action item</strong>: Customer needs to update the engine types manually in the target.</p>
+          </li>
+          <li>
+            <p><strong>Scenario 2 — Case sensitivity in string transformations</strong>: While running string transformations using <code>transform-and-merge</code> or <code>policy-xfr</code>, the strings are case sensitive.</p>
+            <p class="muted"><strong>Action item</strong>: Although Snowflake supports case-insensitive matching, the <code>policy-xfr</code> command affects not only databases but also datasource names that are part of the Acceldata configuration, which is case-sensitive. Therefore, we cannot make the string transformation case-insensitive. Customers should provide the mappings exactly as they appear.</p>
+          </li>
+          <li>
+            <p><strong>Scenario 3 — Schema drift policy (Alert on column metadata changes)</strong>: When exporting and importing a schema drift policy that has "Alert on column metadata changes" enabled along with Additional Metadata, the first import does not correctly reflect these settings. The policy does get imported, but the "Alert on column metadata changes" option remains disabled, and the "Additional metadata" is not applied. Upon re-importing the same policy, all configurations are updated correctly.</p>
+            <p class="muted"><strong>Action item</strong>: Customer needs to run the <code>policy-import</code> command twice to get the "Alert on column metadata changes" updated.</p>
+          </li>
+          <li>
+            <p><strong>Scenario 4 — Overlapping string mappings (sequential replacements)</strong>: In the current process, string replacements are applied sequentially, in the order they are defined. This can cause unintended results when two mappings overlap (i.e., one mapping’s key is a substring of the value produced by another mapping).</p>
+            <p><em>Example</em>:</p>
+            <pre><code>policy-xfr --string-transform "Snowflake":"snowflake_krish_pfizer_test", "SNOWFLAKE_SAMPLE_DATA":"KRISH_TEST", "MANOJ_TEST":"TEST_MIGRATION", "KRISH":"ATULDB", "BABU_DB":"TEST_KRISH"</code></pre>
+            <p><em>What happens</em>:</p>
+            <ol>
+              <li>The source string contains <code>SNOWFLAKE_SAMPLE_DATA</code>.</li>
+              <li>The first relevant mapping converts it to <code>KRISH_TEST</code>.</li>
+              <li>Later in the sequence, another mapping changes <code>KRISH</code> to <code>ATULDB</code>.</li>
+              <li>Since <code>KRISH</code> appears inside the newly created <code>KRISH_TEST</code>, it gets changed again, resulting in <code>ATULDB_TEST</code>.</li>
+            </ol>
+            <p>This is not the intended behavior; the goal was to replace only the original occurrence of <code>KRISH</code> in the input, not the one introduced by a previous replacement. The root cause is that replacements are applied sequentially without distinguishing between text from the original input versus text introduced by earlier replacements. As a result, overlapping or nested mappings can cause multiple, unintended transformations.</p>
+          </li>
         </ul>
       </div>
       <p class="foot">Built for the ADOC Interactive Migration Toolkit • Handy shortcuts: <span class="kbd">/</span> to focus search, <span class="kbd">Home</span> to jump to top.</p>
