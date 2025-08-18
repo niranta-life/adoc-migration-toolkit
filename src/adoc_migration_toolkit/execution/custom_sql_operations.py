@@ -126,7 +126,6 @@ def check_for_custom_sql_required_before_migration(client, logger: logging.Logge
             src_schema_map = _build_schema_table_map(source_set)
             sink_schema_map = _build_schema_table_map(sink_set)
             mappings = []
-            unmapped_dbs = set()
 
             for schema_table, src_full_list in src_schema_map.items():
                 if schema_table in sink_schema_map:
@@ -134,17 +133,27 @@ def check_for_custom_sql_required_before_migration(client, logger: logging.Logge
                     for src_full in src_full_list:
                         mappings.append(f"{src_full} -> {', '.join(sink_full_list)}")
                 else:
-                    # No match for this schema.table, mark as unmapped
                     for src_full in src_full_list:
                         mappings.append(f"{src_full} -> No match")
-                        unmapped_dbs.add(src_full)
+
+            # For DBs present on both sides, list tables present in BOTH source and sink
+            src_dbs = {t.split('.')[0] for t in source_set if '.' in t}
+            sink_dbs = {t.split('.')[0] for t in sink_set if '.' in t}
+            common_dbs = src_dbs & sink_dbs
+            common_tables_details = []
+            for db in common_dbs:
+                src_tables_for_db = {t for t in source_set if t.startswith(db + '.')}
+                sink_tables_for_db = {t for t in sink_set if t.startswith(db + '.')}
+                common_tables = src_tables_for_db & sink_tables_for_db
+                if common_tables:
+                    common_tables_details.extend(sorted(common_tables))
 
             writer.writerow([
                 policy,
                 ", ".join(src_list),
                 ", ".join(sink_list),
                 " | ".join(mappings) if mappings else "",
-                ", ".join(sorted(unmapped_dbs)) if unmapped_dbs else "",
+                ", ".join(common_tables_details) if common_tables_details else "",
             ])
 
     if not quiet_mode:
