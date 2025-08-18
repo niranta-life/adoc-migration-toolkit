@@ -1483,6 +1483,15 @@ def run_interactive(args):
                         check_for_profiling_required_before_migration(client, logger, policy_types, run_profile, quiet_mode, verbose_mode)
                     continue
 
+                # Check if it's a custom-sql-check command
+                if command.lower().startswith('custom-sql-check'):
+                    from .command_parsing import parse_custom_sql_check_command
+                    from .custom_sql_operations import check_for_custom_sql_required_before_migration
+                    parallel_mode, verbose_mode, quiet_mode = parse_custom_sql_check_command(command)
+                    # Currently the operation is not parallelized; flags are accepted for consistency
+                    check_for_custom_sql_required_before_migration(client, logger, quiet_mode, verbose_mode)
+                    continue
+
                 # Check if it's a profile-run command
                 if command.lower().startswith('profile-run'):
                     from .command_parsing import parse_run_profile_command

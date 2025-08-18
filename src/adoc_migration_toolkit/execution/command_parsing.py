@@ -1075,6 +1075,40 @@ def parse_profile_command(command: str) -> tuple:
     return policy_type, parallel_mode, run_profile, verbose_mode, quiet_mode
 
 
+def parse_custom_sql_check_command(command: str) -> tuple:
+    """Parse a custom-sql-check command string into components.
+
+    Args:
+        command: Command string like "custom-sql-check [--quiet] [--verbose] [--parallel]"
+    Returns:
+        Tuple of (parallel_mode, verbose_mode, quiet_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'custom-sql-check':
+        return False, False, False
+
+    parallel_mode = False
+    verbose_mode = False
+    quiet_mode = False
+
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--parallel':
+            parallel_mode = True
+            parts.remove('--parallel')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        else:
+            i += 1
+
+    return parallel_mode, verbose_mode, quiet_mode
+
 def parse_run_profile_command(command: str) -> tuple:
     """Parse a profile command string into components.
 
