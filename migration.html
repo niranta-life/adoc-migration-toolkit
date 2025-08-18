@@ -685,22 +685,35 @@ help policy-export</code></pre>
   // Search filter (Cmd+/ focus)
   const search = document.getElementById('search');
   const cmdList = document.getElementById('cmdList');
-  function filterCommands(q){
+  const allCmdCards = Array.from(cmdList.querySelectorAll('.cmd'));
+
+  function filterCommands(q) {
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     let visible = 0;
-    cmdCards.forEach(card => {
-      const hay = (card.dataset.name + ' ' + card.textContent).toLowerCase();
+    allCmdCards.forEach(card => {
+      // Use the h4 text and all text content for searching
+      const hay = (card.querySelector('h4').textContent + ' ' + card.textContent).toLowerCase();
       const ok = terms.every(t => hay.includes(t));
       card.style.display = ok ? '' : 'none';
-      if(ok) visible++;
+      if (ok) visible++;
     });
     cmdList.dataset.count = visible;
   }
+
   search.addEventListener('input', e => filterCommands(e.target.value));
   window.addEventListener('keydown', e => {
     if (e.key === '/' && document.activeElement !== search) {
       e.preventDefault(); search.focus();
     }
+  });
+
+  // Attach highlight/scroll to all cards (once)
+  allCmdCards.forEach(card => {
+    card.addEventListener('click', function() {
+      allCmdCards.forEach(c => c.classList.remove('cmd-highlight'));
+      card.classList.add('cmd-highlight');
+      card.scrollIntoView({behavior:'smooth', block:'start'});
+    });
   });
 
   // Sidebar toggle (mobile)
