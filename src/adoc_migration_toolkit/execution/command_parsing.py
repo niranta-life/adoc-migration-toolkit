@@ -592,14 +592,14 @@ def parse_policy_export_command(command: str) -> tuple:
     """Parse a policy-export command string into components.
     
     Args:
-        command: Command string like "policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel]"
+        command: Command string like "policy-export [--type <export_type>] [--filter <filter_value>] [--quiet] [--verbose] [--batch-size <size>] [--parallel] [--max-threads <threads>] [--no-filter-versions]"
         
     Returns:
-        Tuple of (quiet_mode, verbose_mode, batch_size, export_type, filter_value, parallel_mode)
+        Tuple of (quiet_mode, verbose_mode, batch_size, export_type, filter_value, parallel_mode, max_threads, filter_versions)
     """
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'policy-export':
-        return False, False, 50, None, None, False
+        return False, False, 50, None, None, False, 5, True
     
     quiet_mode = False
     verbose_mode = False
@@ -607,6 +607,8 @@ def parse_policy_export_command(command: str) -> tuple:
     export_type = None
     filter_value = None
     parallel_mode = False
+    max_threads = 5  # Default max threads
+    filter_versions = True  # Default to filtering versions
     
     # Check for flags and options
     i = 1
@@ -630,6 +632,15 @@ def parse_policy_export_command(command: str) -> tuple:
                 parts.pop(i)  # Remove the batch size value
             except (ValueError, IndexError):
                 raise ValueError("Invalid batch size. Must be a positive integer")
+        elif parts[i] == '--max-threads' and i + 1 < len(parts):
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads <= 0:
+                    raise ValueError("Max threads must be positive")
+                parts.pop(i)  # Remove --max-threads
+                parts.pop(i)  # Remove the max threads value
+            except (ValueError, IndexError):
+                raise ValueError("Invalid max threads. Must be a positive integer")
         elif parts[i] == '--quiet':
             quiet_mode = True
             verbose_mode = False  # Quiet overrides verbose
@@ -641,10 +652,13 @@ def parse_policy_export_command(command: str) -> tuple:
         elif parts[i] == '--parallel':
             parallel_mode = True
             parts.remove('--parallel')
+        elif parts[i] == '--no-filter-versions':
+            filter_versions = False
+            parts.remove('--no-filter-versions')
         else:
             i += 1
     
-    return quiet_mode, verbose_mode, batch_size, export_type, filter_value, parallel_mode
+    return quiet_mode, verbose_mode, batch_size, export_type, filter_value, parallel_mode, max_threads, filter_versions
 
 def parse_policy_import_command(command: str) -> tuple:
     """Parse a policy-import command string into components.

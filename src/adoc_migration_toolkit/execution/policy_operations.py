@@ -1116,7 +1116,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
         raise
 
 
-def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None):
+def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None, filter_versions: bool = True):
     """Execute the policy-export command.
     
     Args:
@@ -1127,6 +1127,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         batch_size: Number of policies to export in each batch
         export_type: Type of export (rule-types, engine-types, assemblies, source-types)
         filter_value: Optional filter value within the export type
+        filter_versions: Whether to filter policy versions
     """
     try:
         # Determine input and output file paths
@@ -1414,6 +1415,19 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                     if response:
                         with open(output_file, 'wb') as f:
                             f.write(response)
+                        
+                        # Filter policy versions if enabled
+                        if filter_versions:
+                            try:
+                                success, policies_processed, versions_removed = filter_policy_versions(
+                                    output_file, quiet_mode, verbose_mode
+                                )
+                                if success and not quiet_mode:
+                                    print(f"🔧 Filtered {policies_processed} policies, removed {versions_removed} older versions from {batch_filename}")
+                            except Exception as filter_error:
+                                if verbose_mode:
+                                    print(f"⚠️  Version filtering failed for {batch_filename}: {filter_error}")
+                                logger.warning(f"Version filtering failed for {batch_filename}: {filter_error}")
                         
                         # Store result for this batch
                         batch_key = f"{policy_type}_batch_{batch_num + 1}"
@@ -2249,7 +2263,7 @@ def execute_rule_tag_export(client, logger: logging.Logger, quiet_mode: bool = F
         logger.error(error_msg)
 
 
-def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None, max_threads: int = 5):
+def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, batch_size: int = 50, export_type: str = None, filter_value: str = None, max_threads: int = 5, filter_versions: bool = True):
     """Execute the policy-export command with parallel processing.
     
     Args:
@@ -2261,6 +2275,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
         export_type: Type of export (rule-types, engine-types, assemblies, source-types)
         filter_value: Optional filter value within the export type
         max_threads: Maximum number of threads to use (default: 5)
+        filter_versions: Whether to filter policy versions to keep only the latest (default: True)
     """
     try:
         # Determine input and output file paths
@@ -2535,6 +2550,19 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                         if response:
                             with open(output_file, 'wb') as f:
                                 f.write(response)
+                            
+                            # Filter policy versions if enabled
+                            if filter_versions:
+                                try:
+                                    success, policies_processed, versions_removed = filter_policy_versions(
+                                        output_file, quiet_mode, verbose_mode
+                                    )
+                                    if success and verbose_mode:
+                                        print(f"🔧 {thread_name}: Filtered {policies_processed} policies, removed {versions_removed} older versions from {batch_filename}")
+                                except Exception as filter_error:
+                                    if verbose_mode:
+                                        print(f"⚠️  {thread_name}: Version filtering failed for {batch_filename}: {filter_error}")
+                                    logger.warning(f"Thread {thread_name}: Version filtering failed for {batch_filename}: {filter_error}")
                             
                             # Store result for this batch
                             batch_key = f"{policy_type}_batch_{batch_num + 1}"
@@ -3038,3 +3066,126 @@ def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
         raise
+
+
+def filter_policy_versions(zip_file_path: Path, quiet_mode: bool = False, verbose_mode: bool = False):
+    """
+    Filter policy versions in a ZIP file to keep only the latest version for each policy.
+    
+    Args:
+        zip_file_path: Path to the ZIP file containing policy definitions
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    """
+    import zipfile
+    import tempfile
+    import shutil
+    
+    try:
+        if not quiet_mode:
+            print(f"🔧 Filtering policy versions in: {zip_file_path}")
+        
+        # Create a temporary directory for processing
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir_path = Path(temp_dir)
+            
+            # Extract the ZIP file
+            with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir_path)
+            
+            # Process each JSON file in the ZIP
+            json_files = list(temp_dir_path.glob("*.json"))
+            total_policies_processed = 0
+            total_versions_removed = 0
+            
+            for json_file in json_files:
+                if verbose_mode:
+                    print(f"  Processing: {json_file.name}")
+                
+                try:
+                    # Read the JSON file
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        policies = json.load(f)
+                    
+                    if not isinstance(policies, list):
+                        if verbose_mode:
+                            print(f"    Skipping {json_file.name}: not a list of policies")
+                        continue
+                    
+                    original_policy_count = len(policies)
+                    original_total_versions = sum(len(policy.get('items', [])) for policy in policies)
+                    
+                    # Process each policy
+                    for policy in policies:
+                        if 'items' not in policy or not policy['items']:
+                            continue
+                        
+                        items = policy['items']
+                        if len(items) <= 1:
+                            continue  # No filtering needed if only one version
+                        
+                        # Sort items by ruleVersion in descending order (latest first)
+                        # Handle cases where ruleVersion might be missing
+                        def get_rule_version(item):
+                            return item.get('ruleVersion', 0)
+                        
+                        items.sort(key=get_rule_version, reverse=True)
+                        
+                        # Keep only the first item (latest version)
+                        latest_item = items[0]
+                        policy['items'] = [latest_item]
+                        
+                        if verbose_mode:
+                            policy_name = policy.get('name', 'Unknown')
+                            latest_version = get_rule_version(latest_item)
+                            removed_count = len(items) - 1
+                            print(f"    Policy '{policy_name}': kept version {latest_version}, removed {removed_count} older versions")
+                    
+                    # Write the filtered policies back to the JSON file
+                    with open(json_file, 'w', encoding='utf-8') as f:
+                        json.dump(policies, f, indent=2, ensure_ascii=False)
+                    
+                    # Calculate statistics
+                    final_total_versions = sum(len(policy.get('items', [])) for policy in policies)
+                    versions_removed = original_total_versions - final_total_versions
+                    
+                    total_policies_processed += original_policy_count
+                    total_versions_removed += versions_removed
+                    
+                    if verbose_mode:
+                        print(f"    {json_file.name}: {original_policy_count} policies, removed {versions_removed} versions")
+                
+                except Exception as e:
+                    if verbose_mode:
+                        print(f"    Error processing {json_file.name}: {e}")
+                    continue
+            
+            # Create a new ZIP file with the filtered content
+            backup_path = zip_file_path.with_suffix('.zip.backup')
+            if backup_path.exists():
+                backup_path.unlink()
+            
+            # Rename original to backup
+            zip_file_path.rename(backup_path)
+            
+            # Create new ZIP with filtered content
+            with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                for file_path in temp_dir_path.rglob('*'):
+                    if file_path.is_file():
+                        arc_name = file_path.relative_to(temp_dir_path)
+                        new_zip.write(file_path, arc_name)
+            
+            if not quiet_mode:
+                print(f"✅ Version filtering completed:")
+                print(f"   Policies processed: {total_policies_processed}")
+                print(f"   Versions removed: {total_versions_removed}")
+                print(f"   Backup saved as: {backup_path}")
+            
+            return True, total_policies_processed, total_versions_removed
+    
+    except Exception as e:
+        error_msg = f"Error filtering policy versions in {zip_file_path}: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        return False, 0, 0
+
