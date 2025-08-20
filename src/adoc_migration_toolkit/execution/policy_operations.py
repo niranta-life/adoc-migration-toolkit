@@ -100,7 +100,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
         
         if verbose_mode:
             print("\nGET Request Headers:")
-            print(f"  Endpoint: /catalog-server/api/rules?page=0&size=0&ruleStatus=ACTIVE")
+            print(f"  Endpoint: /catalog-server/api/rules?page=0&size=0&ruleStatus=ENABLED")
             print(f"  Method: GET")
             print(f"  Content-Type: application/json")
             print(f"  Authorization: Bearer [REDACTED]")
@@ -108,7 +108,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 print(f"  X-Tenant: {client.tenant}")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/rules?page=0&size=0&ruleStatus=ACTIVE",
+            endpoint="/catalog-server/api/rules?page=0&size=0&ruleStatus=ENABLED",
             method='GET'
         )
         
@@ -145,7 +145,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
             try:
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
-                    print(f"  Endpoint: /catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ACTIVE")
+                    print(f"  Endpoint: /catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ENABLED")
                     print(f"  Method: GET")
                     print(f"  Content-Type: application/json")
                     print(f"  Authorization: Bearer [REDACTED]")
@@ -153,7 +153,7 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                         print(f"  X-Tenant: {client.tenant}")
                 
                 page_response = client.make_api_call(
-                    endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ACTIVE",
+                    endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ENABLED",
                     method='GET'
                 )
                 
@@ -687,7 +687,7 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             print("Getting total rules count...")
         
         count_response = client.make_api_call(
-            endpoint="/catalog-server/api/rules?page=0&size=0&ruleStatus=ACTIVE",
+            endpoint="/catalog-server/api/rules?page=0&size=0&ruleStatus=ENABLED",
             method='GET'
         )
         
@@ -715,9 +715,9 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 print(f"  Retrieving page {page + 1}/{total_pages}...")
             
             page_response = client.make_api_call(
-                endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ACTIVE",
-                method='GET'
-            )
+                    endpoint=f"/catalog-server/api/rules?page={page}&size={page_size}&ruleStatus=ENABLED",
+                    method='GET'
+                )
             
             if page_response and 'rules' in page_response:
                 page_policies = page_response['rules']
