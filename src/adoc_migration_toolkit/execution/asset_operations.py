@@ -3194,8 +3194,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             asset_not_found_thread = 0
             thread_results = []
 
-            # Create progress bar for this thread if in quiet mode
-            if quiet_mode and not verbose_mode:
+            # Create progress bar for this thread (show in normal mode and quiet mode, but not in verbose mode)
+            if not verbose_mode:
                 thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                 thread_pbar = tqdm(
                     total=end_index - start_index,
@@ -3204,6 +3204,8 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                     position=thread_id,
                     leave=False
                 )
+            else:
+                thread_pbar = None
 
             for i in range(start_index, end_index):
                 asset = asset_data[i]
@@ -3298,11 +3300,11 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                     thread_results.append({'target_uid': target_uid, 'status': 'failed', 'error': error_msg})
 
                 # Update progress bar
-                if quiet_mode and not verbose_mode:
+                if thread_pbar:
                     thread_pbar.update(1)
 
             # Close thread progress bar
-            if quiet_mode and not verbose_mode:
+            if thread_pbar:
                 thread_pbar.close()
 
             # Update global counters
@@ -3353,12 +3355,12 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
             pbar.close()
 
         if thread_results:
-            print(f"\nPer-thread breakdown:")
+            print(f"\nThread Statistics:")
             for result in thread_results:
                 thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(
                     thread_names) else f"Thread {result['thread_id']}"
                 print(
-                    f"{thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets']} assets")
+                    f"  {thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets']} assets")
 
         if failed > 0:
             print(f"\nFailed assets:")
