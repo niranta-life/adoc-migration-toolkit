@@ -23,6 +23,9 @@ from ..shared import globals
 from .utils import get_source_to_target_asset_id_map
 
 
+
+
+
 def execute_asset_profile_export_guided(
     csv_file: str, 
     client, 
@@ -179,7 +182,7 @@ def execute_asset_profile_export_guided(
         return False, error_msg
 
 
-def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view']):
+def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view'], source_context_id: str = None, target_context_id: str = None):
     """Execute the asset-profile-export command.
     
     Args:
@@ -190,6 +193,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
         allowed_types: List of asset types to export
+        source_context_id: Source context ID for notification mapping (optional)
+        target_context_id: Target context ID for notification mapping (optional)
     """
     try:
         # Check if CSV file exists
@@ -205,6 +210,28 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
             logger.error(error_msg)
             return
 
+        # Load notification ID mapping if context IDs are provided
+        notification_id_mapping = {}
+        if source_context_id and target_context_id:
+            try:
+                from .notification_operations import create_notification_id_mapping_csv, load_notification_id_mapping
+                if not quiet_mode:
+                    print(f"🔄 Creating notification ID mapping for context IDs: {source_context_id} -> {target_context_id}")
+                
+                # Create the mapping CSV
+                mapping_csv_path = create_notification_id_mapping_csv(client, logger, source_context_id, target_context_id, quiet_mode, verbose_mode)
+                
+                # Load the mapping
+                notification_id_mapping = load_notification_id_mapping(mapping_csv_path, quiet_mode, verbose_mode)
+                
+                if not quiet_mode:
+                    print(f"📋 Loaded {len(notification_id_mapping)} notification ID mappings")
+                    
+            except Exception as e:
+                if not quiet_mode:
+                    print(f"⚠️  Failed to create notification ID mapping: {e}")
+                logger.warning(f"Failed to create notification ID mapping: {e}")
+
         # Read source-env and target-env mappings from CSV file
         env_mappings = []  # read_csv_uids(csv_file, logger)
 
@@ -218,6 +245,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
             logger.warning("No environment mappings found in CSV file")
             return
         
+
+        
         # Generate default output file if not provided - use asset-import category
         if not output_file:
             output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
@@ -225,6 +254,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         if not quiet_mode:
             print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file: {csv_file}")
             print(f"Output will be written to: {output_file}")
+            if source_context_id and target_context_id:
+                print(f"🔗 Notification ID mapping enabled: {source_context_id} -> {target_context_id}")
             if globals.GLOBAL_OUTPUT_DIR:
                 print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
             if verbose_mode:
@@ -238,7 +269,6 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         successful = 0
         failed = 0
         total_assets_processed = 0
-        failed_indices = set()  # Track failed indices for progress bar
         
         # Create progress bar using tqdm utility
         progress_bar = create_progress_bar(
@@ -251,8 +281,8 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
-            # Write header
-            writer.writerow(['target-env', 'profile_json'])
+            # Write header - include source-env for duplicate resolution
+            writer.writerow(['target-env', 'profile_json', 'source-env'])
             
             for i, (source_env, target_env) in enumerate(env_mappings, 1):
                 if verbose_mode:
@@ -268,25 +298,10 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     if verbose_mode:
                         print(f"Getting asset details for UID: {source_env}")
                     
-                    # Show headers in verbose mode
-                    if verbose_mode:
-                        print("\nGET Request Headers:")
-                        print(f"  Endpoint: /catalog-server/api/assets?uid={source_env}")
-                        print(f"  Method: GET")
-                        print(f"  Content-Type: application/json")
-                        print(f"  Authorization: Bearer [REDACTED]")
-                        if hasattr(client, 'tenant') and client.tenant:
-                            print(f"  X-Tenant: {client.tenant}")
-                    
                     asset_response = client.make_api_call(
                         endpoint=f"/catalog-server/api/assets?uid={source_env}",
                         method='GET'
                     )
-                    
-                    # Show response in verbose mode
-                    if verbose_mode:
-                        print("\nAsset Response:")
-                        print(json.dumps(asset_response, indent=2, ensure_ascii=False))
                     
                     # Step 2: Extract the asset ID
                     if not asset_response or 'data' not in asset_response:
@@ -295,7 +310,6 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
-                        failed_indices.add(i - 1)  # Add to failed indices (0-based)
                         continue
                     
                     data_array = asset_response['data']
@@ -305,7 +319,6 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
-                        failed_indices.add(i - 1)  # Add to failed indices (0-based)
                         continue
                     
                     first_asset = data_array[0]
@@ -315,7 +328,6 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
                         failed += 1
-                        failed_indices.add(i - 1)  # Add to failed indices (0-based)
                         continue
                     
                     asset_id = first_asset['id']
@@ -326,29 +338,21 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                     if verbose_mode:
                         print(f"Getting profile configuration for asset ID: {asset_id}")
                     
-                    # Show headers in verbose mode
-                    if verbose_mode:
-                        print("\nGET Request Headers:")
-                        print(f"  Endpoint: /catalog-server/api/profile/{asset_id}/config")
-                        print(f"  Method: GET")
-                        print(f"  Content-Type: application/json")
-                        print(f"  Authorization: Bearer [REDACTED]")
-                        if hasattr(client, 'tenant') and client.tenant:
-                            print(f"  X-Tenant: {client.tenant}")
-                    
                     profile_response = client.make_api_call(
                         endpoint=f"/catalog-server/api/profile/{asset_id}/config",
                         method='GET'
                     )
                     
-                    # Show response in verbose mode
-                    if verbose_mode:
-                        print("\nProfile Response:")
-                        print(json.dumps(profile_response, indent=2, ensure_ascii=False))
+                    # Transform profile configuration if notification mapping is available
+                    if notification_id_mapping:
+                        from .notification_operations import transform_profile_configuration
+                        profile_response = transform_profile_configuration(
+                            profile_response, notification_id_mapping, quiet_mode, verbose_mode
+                        )
                     
-                    # Step 4: Write to CSV
+                    # Step 4: Write to CSV - include source-env for duplicate resolution
                     profile_json = json.dumps(profile_response, ensure_ascii=False)
-                    writer.writerow([target_env, profile_json])
+                    writer.writerow([target_env, profile_json, source_env])
                     
                     if verbose_mode:
                         print(f"✅ Written to file: {target_env}")
@@ -365,34 +369,36 @@ def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, 
                 
                 # Update progress bar
                 progress_bar.update(1)
-            
-            # Close progress bar
-            progress_bar.close()
-            
-            # Print summary
-            if not quiet_mode:
-                print("\n" + "="*80)
-                print("ASSET PROFILE EXPORT COMPLETED")
-                print("="*80)
-                if verbose_mode:
-                    print("🔊 VERBOSE MODE - Detailed output including headers and responses")
-                print(f"Output file: {output_file}")
-                print(f"Total mappings processed: {len(env_mappings)}")
-                print(f"Successful: {successful}")
-                print(f"Failed: {failed}")
-                print("="*80)
-            else:
-                print(f"✅ Asset profile export completed: {successful} successful, {failed} failed")
-                print(f"Output written to: {output_file}")
+        
+        # Close progress bar
+        progress_bar.close()
+        
+        # Print summary
+        if verbose_mode:
+            print("\n" + "="*80)
+            print("ASSET PROFILE EXPORT COMPLETED")
+            print("="*80)
+            print(f"Output file: {output_file}")
+            print(f"Total environment mappings processed: {len(env_mappings)}")
+            print(f"Successful: {successful}")
+            print(f"Failed: {failed}")
+            print(f"Total assets processed: {total_assets_processed}")
+            print("="*80)
+        else:
+            print(f"✅ Asset profile export completed: {successful} successful, {failed} failed")
+            print(f"Output written to: {output_file}")
+        
+        return True, f"Asset profiles exported to {output_file}"
         
     except Exception as e:
         error_msg = f"Error in asset-profile-export: {e}"
-        if not quiet_mode:
+        if verbose_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
+        return False, error_msg
 
 
-def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, dry_run: bool = False, quiet_mode: bool = True, verbose_mode: bool = False, max_threads: int = 5):
+def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, dry_run: bool = False, quiet_mode: bool = True, verbose_mode: bool = False, max_threads: int = 5, notification_mapping_csv: str = None, interactive_duplicate_resolution: bool = True):
     """Execute the asset-profile-import command with parallel processing."""
     import threading
     try:
@@ -409,8 +415,39 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                     print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-profiles-import-ready.csv")
             logger.error(error_msg)
             return
+        
+        # Handle duplicate resolution if enabled
+        if interactive_duplicate_resolution and not dry_run:
+            if not quiet_mode:
+                print("🔍 Checking for duplicate target UIDs...")
+            
+            resolved_csv_file = detect_and_resolve_duplicates(csv_file, quiet_mode, verbose_mode)
+            if resolved_csv_file and resolved_csv_file != csv_file:
+                csv_file = resolved_csv_file
+                if not quiet_mode:
+                    print(f"📄 Using deduplicated file: {csv_file}")
+            elif resolved_csv_file is None:
+                if not quiet_mode:
+                    print("❌ Failed to resolve duplicates. Aborting import.")
+                return
+        
+        # Load notification ID mapping if provided
+        notification_id_mapping = {}
+        if notification_mapping_csv:
+            try:
+                from .notification_operations import load_notification_id_mapping
+                notification_id_mapping = load_notification_id_mapping(notification_mapping_csv, quiet_mode, verbose_mode)
+                if not quiet_mode:
+                    print(f"📋 Loaded notification ID mapping with {len(notification_id_mapping)} mappings from: {notification_mapping_csv}")
+            except Exception as e:
+                if not quiet_mode:
+                    print(f"⚠️  Failed to load notification ID mapping: {e}")
+                logger.warning(f"Failed to load notification ID mapping: {e}")
+        
         if not quiet_mode:
             print(f"\nProcessing asset profile import from CSV file: {csv_file}")
+            if notification_mapping_csv:
+                print(f"📋 Using notification ID mapping from: {notification_mapping_csv}")
             if dry_run:
                 print("🔍 DRY RUN MODE - No actual API calls will be made")
                 print("📋 Will show detailed information about what would be executed")
@@ -419,38 +456,44 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
             if verbose_mode:
                 print("🔊 VERBOSE MODE - Detailed output including headers and responses")
             print("="*80)
-            # Show environment information in dry-run mode
-            if dry_run:
-                print("\n🌍 TARGET ENVIRONMENT INFORMATION:")
-                print(f"  Host: {client.host}")
-                if hasattr(client, 'target_tenant') and client.target_tenant:
-                    print(f"  Target Tenant: {client.target_tenant}")
-                else:
-                    print(f"  Source Tenant: {client.tenant} (will be used as target)")
-                print(f"  Authentication: Target access key and secret key")
-                print("="*80)
+        
         # Read CSV file
         import_mappings = []
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             header = next(reader)
-            if len(header) != 2 or header[0] != 'target-env' or header[1] != 'profile_json':
-                error_msg = f"Invalid CSV format. Expected header: ['target-env', 'profile_json'], got: {header}"
+            # Support both old format (2 columns) and new format (3 columns with source-env)
+            if len(header) < 2 or header[0] != 'target-env' or header[1] != 'profile_json':
+                error_msg = f"Invalid CSV format. Expected header: ['target-env', 'profile_json'] or ['target-env', 'profile_json', 'source-env'], got: {header}"
                 if not quiet_mode:
                     print(f"❌ {error_msg}")
                 logger.error(error_msg)
                 return
+            
+            # Check if we have the new format with source-env column
+            has_source_env = len(header) >= 3 and header[2] == 'source-env'
+            if not quiet_mode and has_source_env:
+                print(f"📋 Detected CSV format with source-env column (new format)")
+            elif not quiet_mode:
+                print(f"📋 Detected CSV format without source-env column (legacy format)")
             for row_num, row in enumerate(reader, start=2):
-                if len(row) != 2:
-                    logger.warning(f"Row {row_num}: Expected 2 columns, got {len(row)}")
+                # Handle both 2-column and 3-column formats
+                if len(row) < 2:
+                    logger.warning(f"Row {row_num}: Expected at least 2 columns, got {len(row)}")
                     continue
+                
                 target_env = row[0].strip()
                 profile_json = row[1].strip()
-                if target_env and profile_json:
-                    import_mappings.append((target_env, profile_json))
-                    logger.debug(f"Row {row_num}: Found target-env: {target_env}")
-                else:
+                
+                if not target_env or not profile_json:
                     logger.warning(f"Row {row_num}: Empty target-env or profile_json value")
+                    continue
+                
+                # Extract source_env if available (for logging purposes)
+                source_env = row[2].strip() if len(row) >= 3 and has_source_env else None
+                
+                import_mappings.append((target_env, profile_json))
+                logger.debug(f"Row {row_num}: Found target-env: {target_env}" + (f", source-env: {source_env}" if source_env else ""))
         if not import_mappings:
             logger.warning("No valid import mappings found in CSV file")
             return
@@ -543,6 +586,13 @@ def execute_asset_profile_import(csv_file: str, client, logger: logging.Logger, 
                         print(f"[Thread {thread_name}] Extracted asset ID: {asset_id}")
                     try:
                         profile_data = json.loads(profile_json)
+                        
+                        # Transform profile configuration if notification mapping is available
+                        if notification_id_mapping:
+                            from .notification_operations import transform_profile_configuration
+                            profile_data = transform_profile_configuration(
+                                profile_data, notification_id_mapping, quiet_mode, verbose_mode
+                            )
                     except json.JSONDecodeError as e:
                         error_msg = f"Invalid JSON in profile_json for UID {target_env}: {e}"
                         if not quiet_mode:
@@ -1794,7 +1844,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         logger.error(error_msg)
 
 
-def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view'], max_threads: int = 5):
+def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view'], max_threads: int = 5, source_context_id: str = None, target_context_id: str = None):
     """Execute the asset-profile-export command with parallel processing.
     
     Args:
@@ -1836,6 +1886,30 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             logger.warning("No environment mappings found in CSV file")
             return
         
+
+        
+        # Load notification ID mapping if context IDs are provided
+        notification_id_mapping = {}
+        if source_context_id and target_context_id:
+            try:
+                from .notification_operations import create_notification_id_mapping_csv, load_notification_id_mapping
+                if not quiet_mode:
+                    print(f"🔄 Creating notification ID mapping for context IDs: {source_context_id} -> {target_context_id}")
+                
+                # Create the mapping CSV
+                mapping_csv_path = create_notification_id_mapping_csv(client, logger, source_context_id, target_context_id, quiet_mode, verbose_mode)
+                
+                # Load the mapping
+                notification_id_mapping = load_notification_id_mapping(mapping_csv_path, quiet_mode, verbose_mode)
+                
+                if not quiet_mode:
+                    print(f"📋 Loaded {len(notification_id_mapping)} notification ID mappings")
+                    
+            except Exception as e:
+                if not quiet_mode:
+                    print(f"⚠️  Failed to create notification ID mapping: {e}")
+                logger.warning(f"Failed to create notification ID mapping: {e}")
+        
         # Generate default output file if not provided - use asset-import category
         if not output_file:
             output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
@@ -1845,6 +1919,8 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
             print(f"\nProcessing {len(env_mappings)} asset profile exports from CSV file (Parallel Mode)")
             print(f"Input file: {csv_file}")
             print(f"Output will be written to: {output_file}")
+            if source_context_id and target_context_id:
+                print(f"🔗 Notification ID mapping enabled: {source_context_id} -> {target_context_id}")
             if globals.GLOBAL_OUTPUT_DIR:
                 print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
             if verbose_mode:
@@ -1993,11 +2069,18 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
                         print(f"\n{thread_name} - Profile Response:")
                         print(json.dumps(profile_response, indent=2, ensure_ascii=False))
                     
-                    # Step 4: Write to temporary CSV file
+                    # Transform profile configuration if notification mapping is available
+                    if notification_id_mapping:
+                        from .notification_operations import transform_profile_configuration
+                        profile_response = transform_profile_configuration(
+                            profile_response, notification_id_mapping, quiet_mode, verbose_mode
+                        )
+                    
+                    # Step 4: Write to temporary CSV file - include source-env for duplicate resolution
                     profile_json = json.dumps(profile_response, ensure_ascii=False)
                     with open(temp_file.name, 'a', newline='', encoding='utf-8') as f:
                         writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-                        writer.writerow([target_env, profile_json])
+                        writer.writerow([target_env, profile_json, source_env])
                     
                     if verbose_mode:
                         print(f"{thread_name} - ✅ Written to file: {target_env}")
@@ -2085,8 +2168,8 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
-            # Write header
-            writer.writerow(['target-env', 'profile_json'])
+            # Write header - include source-env for duplicate resolution
+            writer.writerow(['target-env', 'profile_json', 'source-env'])
             
             # Write sorted data
             writer.writerows(all_rows)
@@ -3844,3 +3927,147 @@ def execute_transform_and_merge_sql_view(quiet_mode: bool, verbose_mode: bool, l
         if verbose_mode:
             import traceback
             traceback.print_exc()
+
+def detect_and_resolve_duplicates(csv_file: str, quiet_mode: bool = False, verbose_mode: bool = False):
+    """
+    Detect duplicate target UIDs in the asset-profiles-import-ready.csv file and let user choose which one to keep.
+    
+    Args:
+        csv_file: Path to the asset-profiles-import-ready.csv file
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        
+    Returns:
+        str: Path to the deduplicated CSV file
+    """
+    import csv
+    from pathlib import Path
+    
+    if not Path(csv_file).exists():
+        print(f"❌ CSV file not found: {csv_file}")
+        return None
+    
+    # Read all entries
+    entries = []
+    with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        header = next(reader)  # Skip header
+        for row_num, row in enumerate(reader, 2):
+            if len(row) >= 2:
+                target_env = row[0].strip()
+                profile_json = row[1].strip()
+                entries.append({
+                    'row_num': row_num,
+                    'target_env': target_env,
+                    'profile_json': profile_json,
+                    'raw_row': row  # Store the full row data
+                })
+    
+    # Group by target_env to find duplicates
+    target_groups = {}
+    for entry in entries:
+        target_env = entry['target_env']
+        if target_env not in target_groups:
+            target_groups[target_env] = []
+        target_groups[target_env].append(entry)
+    
+    # Find duplicates
+    duplicates = {target_env: entries for target_env, entries in target_groups.items() if len(entries) > 1}
+    
+    if not duplicates:
+        if not quiet_mode:
+            print("✅ No duplicate target UIDs found. Proceeding with import...")
+        return csv_file
+    
+    if not quiet_mode:
+        print(f"\n🔍 Found {len(duplicates)} target UIDs with duplicate configurations:")
+        print("="*80)
+    
+    # Let user choose for each duplicate
+    selected_entries = []
+    skipped_targets = set()
+    
+    for target_env, entries in duplicates.items():
+        if not quiet_mode:
+            print(f"\n📋 Target UID: {target_env}")
+            print(f"   Found {len(entries)} configurations:")
+            
+            for i, entry in enumerate(entries, 1):
+                # Extract source info from profile JSON for display
+                try:
+                    import json
+                    profile_data = json.loads(entry['profile_json'])
+                    profile_settings = profile_data.get("profileSettingsConfigs", {})
+                    
+                    # Check for notification channels
+                    notification_channels = profile_settings.get("profileNotificationChannels", {})
+                    has_notifications = bool(notification_channels and notification_channels.get("configuredNotificationGroupIds"))
+                    
+                    # Check for schedule
+                    has_schedule = bool(profile_settings.get("schedule"))
+                    
+                    # Check for profiling enabled
+                    is_enabled = profile_settings.get("enabled", False)
+                    
+                    # Try to extract source UID from the CSV row if it has 3 columns
+                    source_uid = "Unknown"
+                    if len(entry.get('raw_row', [])) >= 3:
+                        source_uid = entry['raw_row'][2].strip()
+                    
+                    print(f"   Option {i}:")
+                    print(f"     - Source UID: {source_uid}")
+                    print(f"     - Notifications: {'✅' if has_notifications else '❌'}")
+                    print(f"     - Schedule: {'✅' if has_schedule else '❌'}")
+                    print(f"     - Profiling Enabled: {'✅' if is_enabled else '❌'}")
+                    
+                except Exception as e:
+                    print(f"   Option {i}: Row {entry['row_num']} (Could not parse configuration: {e})")
+        
+        # Get user input
+        while True:
+            try:
+                choice = input(f"\n🤔 Which configuration do you want to keep for '{target_env}'? (1-{len(entries)}, or 'skip' to skip this target): ").strip()
+                
+                if choice.lower() == 'skip':
+                    skipped_targets.add(target_env)
+                    if not quiet_mode:
+                        print(f"   ⏭️  Skipping {target_env}")
+                    break
+                
+                choice_num = int(choice)
+                if 1 <= choice_num <= len(entries):
+                    selected_entry = entries[choice_num - 1]
+                    selected_entries.append(selected_entry)
+                    if not quiet_mode:
+                        print(f"   ✅ Selected Option {choice_num}")
+                    break
+                else:
+                    print(f"   ❌ Please enter a number between 1 and {len(entries)}, or 'skip'")
+            except ValueError:
+                print(f"   ❌ Please enter a valid number between 1 and {len(entries)}, or 'skip'")
+    
+    # Add non-duplicate entries
+    for target_env, entries in target_groups.items():
+        if len(entries) == 1 and target_env not in skipped_targets:
+            selected_entries.append(entries[0])
+    
+    # Create deduplicated CSV - use the same format as the input file
+    output_file = csv_file.replace('.csv', '_deduplicated.csv')
+    with open(output_file, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        writer.writerow(header)  # Write header (preserves format)
+        for entry in selected_entries:
+            # Write the same format as input (with or without source-env)
+            if len(entry['raw_row']) >= 3:
+                writer.writerow([entry['target_env'], entry['profile_json'], entry['raw_row'][2]])
+            else:
+                writer.writerow([entry['target_env'], entry['profile_json']])
+    
+    if not quiet_mode:
+        print(f"\n✅ Deduplication complete!")
+        print(f"   📊 Original entries: {len(entries)}")
+        print(f"   📊 Selected entries: {len(selected_entries)}")
+        print(f"   📊 Skipped targets: {len(skipped_targets)}")
+        print(f"   📄 Output file: {output_file}")
+    
+    return output_file

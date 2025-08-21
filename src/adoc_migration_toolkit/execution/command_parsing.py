@@ -161,6 +161,8 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     parallel_mode = False
     allowed_types = ['table', 'sql_view', 'view']
     max_threads = 5
+    source_context_id = None
+    target_context_id = None
     # Check for flags and options
     i = 1
     while i < len(parts):
@@ -200,6 +202,18 @@ def parse_asset_profile_export_command(command: str) -> tuple:
                 parts.pop(i)
             except (ValueError, IndexError):
                 raise ValueError("Invalid max threads. Must be a positive integer")
+        elif parts[i] == '--source-context':
+            if i + 1 >= len(parts):
+                raise ValueError("--source-context requires a value")
+            source_context_id = parts[i + 1]
+            parts.pop(i)
+            parts.pop(i)
+        elif parts[i] == '--target-context':
+            if i + 1 >= len(parts):
+                raise ValueError("--target-context requires a value")
+            target_context_id = parts[i + 1]
+            parts.pop(i)
+            parts.pop(i)
         else:
             i += 1
     
@@ -248,7 +262,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     if not output_file:
         output_file = get_output_file_path(csv_file, "asset-profiles-import-ready.csv", category="asset-import")
 
-    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types, max_threads
+    return csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types, max_threads, source_context_id, target_context_id
 
 def parse_asset_profile_import_command(command: str) -> tuple:
     """Parse an asset-profile-import command string into components.
@@ -268,6 +282,8 @@ def parse_asset_profile_import_command(command: str) -> tuple:
     quiet_mode = False  # Default to quiet mode
     verbose_mode = False
     max_threads = 5
+    notification_mapping_csv = None
+    interactive_duplicate_resolution = True
 
     # Check for flags and options
     i = 1
@@ -294,6 +310,15 @@ def parse_asset_profile_import_command(command: str) -> tuple:
                 parts.pop(i)
             except (ValueError, IndexError):
                 raise ValueError("Invalid max threads. Must be a positive integer")
+        elif parts[i] == '--notification-mapping':
+            if i + 1 >= len(parts):
+                raise ValueError("--notification-mapping requires a value")
+            notification_mapping_csv = parts[i + 1]
+            parts.pop(i)
+            parts.pop(i)
+        elif parts[i] == '--no-duplicate-resolution':
+            interactive_duplicate_resolution = False
+            parts.remove('--no-duplicate-resolution')
         elif i == 1 and not parts[i].startswith('--'):
             # This is the CSV file argument (first non-flag argument)
             csv_file = parts[i]
@@ -316,7 +341,7 @@ def parse_asset_profile_import_command(command: str) -> tuple:
             else:
                 csv_file = "asset-import/asset-profiles-import-ready.csv"  # Fallback
 
-    return csv_file, dry_run, quiet_mode, verbose_mode, max_threads
+    return csv_file, dry_run, quiet_mode, verbose_mode, max_threads, notification_mapping_csv, interactive_duplicate_resolution
 
 def parse_asset_config_export_command(command: str) -> tuple:
     """Parse an asset-config-export command string into components.
@@ -1336,3 +1361,94 @@ def parse_transform_and_merge_command(command: str) -> tuple:
         raise ValueError("Missing required argument: --string-transform")
     
     return string_transforms, quiet_mode, verbose_mode 
+
+def parse_create_notification_mapping_command(command: str) -> tuple:
+    """Parse a create-notification-mapping command string into components.
+
+    Args:
+        command: Command string like "create-notification-mapping --source-context <id> --target-context <id> [--quiet] [--verbose]"
+
+    Returns:
+        Tuple of (source_context_id, target_context_id, quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'create-notification-mapping':
+        return None, None, False, False
+
+    source_context_id = None
+    target_context_id = None
+    quiet_mode = False
+    verbose_mode = False
+
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--source-context':
+            if i + 1 >= len(parts):
+                raise ValueError("--source-context requires a value")
+            source_context_id = parts[i + 1]
+            parts.pop(i)  # Remove --source-context
+            parts.pop(i)  # Remove the context ID value
+        elif parts[i] == '--target-context':
+            if i + 1 >= len(parts):
+                raise ValueError("--target-context requires a value")
+            target_context_id = parts[i + 1]
+            parts.pop(i)  # Remove --target-context
+            parts.pop(i)  # Remove the context ID value
+        elif parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        else:
+            i += 1
+
+    return source_context_id, target_context_id, quiet_mode, verbose_mode
+
+
+def parse_resolve_duplicates_command(command: str) -> tuple:
+    """Parse a resolve-duplicates command string into components.
+
+    Args:
+        command: Command string like "resolve-duplicates [<csv_file>] [--quiet] [--verbose]"
+
+    Returns:
+        Tuple of (csv_file, quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'resolve-duplicates':
+        return None, False, False
+
+    csv_file = None
+    quiet_mode = False
+    verbose_mode = False
+
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif i == 1 and not parts[i].startswith('--'):
+            # This is the CSV file argument (first non-flag argument)
+            csv_file = parts[i]
+            parts.remove(parts[i])
+        else:
+            i += 1
+
+    # If no CSV file specified, use default
+    if not csv_file:
+        if globals.GLOBAL_OUTPUT_DIR:
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-profiles-import-ready.csv")
+        else:
+            csv_file = "asset-import/asset-profiles-import-ready.csv"
+
+    return csv_file, quiet_mode, verbose_mode 

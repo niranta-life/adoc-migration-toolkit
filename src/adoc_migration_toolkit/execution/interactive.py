@@ -265,7 +265,7 @@ def show_command_help(command_name: str):
         print("      • Processes only assets that have valid segments configuration")
     
     elif command_name == 'asset-profile-export':
-        print(f"\n{BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel]")
+        print(f"\n{BOLD}asset-profile-export{RESET} [<csv_file>] [--output-file <file>] [--quiet] [--verbose] [--parallel] [--source-context <id>] [--target-context <id>]")
         print("    Description: Export asset profiles from source environment to CSV file")
         print("    Arguments:")
         print("      csv_file: Path to CSV file with source-env and target-env mappings (optional)")
@@ -273,17 +273,21 @@ def show_command_help(command_name: str):
         print("      --quiet: Suppress console output, show only summary (default)")
         print("      --verbose: Show detailed output including headers and responses")
         print("      --parallel: Use parallel processing for faster export (max 5 threads)")
+        print("      --source-context: Source context ID for notification mapping (optional)")
+        print("      --target-context: Target context ID for notification mapping (optional)")
         print("    Examples:")
         print("      asset-profile-export")
         print("      asset-profile-export <output-dir>/asset-export/asset_uids.csv")
         print("      asset-profile-export uids.csv --output-file profiles.csv --verbose")
         print("      asset-profile-export --parallel")
+        print("      asset-profile-export --source-context 1643800761 --target-context 1080269831")
         print("    Behavior:")
         print("      • If no CSV file specified, uses default from output directory")
         print("      • Default input: <output-dir>/asset-export/asset_uids.csv")
         print("      • Default output: <output-dir>/asset-import/asset-profiles-import-ready.csv")
         print("      • Reads source-env and target-env mappings from CSV file")
         print("      • Makes API calls to get asset profiles from source environment")
+        print("      • Maps notification group IDs from source to target if context IDs provided")
         print("      • Writes profile JSON data to output CSV file")
         print("      • Shows minimal output by default, use --verbose for detailed information")
         print("      • Parallel mode: Uses up to 5 threads to process assets simultaneously")
@@ -291,21 +295,28 @@ def show_command_help(command_name: str):
         print("      • Parallel mode: Significantly faster for large asset sets")
     
     elif command_name == 'asset-profile-import':
-        print(f"\n{BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose]")
+        print(f"\n{BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--max-threads <num>] [--notification-mapping <csv_file>] [--no-duplicate-resolution]")
         print("    Description: Import asset profiles to target environment from CSV file")
         print("    Arguments:")
         print("      csv_file: Path to CSV file with target-env and profile_json (optional)")
         print("      --dry-run: Preview changes without making API calls")
         print("      --quiet: Suppress console output (default)")
         print("      --verbose: Show detailed output including headers and responses")
+        print("      --max-threads: Maximum number of threads for parallel processing (default: 5)")
+        print("      --notification-mapping: Path to notification ID mapping CSV file (optional)")
+        print("      --no-duplicate-resolution: Skip interactive duplicate resolution")
         print("    Examples:")
         print("      asset-profile-import")
         print("      asset-profile-import <output-dir>/asset-import/asset-profiles-import-ready.csv")
         print("      asset-profile-import profiles.csv --dry-run --verbose")
+        print("      asset-profile-import --notification-mapping notification_id_mapping.csv")
+        print("      asset-profile-import --no-duplicate-resolution")
         print("    Behavior:")
         print("      • If no CSV file specified, uses default from output directory")
         print("      • Default input: <output-dir>/asset-import/asset-profiles-import-ready.csv")
+        print("      • Automatically detects duplicate target UIDs and prompts for selection")
         print("      • Reads target-env and profile_json from CSV file")
+        print("      • Maps notification group IDs from source to target if mapping CSV provided")
         print("      • Makes API calls to update asset profiles in target environment")
         print("      • Supports dry-run mode for previewing changes")
     
@@ -906,6 +917,27 @@ def show_command_help(command_name: str):
         print("      • Parallel mode: Uses up to 5 threads to process groups simultaneously")
         print("      • Parallel mode: Each thread has its own progress bar")
         print("      • Parallel mode: Significantly faster for large notification sets")
+    elif command_name == 'create-notification-mapping':
+        print(f"\n{BOLD}create-notification-mapping{RESET} --source-context <id> --target-context <id> [--quiet] [--verbose]")
+        print("    Description: Create a notification ID mapping CSV file for the specified source and target contexts.")
+        print("    Arguments:")
+        print("      --source-context <id>: Source context ID (required)")
+        print("      --target-context <id>: Target context ID (required)")
+        print("      --quiet: Suppress console output, show only summary")
+        print("      --verbose: Show detailed output including API calls and responses")
+        print("    Examples:")
+        print("      create-notification-mapping --source-context 1 --target-context 2")
+        print("      create-notification-mapping --source-context 1 --target-context 2 --quiet")
+        print("      create-notification-mapping --source-context 1 --target-context 2 --verbose")
+        print("    Behavior:")
+        print("      • Fetches notification groups from both source and target environments")
+        print("      • Compares notification group definitions by name and type")
+        print("      • Generates a CSV file with notification ID mappings")
+        print("      • Shows progress bar in quiet mode")
+        print("      • Shows detailed API calls in verbose mode")
+        print("      • Parallel mode: Uses up to 5 threads to process groups simultaneously")
+        print("      • Parallel mode: Each thread has its own progress bar")
+        print("      • Parallel mode: Significantly faster for large notification sets")
     else:
         print(f"\n❌ Unknown command: {command_name}")
         print("💡 Use 'help' to see all available commands")
@@ -1364,24 +1396,24 @@ def run_interactive(args):
                 # Check if it's an asset-profile-export command
                 if command.lower().startswith('asset-profile-export'):
                     from .command_parsing import parse_asset_profile_export_command
-                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types, max_threads = parse_asset_profile_export_command(command)
+                    csv_file, output_file, quiet_mode, verbose_mode, parallel_mode, allowed_types, max_threads, source_context_id, target_context_id = parse_asset_profile_export_command(command)
                     if csv_file:
                         if parallel_mode:
-                            execute_asset_profile_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types, max_threads)
+                            execute_asset_profile_export_parallel(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types, max_threads, source_context_id, target_context_id)
                         else:
-                            execute_asset_profile_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types)
+                            execute_asset_profile_export(csv_file, client, logger, output_file, quiet_mode, verbose_mode, allowed_types, source_context_id, target_context_id)
                     continue
                 
                 # Check if it's an asset-profile-import command
                 if command.lower().startswith('asset-profile-import'):
                     from .command_parsing import parse_asset_profile_import_command
-                    csv_file, dry_run, quiet_mode, verbose_mode, max_threads = parse_asset_profile_import_command(command)
+                    csv_file, dry_run, quiet_mode, verbose_mode, max_threads, notification_mapping_csv, interactive_duplicate_resolution = parse_asset_profile_import_command(command)
                     if csv_file:
                         # If execute_asset_profile_import supports max_threads, pass it; otherwise, ignore
                         try:
-                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode, max_threads=max_threads)
+                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode, max_threads, notification_mapping_csv, interactive_duplicate_resolution)
                         except TypeError:
-                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode, max_threads=max_threads)
+                            execute_asset_profile_import(csv_file, client, logger, dry_run, quiet_mode, verbose_mode, max_threads)
                     continue
                 
                 # Check if it's an asset-list-export command (check this first to avoid conflicts)
@@ -1536,6 +1568,32 @@ def run_interactive(args):
                         precheck_on_notifications(client, logger, source_context_id, target_context_id, assembly_ids, quiet_mode, verbose_mode)
                     else:
                         precheck_on_notifications(client, logger, source_context_id, target_context_id, assembly_ids, quiet_mode, verbose_mode)
+                    continue
+
+                # Check if it's a create-notification-mapping command
+                if command.lower().startswith('create-notification-mapping'):
+                    from .command_parsing import parse_create_notification_mapping_command
+                    source_context_id, target_context_id, quiet_mode, verbose_mode = parse_create_notification_mapping_command(command)
+                    if source_context_id and target_context_id:
+                        from .notification_operations import create_notification_id_mapping_csv
+                        mapping_file = create_notification_id_mapping_csv(client, logger, source_context_id, target_context_id, quiet_mode, verbose_mode)
+                        if mapping_file:
+                            print(f"✅ Notification ID mapping created: {mapping_file}")
+                    else:
+                        print("❌ Both --source-context and --target-context are required")
+                    continue
+
+                # Check if it's a resolve-duplicates command
+                if command.lower().startswith('resolve-duplicates'):
+                    from .command_parsing import parse_resolve_duplicates_command
+                    csv_file, quiet_mode, verbose_mode = parse_resolve_duplicates_command(command)
+                    if csv_file:
+                        from .asset_operations import detect_and_resolve_duplicates
+                        resolved_file = detect_and_resolve_duplicates(csv_file, quiet_mode, verbose_mode)
+                        if resolved_file:
+                            print(f"✅ Duplicate resolution complete: {resolved_file}")
+                    else:
+                        print("❌ Please specify a CSV file to process")
                     continue
 
                 # Check if it's a transform-and-merge command
