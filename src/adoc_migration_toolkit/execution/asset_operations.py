@@ -3980,7 +3980,7 @@ def detect_and_resolve_duplicates(csv_file: str, quiet_mode: bool = False, verbo
         return csv_file
     
     if not quiet_mode:
-        print(f"\n🔍 Found {len(duplicates)} target UIDs with duplicate configurations:")
+        print(f"\n🔍 Found {len(duplicates)} target UIDs which are pointing to multiple UIDs from the source. So we have duplicate configurations present:")
         print("="*80)
     
     # Let user choose for each duplicate
@@ -4071,3 +4071,411 @@ def detect_and_resolve_duplicates(csv_file: str, quiet_mode: bool = False, verbo
         print(f"   📄 Output file: {output_file}")
     
     return output_file
+
+
+def verify_profile_configurations_after_import(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5):
+    """
+    Verify that profile configurations were successfully updated in the target environment.
+    
+    Args:
+        csv_file: Path to the CSV file used for import (to get target UIDs)
+        client: API client for making requests
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        max_threads: Maximum number of threads for parallel processing
+    
+    Returns:
+        dict: Verification results with success/failure counts
+    """
+    import csv
+    from pathlib import Path
+    
+    if not Path(csv_file).exists():
+        if not quiet_mode:
+            print(f"❌ CSV file not found: {csv_file}")
+        return None
+    
+    if not quiet_mode:
+        print(f"\n🔍 Verifying profile configurations in target environment...")
+        print(f"📄 Reading target UIDs from: {csv_file}")
+        print("="*80)
+    
+    # Read target UIDs from CSV
+    target_uids = []
+    with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        header = next(reader)  # Skip header
+        for row_num, row in enumerate(reader, start=2):
+            if len(row) >= 1:
+                target_uid = row[0].strip()
+                if target_uid:
+                    target_uids.append(target_uid)
+    
+    if not target_uids:
+        if not quiet_mode:
+            print("❌ No target UIDs found in CSV file")
+        return None
+    
+    if not quiet_mode:
+        print(f"📊 Found {len(target_uids)} target UIDs to verify")
+    
+    # Threading setup
+    num_threads = max_threads
+    min_assets_per_thread = 10
+    if len(target_uids) < min_assets_per_thread:
+        num_threads = 1
+        assets_per_thread = len(target_uids)
+    else:
+        num_threads = min(max_threads, (len(target_uids) + min_assets_per_thread - 1) // min_assets_per_thread)
+        assets_per_thread = (len(target_uids) + num_threads - 1) // num_threads
+
+    if not quiet_mode:
+        print(f"Using {num_threads} threads to verify {len(target_uids)} profiles")
+        print(f"Assets per thread: {assets_per_thread}")
+        print("="*80)
+    
+    # Verification results
+    verification_results = {
+        'total_checked': 0,
+        'successful': 0,
+        'failed': 0,
+        'asset_not_found': 0,
+        'profile_not_found': 0,
+        'details': []
+    }
+    
+    # Thread synchronization
+    lock = threading.Lock()
+    thread_results = []
+    
+    def process_verification_chunk(thread_id, chunk):
+        thread_successful = 0
+        thread_failed = 0
+        thread_asset_not_found = 0
+        thread_profile_not_found = 0
+        thread_details = []
+        
+        thread_name = f"Thread {thread_id}"
+        if not verbose_mode:
+            thread_pbar = create_progress_bar(
+                total=len(chunk),
+                desc=thread_name,
+                unit="profiles",
+                disable=quiet_mode,
+                position=thread_id,
+                leave=False
+            )
+        else:
+            thread_pbar = None
+        
+        for i, target_uid in enumerate(chunk):
+            if verbose_mode:
+                print(f"\n[{thread_id}] [{i+1}/{len(chunk)}] Verifying: {target_uid}")
+            
+            try:
+                # Step 1: Get asset ID from target UID
+                if verbose_mode:
+                    print(f"   GET /catalog-server/api/assets?uid={target_uid}")
+                
+                asset_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+                
+                if not asset_response or 'data' not in asset_response or not asset_response['data']:
+                    error_msg = f"Asset not found for UID: {target_uid}"
+                    if verbose_mode:
+                        print(f"   ❌ {error_msg}")
+                    thread_asset_not_found += 1
+                    thread_details.append({
+                        'target_uid': target_uid,
+                        'status': 'asset_not_found',
+                        'error': error_msg
+                    })
+                    if thread_pbar:
+                        thread_pbar.update(1)
+                    continue
+                
+                asset_id = asset_response['data'][0]['id']
+                if verbose_mode:
+                    print(f"   ✅ Found asset ID: {asset_id}")
+                
+                # Step 2: Get profile configuration from target
+                if verbose_mode:
+                    print(f"   GET /catalog-server/api/profile/{asset_id}/config")
+                
+                profile_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/profile/{asset_id}/config",
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+                
+                if not profile_response:
+                    error_msg = f"Profile configuration not found for asset ID: {asset_id}"
+                    if verbose_mode:
+                        print(f"   ❌ {error_msg}")
+                    thread_profile_not_found += 1
+                    thread_details.append({
+                        'target_uid': target_uid,
+                        'asset_id': asset_id,
+                        'status': 'profile_not_found',
+                        'error': error_msg
+                    })
+                    if thread_pbar:
+                        thread_pbar.update(1)
+                    continue
+                
+                # Step 3: Verify profile configuration has expected structure
+                profile_settings = profile_response.get("profileSettingsConfigs", {})
+                notification_channels = profile_settings.get("profileNotificationChannels", {})
+                
+                # Check for key configuration elements
+                has_notifications = bool(notification_channels and notification_channels.get("configuredNotificationGroupIds"))
+                has_schedule = bool(profile_settings.get("schedule"))
+                is_enabled = profile_settings.get("enabled", False)
+                
+                if verbose_mode:
+                    print(f"   📋 Configuration details:")
+                    print(f"      - Notifications: {'✅' if has_notifications else '❌'}")
+                    print(f"      - Schedule: {'✅' if has_schedule else '❌'}")
+                    print(f"      - Enabled: {'✅' if is_enabled else '❌'}")
+                    if has_notifications:
+                        notification_ids = notification_channels.get("configuredNotificationGroupIds", [])
+                        print(f"      - Notification IDs: {notification_ids}")
+                
+                # Consider it successful if we can retrieve the configuration
+                thread_successful += 1
+                thread_details.append({
+                    'target_uid': target_uid,
+                    'asset_id': asset_id,
+                    'status': 'success',
+                    'has_notifications': has_notifications,
+                    'has_schedule': has_schedule,
+                    'is_enabled': is_enabled,
+                    'notification_ids': notification_channels.get("configuredNotificationGroupIds", []) if has_notifications else []
+                })
+                
+                if verbose_mode:
+                    print(f"   ✅ Configuration verified successfully")
+                
+            except Exception as e:
+                error_msg = f"Error verifying {target_uid}: {str(e)}"
+                if verbose_mode:
+                    print(f"   ❌ {error_msg}")
+                thread_failed += 1
+                thread_details.append({
+                    'target_uid': target_uid,
+                    'status': 'error',
+                    'error': error_msg
+                })
+            
+            if thread_pbar:
+                thread_pbar.update(1)
+        
+        if thread_pbar:
+            thread_pbar.close()
+        
+        # Update global results with thread lock
+        with lock:
+            verification_results['total_checked'] += len(chunk)
+            verification_results['successful'] += thread_successful
+            verification_results['failed'] += thread_failed
+            verification_results['asset_not_found'] += thread_asset_not_found
+            verification_results['profile_not_found'] += thread_profile_not_found
+            verification_results['details'].extend(thread_details)
+            thread_results.append({
+                'thread_id': thread_id,
+                'successful': thread_successful,
+                'failed': thread_failed,
+                'asset_not_found': thread_asset_not_found,
+                'profile_not_found': thread_profile_not_found,
+                'total_assets': len(chunk)
+            })
+    
+    # Create and start threads
+    threads = []
+    for thread_id in range(num_threads):
+        start_index = thread_id * assets_per_thread
+        end_index = min(start_index + assets_per_thread, len(target_uids))
+        chunk = target_uids[start_index:end_index]
+        
+        if chunk:  # Only create thread if there are assets to process
+            thread = threading.Thread(target=process_verification_chunk, args=(thread_id, chunk))
+            threads.append(thread)
+            thread.start()
+    
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
+    
+    # Print thread statistics
+    if thread_results and not quiet_mode:
+        print(f"\nThread Statistics:")
+        for result in thread_results:
+            thread_name = f"Thread {result['thread_id']}"
+            print(f"  {thread_name}: {result['successful']} successful, {result['failed']} failed, {result['asset_not_found']} asset not found, {result['profile_not_found']} profile not found, {result['total_assets']} assets")
+    
+    # Generate CSV report
+    csv_report_path = generate_verification_csv_report(verification_results, csv_file, quiet_mode, verbose_mode)
+    
+    # Print summary
+    if not quiet_mode:
+        print(f"\n" + "="*80)
+        print("PROFILE CONFIGURATION VERIFICATION COMPLETED")
+        print("="*80)
+        print(f"📊 Total checked: {verification_results['total_checked']}")
+        print(f"✅ Successful: {verification_results['successful']}")
+        print(f"❌ Failed: {verification_results['failed']}")
+        print(f"🔍 Asset not found: {verification_results['asset_not_found']}")
+        print(f"📋 Profile not found: {verification_results['profile_not_found']}")
+        
+        if csv_report_path:
+            print(f"📄 Detailed CSV report: {csv_report_path}")
+        
+        # Show some successful configurations as examples
+        successful_configs = [d for d in verification_results['details'] if d['status'] == 'success']
+        if successful_configs:
+            print(f"\n📋 Sample successful configurations:")
+            for i, config in enumerate(successful_configs[:3], 1):  # Show first 3
+                print(f"   {i}. {config['target_uid']}")
+                print(f"      - Asset ID: {config['asset_id']}")
+                print(f"      - Notifications: {'✅' if config['has_notifications'] else '❌'}")
+                print(f"      - Schedule: {'✅' if config['has_schedule'] else '❌'}")
+                print(f"      - Enabled: {'✅' if config['is_enabled'] else '❌'}")
+                if config['has_notifications']:
+                    print(f"      - Notification IDs: {config['notification_ids']}")
+        
+        # Show failed configurations
+        failed_configs = [d for d in verification_results['details'] if d['status'] != 'success']
+        if failed_configs:
+            print(f"\n❌ Failed verifications:")
+            for config in failed_configs[:5]:  # Show first 5
+                print(f"   - {config['target_uid']}: {config['error']}")
+    
+    return verification_results
+
+
+def generate_verification_csv_report(verification_results: dict, input_csv_file: str, quiet_mode: bool = False, verbose_mode: bool = False) -> str:
+    """
+    Generate a detailed CSV report of verification results.
+    
+    Args:
+        verification_results: Results from verify_profile_configurations_after_import
+        input_csv_file: Original CSV file path (for naming the report)
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    
+    Returns:
+        str: Path to the generated CSV report file
+    """
+    import csv
+    from pathlib import Path
+    from datetime import datetime
+    
+    if not verification_results or not verification_results['details']:
+        if not quiet_mode:
+            print("❌ No verification results to generate CSV report")
+        return None
+    
+    # Generate output file path
+    input_path = Path(input_csv_file)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create output directory if it doesn't exist
+    output_dir = input_path.parent / "verification-reports"
+    output_dir.mkdir(exist_ok=True)
+    
+    # Generate report filename
+    report_filename = f"profile_verification_report_{timestamp}.csv"
+    report_path = output_dir / report_filename
+    
+    if not quiet_mode:
+        print(f"\n📄 Generating detailed CSV report: {report_path}")
+    
+    # Write CSV report
+    with open(report_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        
+        # Write header
+        writer.writerow([
+            'Target_UID',
+            'Asset_ID',
+            'Verification_Status',
+            'Has_Notifications',
+            'Has_Schedule',
+            'Profiling_Enabled',
+            'Notification_Group_IDs',
+            'Error_Message',
+            'Verification_Details'
+        ])
+        
+        # Write data rows
+        for detail in verification_results['details']:
+            target_uid = detail.get('target_uid', 'N/A')
+            asset_id = detail.get('asset_id', 'N/A')
+            status = detail.get('status', 'unknown')
+            
+            # Format status for better readability
+            status_display = {
+                'success': '✅ PASSED',
+                'asset_not_found': '❌ ASSET_NOT_FOUND',
+                'profile_not_found': '❌ PROFILE_NOT_FOUND',
+                'error': '❌ ERROR'
+            }.get(status, status.upper())
+            
+            # Extract configuration details for successful verifications
+            has_notifications = 'Yes' if detail.get('has_notifications', False) else 'No'
+            has_schedule = 'Yes' if detail.get('has_schedule', False) else 'No'
+            profiling_enabled = 'Yes' if detail.get('is_enabled', False) else 'No'
+            notification_ids = detail.get('notification_ids', [])
+            notification_ids_str = ', '.join(map(str, notification_ids)) if notification_ids else 'None'
+            
+            # Error message for failed verifications
+            error_message = detail.get('error', '')
+            
+            # Additional verification details
+            verification_details = []
+            if status == 'success':
+                verification_details.append(f"Asset ID: {asset_id}")
+                verification_details.append(f"Notifications: {has_notifications}")
+                verification_details.append(f"Schedule: {has_schedule}")
+                verification_details.append(f"Enabled: {profiling_enabled}")
+                if notification_ids:
+                    verification_details.append(f"Notification IDs: {notification_ids_str}")
+            else:
+                verification_details.append(f"Error: {error_message}")
+            
+            verification_details_str = ' | '.join(verification_details)
+            
+            # Write row
+            writer.writerow([
+                target_uid,
+                asset_id,
+                status_display,
+                has_notifications,
+                has_schedule,
+                profiling_enabled,
+                notification_ids_str,
+                error_message,
+                verification_details_str
+            ])
+    
+    if not quiet_mode:
+        print(f"✅ CSV report generated successfully!")
+        print(f"   📊 Total records: {len(verification_results['details'])}")
+        
+        # Show summary statistics
+        successful_count = len([d for d in verification_results['details'] if d['status'] == 'success'])
+        failed_count = len([d for d in verification_results['details'] if d['status'] != 'success'])
+        
+        print(f"   ✅ Passed: {successful_count}")
+        print(f"   ❌ Failed: {failed_count}")
+        
+        if verbose_mode:
+            print(f"   📁 Report location: {report_path}")
+    
+    return str(report_path)

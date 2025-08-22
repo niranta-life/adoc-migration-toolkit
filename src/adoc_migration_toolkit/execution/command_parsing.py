@@ -1451,4 +1451,61 @@ def parse_resolve_duplicates_command(command: str) -> tuple:
         else:
             csv_file = "asset-import/asset-profiles-import-ready.csv"
 
-    return csv_file, quiet_mode, verbose_mode 
+    return csv_file, quiet_mode, verbose_mode
+
+
+def parse_verify_profiles_command(command: str) -> tuple:
+    """Parse a verify-profiles command string into components.
+    
+    Args:
+        command: Command string like "verify-profiles [<csv_file>] [--quiet] [--verbose] [--max-threads <threads>]"
+        
+    Returns:
+        Tuple of (csv_file, quiet_mode, verbose_mode, max_threads)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'verify-profiles':
+        return None, False, False, 5
+    
+    csv_file = None
+    quiet_mode = False
+    verbose_mode = False
+    max_threads = 5  # Default value
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--quiet':
+            quiet_mode = True
+            verbose_mode = False  # Quiet overrides verbose
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            quiet_mode = False  # Verbose overrides quiet
+            parts.remove('--verbose')
+        elif parts[i] == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads <= 0:
+                    raise ValueError("--max-threads must be a positive integer")
+            except ValueError:
+                raise ValueError("--max-threads must be a positive integer")
+            parts.pop(i)  # Remove --max-threads
+            parts.pop(i)  # Remove the thread count value
+        elif i == 1 and not parts[i].startswith('--'):
+            # This is the CSV file argument (first non-flag argument)
+            csv_file = parts[i]
+            parts.remove(parts[i])
+        else:
+            i += 1
+    
+    # If no CSV file specified, use default
+    if not csv_file:
+        if globals.GLOBAL_OUTPUT_DIR:
+            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-profiles-import-ready.csv")
+        else:
+            csv_file = "asset-import/asset-profiles-import-ready.csv"
+    
+    return csv_file, quiet_mode, verbose_mode, max_threads 

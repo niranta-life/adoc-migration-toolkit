@@ -118,6 +118,10 @@ def show_interactive_help():
     print("    Export asset profiles from source environment to CSV file")
     print(f"  {BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--allowed-types <types>]")
     print("    Import asset profiles to target environment from CSV file")
+    print(f"  {BOLD}verify-profiles{RESET} [<csv_file>] [--quiet] [--verbose] [--max-threads <threads>]")
+    print("    Verify that profile configurations were successfully updated in the target environment")
+    print(f"  {BOLD}resolve-duplicates{RESET} [<csv_file>] [--quiet] [--verbose]")
+    print("    Interactively resolve duplicate target UIDs in an asset profile CSV file")
     print(f"  {BOLD}profile-check{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose]")
     print("    Checks the assets configured with the provided policy type and not yet profiled.")
     print(f"  {BOLD}profile-run{RESET} [<csv_file>] [--run-profile] [--dry-run] [--quiet] [--verbose]")
@@ -152,6 +156,8 @@ def show_interactive_help():
     print(f"\n{BOLD}🔧 NOTIFICATION COMMANDS:{RESET}")
     print(f"  {BOLD}notifications-check{RESET} --source-context <id> --target-context <id> --assembly-ids <ids> [--quiet] [--verbose] [--parallel] [--page-size <size>]")
     print("    Compare notification groups between source and target environments and report differences.")
+    print(f"  {BOLD}create-notification-mapping{RESET} --source-context <id> --target-context <id> [--quiet] [--verbose]")
+    print("    Create a notification ID mapping CSV file for the specified source and target contexts.")
 
     print(f"\n{BOLD}🔧 VCS COMMANDS:{RESET}")
     print(f"  {BOLD}vcs-config{RESET} [--vcs-type <type>] [--remote-url <url>] [--username <user>] [--token <token>] [options]")
@@ -938,6 +944,47 @@ def show_command_help(command_name: str):
         print("      • Parallel mode: Uses up to 5 threads to process groups simultaneously")
         print("      • Parallel mode: Each thread has its own progress bar")
         print("      • Parallel mode: Significantly faster for large notification sets")
+    elif command_name == 'resolve-duplicates':
+        print(f"\n{BOLD}resolve-duplicates{RESET} [<csv_file>] [--quiet] [--verbose]")
+        print("    Description: Interactively resolve duplicate target UIDs in an asset profile CSV file.")
+        print("    Arguments:")
+        print("      csv_file: Path to CSV file with target-env and profile_json (optional)")
+        print("      --quiet: Suppress console output, show only summary")
+        print("      --verbose: Show detailed output including parsed configurations")
+        print("    Examples:")
+        print("      resolve-duplicates")
+        print("      resolve-duplicates asset-profiles-import-ready.csv")
+        print("      resolve-duplicates profiles.csv --verbose")
+        print("    Behavior:")
+        print("      • If no CSV file specified, uses default from output directory")
+        print("      • Default input: <output-dir>/asset-import/asset-profiles-import-ready.csv")
+        print("      • Detects duplicate target UIDs and prompts the user to select which configuration to keep.")
+        print("      • Displays key configuration details (notifications, schedule, enabled status) for each option.")
+        print("      • Creates a new deduplicated CSV file (e.g., asset-profiles-import-ready_deduplicated.csv).")
+        print("      • The original CSV file is not modified.")
+    elif command_name == 'verify-profiles':
+        print(f"\n{BOLD}verify-profiles{RESET} [<csv_file>] [--quiet] [--verbose] [--max-threads <threads>]")
+        print("    Description: Verify that profile configurations were successfully updated in the target environment.")
+        print("    Arguments:")
+        print("      csv_file: Path to CSV file with target-env and profile_json (optional)")
+        print("      --quiet: Suppress console output, show only summary")
+        print("      --verbose: Show detailed output including API calls and configuration details")
+        print("      --max-threads: Maximum number of threads for parallel processing (default: 5)")
+        print("    Examples:")
+        print("      verify-profiles")
+        print("      verify-profiles asset-profiles-import-ready.csv")
+        print("      verify-profiles profiles.csv --verbose")
+        print("      verify-profiles --max-threads 10")
+        print("    Behavior:")
+        print("      • If no CSV file specified, uses default from output directory")
+        print("      • Default input: <output-dir>/asset-import/asset-profiles-import-ready.csv")
+        print("      • Reads target UIDs from CSV and makes API calls to verify configurations.")
+        print("      • Uses GET /catalog-server/api/assets?uid={target_uid} to find asset IDs.")
+        print("      • Uses GET /catalog-server/api/profile/{asset_id}/config to verify profile configurations.")
+        print("      • Shows verification results including notifications, schedule, and enabled status.")
+        print("      • Provides detailed summary of successful and failed verifications.")
+        print("      • Parallel mode: Uses multiple threads for faster verification with progress bars.")
+        print("      • Parallel mode: Each thread has its own progress bar and statistics.")
     else:
         print(f"\n❌ Unknown command: {command_name}")
         print("💡 Use 'help' to see all available commands")
@@ -957,7 +1004,8 @@ def setup_autocomplete():
         'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
         'vcs-config', 'vcs-init', 'vcs-pull', 'vcs-push',
         'GET', 'PUT',  # REST API commands
-        'set-output-dir', 'set-log-level', 'set-http-config', 'show-config', 'help', 'history', 'exit', 'quit', 'q'
+        'set-output-dir', 'set-log-level', 'set-http-config', 'show-config', 'help', 'history', 'exit', 'quit', 'q',
+        'resolve-duplicates', 'verify-profiles', 'create-notification-mapping'
     ]
     
     # Define command-specific completions
@@ -968,6 +1016,7 @@ def setup_autocomplete():
                     'asset-list-export': ['--quiet', '--verbose', '--parallel', '--target', '--page-size'],
         'asset-profile-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-profile-import': ['--dry-run', '--quiet', '--verbose'],
+        'verify-profiles': ['--quiet', '--verbose', '--max-threads'],
         'asset-tag-import': ['--quiet', '--verbose', '--parallel'],
     
         'policy-export': ['--type', '--filter', '--quiet', '--verbose', '--batch-size', '--parallel'],
@@ -1592,6 +1641,21 @@ def run_interactive(args):
                         resolved_file = detect_and_resolve_duplicates(csv_file, quiet_mode, verbose_mode)
                         if resolved_file:
                             print(f"✅ Duplicate resolution complete: {resolved_file}")
+                    else:
+                        print("❌ Please specify a CSV file to process")
+                    continue
+                
+                # Check if it's a verify-profiles command
+                if command.lower().startswith('verify-profiles'):
+                    from .command_parsing import parse_verify_profiles_command
+                    csv_file, quiet_mode, verbose_mode, max_threads = parse_verify_profiles_command(command)
+                    if csv_file:
+                        from .asset_operations import verify_profile_configurations_after_import
+                        results = verify_profile_configurations_after_import(csv_file, client, logger, quiet_mode, verbose_mode, max_threads)
+                        if results:
+                            print(f"✅ Profile verification complete!")
+                        else:
+                            print("❌ Profile verification failed")
                     else:
                         print("❌ Please specify a CSV file to process")
                     continue
