@@ -1423,7 +1423,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                                     output_file, quiet_mode, verbose_mode
                                 )
                                 if success and not quiet_mode:
-                                    print(f"🔧 Filtered {policies_processed} policies, removed {versions_removed} older versions from {batch_filename}")
+                                    print(f"🔧 Filtered {policies_processed} SCHEMA_DRIFT policies, removed {versions_removed} older versions from {batch_filename}")
                             except Exception as filter_error:
                                 if verbose_mode:
                                     print(f"⚠️  Version filtering failed for {batch_filename}: {filter_error}")
@@ -2558,7 +2558,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                                         output_file, quiet_mode, verbose_mode
                                     )
                                     if success and verbose_mode:
-                                        print(f"🔧 {thread_name}: Filtered {policies_processed} policies, removed {versions_removed} older versions from {batch_filename}")
+                                        print(f"🔧 {thread_name}: Filtered {policies_processed} SCHEMA_DRIFT policies, removed {versions_removed} older versions from {batch_filename}")
                                 except Exception as filter_error:
                                     if verbose_mode:
                                         print(f"⚠️  {thread_name}: Version filtering failed for {batch_filename}: {filter_error}")
@@ -3070,7 +3070,7 @@ def execute_rule_tag_export_parallel(client, logger: logging.Logger, quiet_mode:
 
 def filter_policy_versions(zip_file_path: Path, quiet_mode: bool = False, verbose_mode: bool = False):
     """
-    Filter policy versions in a ZIP file to keep only the latest version for each policy.
+    Filter policy versions in a ZIP file to keep only the latest version for SCHEMA_DRIFT policies.
     
     Args:
         zip_file_path: Path to the ZIP file containing policy definitions
@@ -3083,7 +3083,7 @@ def filter_policy_versions(zip_file_path: Path, quiet_mode: bool = False, verbos
     
     try:
         if not quiet_mode:
-            print(f"🔧 Filtering policy versions in: {zip_file_path}")
+            print(f"🔧 Filtering SCHEMA_DRIFT policy versions in: {zip_file_path}")
         
         # Create a temporary directory for processing
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3120,8 +3120,19 @@ def filter_policy_versions(zip_file_path: Path, quiet_mode: bool = False, verbos
                         if 'items' not in policy or not policy['items']:
                             continue
                         
+                        # Only filter SCHEMA_DRIFT policies
+                        policy_type = policy.get('type', '')
+                        if policy_type != 'SCHEMA_DRIFT':
+                            if verbose_mode:
+                                policy_name = policy.get('name', 'Unknown')
+                                print(f"    Policy '{policy_name}' (type: {policy_type}): skipping - not SCHEMA_DRIFT")
+                            continue
+                        
                         items = policy['items']
                         if len(items) <= 1:
+                            if verbose_mode:
+                                policy_name = policy.get('name', 'Unknown')
+                                print(f"    Policy '{policy_name}': skipping - only one version")
                             continue  # No filtering needed if only one version
                         
                         # Sort items by ruleVersion in descending order (latest first)
@@ -3139,7 +3150,7 @@ def filter_policy_versions(zip_file_path: Path, quiet_mode: bool = False, verbos
                             policy_name = policy.get('name', 'Unknown')
                             latest_version = get_rule_version(latest_item)
                             removed_count = len(items) - 1
-                            print(f"    Policy '{policy_name}': kept version {latest_version}, removed {removed_count} older versions")
+                            print(f"    Policy '{policy_name}' (SCHEMA_DRIFT): kept version {latest_version}, removed {removed_count} older versions")
                     
                     # Write the filtered policies back to the JSON file
                     with open(json_file, 'w', encoding='utf-8') as f:
@@ -3153,7 +3164,7 @@ def filter_policy_versions(zip_file_path: Path, quiet_mode: bool = False, verbos
                     total_versions_removed += versions_removed
                     
                     if verbose_mode:
-                        print(f"    {json_file.name}: {original_policy_count} policies, removed {versions_removed} versions")
+                        print(f"    {json_file.name}: {original_policy_count} policies, removed {versions_removed} SCHEMA_DRIFT versions")
                 
                 except Exception as e:
                     if verbose_mode:
