@@ -126,7 +126,7 @@ def read_csv_uids_single_column(csv_file: str, logger: logging.Logger) -> List[s
         raise 
 
 
-def read_csv_asset_data(csv_file: str, logger: logging.Logger, allowed_types: list[str] = ['table', 'sql_view', 'view']) -> List[Dict[str, str]]:
+def read_csv_asset_data(csv_file: str, logger: logging.Logger, allowed_types: list[str] = ['table', 'sql_view', 'view', 'file', 'kafka_topic']) -> List[Dict[str, str]]:
     """Read asset data from CSV file with 5 columns: source_id, source_uid, target_id, target_uid, tags.
     
     Args:

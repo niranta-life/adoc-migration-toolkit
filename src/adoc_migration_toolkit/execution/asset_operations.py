@@ -182,7 +182,7 @@ def execute_asset_profile_export_guided(
         return False, error_msg
 
 
-def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view'], source_context_id: str = None, target_context_id: str = None):
+def execute_asset_profile_export(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view', 'file', 'kafka_topic'], source_context_id: str = None, target_context_id: str = None):
     """Execute the asset-profile-export command.
     
     Args:
@@ -1844,7 +1844,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         logger.error(error_msg)
 
 
-def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view'], max_threads: int = 5, source_context_id: str = None, target_context_id: str = None):
+def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None, quiet_mode: bool = False, verbose_mode: bool = False, allowed_types: list[str] = ['table', 'sql_view', 'view', 'file', 'kafka_topic'], max_threads: int = 5, source_context_id: str = None, target_context_id: str = None):
     """Execute the asset-profile-export command with parallel processing.
     
     Args:
@@ -2746,7 +2746,7 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
 
 
 def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None,
-                                         quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5, allowed_types: list[str] = ['table', 'sql_view', 'view']):
+                                         quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5, allowed_types: list[str] = ['table', 'sql_view', 'view', 'file', 'kafka_topic']):
     """Execute the asset-config-export command with parallel processing.
 
     Args:
