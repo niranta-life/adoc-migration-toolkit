@@ -159,7 +159,7 @@ def parse_asset_profile_export_command(command: str) -> tuple:
     quiet_mode = False  # Default to showing progress bar and status
     verbose_mode = False
     parallel_mode = False
-    allowed_types = ['table', 'sql_view', 'view']
+    allowed_types = ['table', 'sql_view', 'view', 'file', 'kafka_topic']
     max_threads = 5
     source_context_id = None
     target_context_id = None
@@ -362,7 +362,7 @@ def parse_asset_config_export_command(command: str) -> tuple:
     verbose_mode = False
     parallel_mode = False
     max_threads = 5
-    allowed_types = ['table', 'sql_view', 'view']
+    allowed_types = ['table', 'sql_view', 'view', 'file', 'kafka_topic']
     # Check for flags and options
     i = 1
     while i < len(parts):
