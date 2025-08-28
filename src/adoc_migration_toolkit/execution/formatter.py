@@ -331,8 +331,11 @@ class PolicyExportFormatter:
                 for uid in sorted_assets:
                     # Apply string transformations to create target-env
                     target_env = uid
+                    transformations_applied = []
                     for source, target in self.string_transforms.items():
-                        target_env = target_env.replace(source, target)
+                        if source in target_env and source != target:  # Only apply if strings are different
+                            target_env = target_env.replace(source, target)
+                            transformations_applied.append(f"'{source}' -> '{target}'")
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.extracted_assets)} unique assets to {csv_file}")
@@ -431,7 +434,7 @@ class PolicyExportFormatter:
                     
                     # Apply string transformations to target_uid
                     for source, target in self.string_transforms.items():
-                        if source in target_uid:
+                        if source in target_uid and source != target:  # Only apply if strings are different
                             target_uid = target_uid.replace(source, target)
                     
                     # Apply string transformations to config_json (for asset UIDs in JSON)
@@ -448,7 +451,7 @@ class PolicyExportFormatter:
                                 if "assetId" in asset_config:
                                     old_asset_id = str(asset_config["assetId"])
                                     for source, target in self.string_transforms.items():
-                                        if source in old_asset_id:
+                                        if source in old_asset_id and source != target:  # Only apply if strings are different
                                             asset_config["assetId"] = int(old_asset_id.replace(source, target))
                                             config_changed = True
                                 
@@ -458,7 +461,7 @@ class PolicyExportFormatter:
                                     if "assetId" in freshness:
                                         old_freshness_asset_id = str(freshness["assetId"])
                                         for source, target in self.string_transforms.items():
-                                            if source in old_freshness_asset_id:
+                                            if source in old_freshness_asset_id and source != target:  # Only apply if strings are different
                                                 freshness["assetId"] = int(old_freshness_asset_id.replace(source, target))
                                                 config_changed = True
                             
@@ -537,7 +540,7 @@ class PolicyExportFormatter:
                     original_target_uid = target_uid
                     # Apply string transformations
                     for source, target in self.string_transforms.items():
-                        if source in target_uid:
+                        if source in target_uid and source != target:  # Only apply if strings are different
                             target_uid = target_uid.replace(source, target)
                     
                     if target_uid != original_target_uid:
@@ -587,7 +590,7 @@ class PolicyExportFormatter:
                 changes_made = 0
                 
                 for source, target in self.string_transforms.items():
-                    if source in modified_value:
+                    if source in modified_value and source != target:  # Only apply if strings are different
                         modified_value = modified_value.replace(source, target)
                         changes_made += 1
                 
@@ -1126,10 +1129,11 @@ def parse_formatter_command(command: str) -> tuple:
                 print("\n" + "="*60)
                 print("POLICY-XFR COMMAND HELP")
                 print("="*60)
-                print("Usage: policy-xfr [--input <input_dir>] --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" [options]")
+                print("Usage: policy-xfr [--input <input_dir>] [--string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"] [options]")
                 print("\nArguments:")
-                print("  --string-transform <transforms>  Multiple string transformations [REQUIRED]")
+                print("  --string-transform <transforms>  Multiple string transformations [OPTIONAL]")
                 print("                                   Format: \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                print("                                   If not provided, processes files without transformations")
                 print("\nOptions:")
                 print("  --input <dir>                 Input directory (auto-detected from policy-export if not specified)")
                 print("  --output-dir <dir>            Output directory (defaults to organized subdirectories)")
@@ -1149,11 +1153,7 @@ def parse_formatter_command(command: str) -> tuple:
                 print("💡 Use 'policy-xfr --help' for usage information")
                 return None, None, None, None, False
         
-        if not string_transforms:
-            print("❌ Missing required argument: --string-transform")
-            print("💡 Use 'policy-xfr --help' for usage information")
-            return None, None, None, None, False
-        
+        # string_transforms can be empty (direct processing mode)
         return input_dir, string_transforms, output_dir, quiet_mode, verbose_mode
     except Exception as e:
         print(f"❌ Error parsing policy-xfr command: {e}")
@@ -1208,9 +1208,20 @@ def execute_formatter(input_dir: str, string_transforms: dict, output_dir: str,
             print(f"Output directory:    {formatter.output_dir}")
             print(f"Asset export dir:    {formatter.asset_export_dir}")
             print(f"Policy export dir:   {formatter.policy_export_dir}")
-            print(f"String transformations: {len(string_transforms)} transformations")
-            for source, target in string_transforms.items():
-                print(f"  '{source}' -> '{target}'")
+            if not string_transforms:
+                print(f"String transformations: None (direct processing mode)")
+                print("  💡 No transformations provided - processing files without string replacements")
+            else:
+                print(f"String transformations: {len(string_transforms)} transformations")
+                identical_transforms = 0
+                for source, target in string_transforms.items():
+                    if source == target:
+                        print(f"  '{source}' -> '{target}' (identical - will be skipped)")
+                        identical_transforms += 1
+                    else:
+                        print(f"  '{source}' -> '{target}'")
+                if identical_transforms > 0:
+                    print(f"  Note: {identical_transforms} identical transformation(s) will be skipped")
             print(f"Total files found:   {stats['total_files']}")
             if stats['json_files'] > 0:
                 print(f"JSON files:          {stats['json_files']}")
@@ -1218,6 +1229,17 @@ def execute_formatter(input_dir: str, string_transforms: dict, output_dir: str,
                 print(f"ZIP files:           {stats['zip_files']}")
             print(f"Files investigated:  {stats.get('files_investigated', 0)}")
             print(f"Changes made:        {stats.get('changes_made', 0)}")
+            if not string_transforms:
+                print("  ℹ️  Direct processing mode (no transformations provided)")
+                print("  💡 This mode processes files without string replacements")
+                print("     • Use this when no environment-specific string changes are needed")
+                print("     • Files are copied and organized without modifications")
+            elif stats.get('changes_made', 0) == 0:
+                print("  ℹ️  No string transformations were applied")
+                print("  💡 This could be because:")
+                print("     • Source and target strings are identical (e.g., 'Snowflake':'Snowflake')")
+                print("     • Source strings were not found in the files")
+                print("     • No transformation was needed for this dataset")
             print(f"Successful:          {stats['successful']}")
             print(f"Failed:              {stats['failed']}")
             if stats.get('extracted_assets', 0) > 0:

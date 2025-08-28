@@ -3662,9 +3662,14 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
             print(f"📄 Source file: {source_file}")
             print(f"📄 Target file: {target_file}")
             print(f"📄 Output file: {output_file}")
-            print(f"🔄 String transformations: {len(string_transforms)} transformations")
-            for source, target in string_transforms.items():
-                print(f"  '{source}' -> '{target}'")
+            
+            if not string_transforms:
+                print(f"🔄 String transformations: None (direct matching mode)")
+                print("💡 No transformations provided - attempting direct UID matching")
+            else:
+                print(f"🔄 String transformations: {len(string_transforms)} transformations")
+                for source, target in string_transforms.items():
+                    print(f"  '{source}' -> '{target}'")
             print("="*80)
         
         # Read source file
@@ -3714,22 +3719,35 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 # Apply string transformations to target_uid (C -> T)
                 original_target_uid = source_row['target_uid']
                 transformed_target_uid = original_target_uid
-                # Apply all string replacements
-
-                for source_str, target_str in string_transforms.items():
-                    # Check if the source_str provided by user exists in source uid (transformed_target_uid)
-                    if source_str in transformed_target_uid:
-                        transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
-                        transformed_count += 1
-                        if verbose_mode:
-                            print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")
-                            print(f"   Applied: '{source_str}' -> '{target_str}'")
+                
+                # Apply string transformations if provided
+                if string_transforms:
+                    for source_str, target_str in string_transforms.items():
+                        # Check if the source_str provided by user exists in source uid (transformed_target_uid)
+                        if source_str in transformed_target_uid:
+                            # Only count as transformation if the strings are actually different
+                            if source_str != target_str:
+                                transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
+                                transformed_count += 1
+                                if verbose_mode:
+                                    print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")
+                                    print(f"   Applied: '{source_str}' -> '{target_str}'")
+                            else:
+                                if verbose_mode:
+                                    print(f"⏭️  Skipped identical transformation: '{source_str}' -> '{target_str}' (no change needed)")
+                        else:
+                            if verbose_mode:
+                                print(f"🔍 No match found for transformation: '{source_str}' -> '{target_str}' in '{original_target_uid}'")
+                else:
+                    # No transformations provided - use original UID for direct matching
+                    if verbose_mode:
+                        print(f"🔍 Direct matching mode: using original UID '{original_target_uid}'")
 
                 # Write transformed record to temporary file
                 temp_row = {
                     'source_uid': source_row['source_uid'],  # A
                     'source_id': source_row['source_id'],    # B
-                    'target_uid': transformed_target_uid,    # T (transformed C)
+                    'target_uid': transformed_target_uid,    # T (transformed C or original)
                     'tags': source_row['tags'],               # D
                     'asset_type': source_row['asset_type']    # E
                 }
@@ -3773,6 +3791,44 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                     if verbose_mode:
                         print(f"❌ No match found for transformed UID: {transformed_target_uid}")
         print(f"merged_data : {merged_data}")
+        
+        # Provide detailed feedback about the matching process
+        if not merged_data:
+            print("\n🔍 MATCHING ANALYSIS:")
+            print("="*50)
+            
+            # Show sample source and target UIDs for debugging
+            if source_data and target_data:
+                print("📊 Sample Source UIDs (after transformation):")
+                sample_source_uids = [row['target_uid'] for row in source_data[:3]]
+                for i, uid in enumerate(sample_source_uids):
+                    print(f"  {i+1}. {uid}")
+                
+                print("\n📊 Sample Target UIDs (source_uid column):")
+                sample_target_uids = list(target_data.keys())[:3]
+                for i, uid in enumerate(sample_target_uids):
+                    print(f"  {i+1}. {uid}")
+                
+                print(f"\n💡 Matching Issue:")
+                print(f"   • Source records: {len(source_data)}")
+                print(f"   • Target records: {len(target_data)}")
+                print(f"   • Matches found: {matched_count}")
+                
+                if not string_transforms:
+                    print(f"\n⚠️  No transformations provided and no matches found!")
+                    print(f"   • Source and target UIDs are not compatible for direct matching")
+                    print(f"   • You need to provide string transformations to map source to target")
+                    print(f"   • Example: Use 'Snowflake':'snowflake_krish_pfizer' to transform UIDs")
+                elif transformed_count == 0:
+                    print(f"\n⚠️  No transformations were applied!")
+                    print(f"   • Your transformation '{list(string_transforms.keys())[0]}' -> '{list(string_transforms.values())[0]}' is identical")
+                    print(f"   • Expected: Transform source UIDs to match target environment")
+                    print(f"   • Example: Use 'Snowflake':'snowflake_krish_pfizer' instead of 'Snowflake':'Snowflake'")
+                else:
+                    print(f"\n⚠️  Transformations applied but no matches found!")
+                    print(f"   • Check if the transformed UIDs match the target environment")
+                    print(f"   • Verify the string transformation is correct for your environment")
+        
         # Clean up temporary file
         try:
             temp_source_file.unlink()
@@ -3799,11 +3855,29 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 print(f"Output file:          {output_file}")
                 print(f"Source records:       {len(source_data)}")
                 print(f"Target records:       {len(target_data)}")
-                print(f"Transformations applied: {transformed_count}")
+                if not string_transforms:
+                    print(f"Transformations applied: 0 (direct matching mode)")
+                else:
+                    print(f"Transformations applied: {transformed_count}")
                 print(f"Matched records:      {matched_count}")
                 print(f"Merged records:       {len(merged_data)}")
                 print(f"Match rate:           {(matched_count/len(source_data)*100):.1f}%")
                 print("="*80)
+                
+                # Provide specific feedback based on transformation count
+                if not string_transforms:
+                    print("ℹ️  Direct matching mode (no transformations provided)")
+                    print("💡 This mode attempts to match source and target UIDs directly")
+                    print("   • Use this when source and target environments have compatible UIDs")
+                    print("   • If no matches found, provide string transformations")
+                elif transformed_count == 0:
+                    print("ℹ️  No string transformations were applied")
+                    print("💡 This could be because:")
+                    print("   • Source and target strings are identical (e.g., 'Snowflake':'Snowflake')")
+                    print("   • Source strings were not found in the asset UIDs")
+                    print("   • No transformation was needed for this dataset")
+                elif transformed_count > 0:
+                    print(f"✅ {transformed_count} string transformations were successfully applied")
                 
                 if matched_count < len(source_data):
                     print("⚠️  Some source records could not be matched with target records")
@@ -3820,6 +3894,25 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
             print("   • String transformations are correct")
             print("   • Target file contains matching UIDs")
             print("   • Both files have the expected format")
+            
+            # Provide specific guidance for common issues
+            if not string_transforms:
+                print("\n🔧 SPECIFIC GUIDANCE:")
+                print("   • No transformations provided - attempting direct UID matching")
+                print("   • Source and target UIDs are not compatible for direct matching")
+                print("   • You need to provide string transformations to map source to target")
+                print("   • Example transformations:")
+                print("     - 'Snowflake':'snowflake_krish_pfizer'")
+                print("     - 'PROD_DB':'DEV_DB'")
+                print("     - 'old_tenant':'new_tenant'")
+            elif transformed_count == 0:
+                print("\n🔧 SPECIFIC GUIDANCE:")
+                print("   • No transformations were applied because source and target strings are identical")
+                print("   • You need to transform source environment strings to match target environment")
+                print("   • Example transformations:")
+                print("     - 'Snowflake':'snowflake_krish_pfizer'")
+                print("     - 'PROD_DB':'DEV_DB'")
+                print("     - 'old_tenant':'new_tenant'")
         
     except Exception as e:
         logger.error(f"Error executing transform-and-merge: {e}")
