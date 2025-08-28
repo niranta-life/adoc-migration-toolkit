@@ -119,6 +119,7 @@ def show_interactive_help():
     print(f"  {BOLD}asset-profile-import{RESET} [<csv_file>] [--dry-run] [--quiet] [--verbose] [--allowed-types <types>]")
     print("    Import asset profiles to target environment from CSV file")
     print(f"  {BOLD}verify-profiles{RESET} [<csv_file>] [--quiet] [--verbose] [--max-threads <threads>]")
+    print(f"  {BOLD}verify-configs{RESET} [<csv_file>] [--quiet] [--verbose] [--max-threads <threads>]")
     print("    Verify that profile configurations were successfully updated in the target environment")
     print(f"  {BOLD}resolve-duplicates{RESET} [<csv_file>] [--quiet] [--verbose]")
     print("    Interactively resolve duplicate target UIDs in an asset profile CSV file")
@@ -985,6 +986,30 @@ def show_command_help(command_name: str):
         print("      • Provides detailed summary of successful and failed verifications.")
         print("      • Parallel mode: Uses multiple threads for faster verification with progress bars.")
         print("      • Parallel mode: Each thread has its own progress bar and statistics.")
+    elif command_name == 'verify-configs':
+        print(f"\n{BOLD}verify-configs{RESET} [<csv_file>] [--quiet] [--verbose] [--max-threads <threads>]")
+        print("    Description: Verify that asset configurations were successfully imported by checking the target environment.")
+        print("    Arguments:")
+        print("      csv_file: Path to CSV file with target_uid and config_json (optional)")
+        print("      --quiet: Suppress console output, show only summary")
+        print("      --verbose: Show detailed output including API calls and configuration details")
+        print("      --max-threads: Maximum number of threads for parallel processing (default: 5)")
+        print("    Examples:")
+        print("      verify-configs")
+        print("      verify-configs asset-config-import-ready.csv")
+        print("      verify-configs configs.csv --verbose")
+        print("      verify-configs --max-threads 10")
+        print("    Behavior:")
+        print("      • If no CSV file specified, uses default from output directory")
+        print("      • Default input: <output-dir>/asset-import/asset-config-import-ready.csv")
+        print("      • Reads target UIDs from CSV and makes API calls to verify configurations.")
+        print("      • Uses GET /catalog-server/api/assets?uid={target_uid} to find asset IDs.")
+        print("      • Uses GET /catalog-server/api/assets/{asset_id}/config to verify asset configurations.")
+        print("      • Shows verification results including schedule, timezone, spark config, and other settings.")
+        print("      • Provides detailed summary of successful and failed verifications.")
+        print("      • Parallel mode: Uses multiple threads for faster verification with progress bars.")
+        print("      • Parallel mode: Each thread has its own progress bar and statistics.")
+        print("      • Generates CSV report: verification-reports/config_verification_report_YYYYMMDD_HHMMSS.csv")
     else:
         print(f"\n❌ Unknown command: {command_name}")
         print("💡 Use 'help' to see all available commands")
@@ -1005,7 +1030,7 @@ def setup_autocomplete():
         'vcs-config', 'vcs-init', 'vcs-pull', 'vcs-push',
         'GET', 'PUT',  # REST API commands
         'set-output-dir', 'set-log-level', 'set-http-config', 'show-config', 'help', 'history', 'exit', 'quit', 'q',
-        'resolve-duplicates', 'verify-profiles', 'create-notification-mapping'
+        'resolve-duplicates', 'verify-profiles', 'verify-configs', 'create-notification-mapping'
     ]
     
     # Define command-specific completions
@@ -1017,6 +1042,7 @@ def setup_autocomplete():
         'asset-profile-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-profile-import': ['--dry-run', '--quiet', '--verbose'],
         'verify-profiles': ['--quiet', '--verbose', '--max-threads'],
+        'verify-configs': ['--quiet', '--verbose', '--max-threads'],
         'asset-tag-import': ['--quiet', '--verbose', '--parallel'],
     
         'policy-export': ['--type', '--filter', '--quiet', '--verbose', '--batch-size', '--parallel'],
@@ -1645,6 +1671,8 @@ def run_interactive(args):
                         print("❌ Please specify a CSV file to process")
                     continue
                 
+
+                
                 # Check if it's a verify-profiles command
                 if command.lower().startswith('verify-profiles'):
                     from .command_parsing import parse_verify_profiles_command
@@ -1658,6 +1686,36 @@ def run_interactive(args):
                             print("❌ Profile verification failed")
                     else:
                         print("❌ Please specify a CSV file to process")
+                    continue
+                
+                # Check if it's a verify-configs command
+                if command.lower().startswith('verify-configs'):
+                    from .command_parsing import parse_verify_configs_command
+                    csv_file, quiet_mode, verbose_mode, max_threads = parse_verify_configs_command(command)
+                    
+                    # Use default CSV file if not specified
+                    if not csv_file:
+                        if globals.GLOBAL_OUTPUT_DIR:
+                            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-config-import-ready.csv")
+                        else:
+                            # Try to find the latest toolkit directory
+                            current_dir = Path.cwd()
+                            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                            if toolkit_dirs:
+                                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                                latest_toolkit_dir = toolkit_dirs[0]
+                                csv_file = str(latest_toolkit_dir / "asset-import" / "asset-config-import-ready.csv")
+                            else:
+                                csv_file = "asset-config-import-ready.csv"
+                    
+                    # Execute verification
+                    from .asset_operations import verify_asset_configurations_after_import, generate_config_verification_csv_report
+                    verification_results = verify_asset_configurations_after_import(csv_file, client, logger, quiet_mode, verbose_mode, max_threads)
+                    if verification_results:
+                        generate_config_verification_csv_report(verification_results, csv_file, quiet_mode, verbose_mode)
+                        print(f"✅ Asset configuration verification complete!")
+                    else:
+                        print("❌ Asset configuration verification failed")
                     continue
 
                 # Check if it's a transform-and-merge command

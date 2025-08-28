@@ -1509,3 +1509,104 @@ def parse_verify_profiles_command(command: str) -> tuple:
             csv_file = "asset-import/asset-profiles-import-ready.csv"
     
     return csv_file, quiet_mode, verbose_mode, max_threads 
+
+def parse_verify_configs_command(command: str):
+    """Parse a verify-configs command string into components.
+    
+    Args:
+        command: Command string like "verify-configs [<csv_file>] [--quiet] [--verbose] [--parallel] [--max-threads <num>]"
+    
+    Returns:
+        tuple: (csv_file, quiet_mode, verbose_mode, max_threads)
+    """
+    parts = command.split()
+    
+    if not parts or parts[0].lower() != 'verify-configs':
+        return None, False, False, 5
+    
+    csv_file = None
+    quiet_mode = False
+    verbose_mode = False
+    max_threads = 5
+    
+    i = 1
+    while i < len(parts):
+        part = parts[i].lower()
+        
+        if part == '--help':
+            print_verify_configs_command_help()
+            return None, False, False, 5
+        
+        elif part == '--quiet':
+            quiet_mode = True
+        
+        elif part == '--verbose':
+            verbose_mode = True
+        
+        elif part == '--parallel':
+            # Parallel mode is always enabled for verify-configs
+            pass
+        
+        elif part == '--max-threads':
+            if i + 1 < len(parts):
+                try:
+                    max_threads = int(parts[i + 1])
+                    if max_threads < 1:
+                        max_threads = 1
+                    elif max_threads > 50:
+                        max_threads = 50
+                    i += 1  # Skip the next part since we consumed it
+                except ValueError:
+                    print("❌ Error: --max-threads requires a valid number")
+                    return None, False, False, 5
+            else:
+                print("❌ Error: --max-threads requires a number")
+                return None, False, False, 5
+        
+        elif not part.startswith('--'):
+            # This is the CSV file path
+            if csv_file is None:
+                csv_file = parts[i]
+            else:
+                print("❌ Error: Multiple CSV files specified")
+                return None, False, False, 5
+        
+        i += 1
+    
+    return csv_file, quiet_mode, verbose_mode, max_threads
+
+def print_verify_configs_command_help():
+    """Print help information for the verify-configs command."""
+    print("VERIFY-CONFIGS COMMAND HELP")
+    print("=" * 50)
+    print("Usage: verify-configs [<csv_file>] [--quiet] [--verbose] [--parallel] [--max-threads <num>]")
+    print()
+    print("Description:")
+    print("  Verify that asset configurations were successfully imported by checking the target environment.")
+    print("  Uses the API endpoint GET /catalog-server/api/assets/{asset_id}/config to verify configurations.")
+    print()
+    print("Arguments:")
+    print("  <csv_file>              Path to asset-config-import-ready.csv file (optional)")
+    print("                          Default: asset-import/asset-config-import-ready.csv")
+    print()
+    print("Options:")
+    print("  --quiet                 Suppress progress output, show only summary")
+    print("  --verbose               Enable detailed logging for each asset")
+    print("  --parallel              Enable parallel processing (always enabled)")
+    print("  --max-threads <num>     Maximum number of threads (default: 5, max: 50)")
+    print("  --help                  Show this help message")
+    print()
+    print("Examples:")
+    print("  verify-configs")
+    print("  verify-configs /path/to/asset-config-import-ready.csv")
+    print("  verify-configs --quiet --max-threads 10")
+    print("  verify-configs --verbose")
+    print()
+    print("Output:")
+    print("  • Console summary of verification results")
+    print("  • CSV report: verification-reports/config_verification_report_YYYYMMDD_HHMMSS.csv")
+    print("  • Detailed verification status for each asset")
+    print()
+    print("💡 Use 'verify-configs --help' for usage information") 
+
+ 
