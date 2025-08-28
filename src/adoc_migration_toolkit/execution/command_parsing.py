@@ -1357,9 +1357,7 @@ def parse_transform_and_merge_command(command: str) -> tuple:
         else:
             i += 1
     
-    if not string_transforms:
-        raise ValueError("Missing required argument: --string-transform")
-    
+    # string_transforms can be empty (direct matching mode)
     return string_transforms, quiet_mode, verbose_mode 
 
 def parse_create_notification_mapping_command(command: str) -> tuple:

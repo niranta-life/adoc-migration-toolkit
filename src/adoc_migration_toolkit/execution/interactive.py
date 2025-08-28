@@ -1602,8 +1602,8 @@ def run_interactive(args):
                 # Check if it's a policy-xfr command
                 if command.lower().startswith('policy-xfr'):
                     input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_formatter_command(command)
-                    if string_transforms:
-                        execute_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
+                    # Execute regardless of whether string_transforms is empty (direct processing mode)
+                    execute_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
                     continue
                 
                 # Check if it's a profile-check command
@@ -1724,11 +1724,11 @@ def run_interactive(args):
                     from .asset_operations import execute_transform_and_merge
                     try:
                         string_transforms, quiet_mode, verbose_mode = parse_transform_and_merge_command(command)
-                        if string_transforms:
-                            execute_transform_and_merge(string_transforms, quiet_mode, verbose_mode, logger)
+                        # Execute regardless of whether string_transforms is empty (direct matching mode)
+                        execute_transform_and_merge(string_transforms, quiet_mode, verbose_mode, logger)
                     except ValueError as e:
                         print(f"❌ Error: {e}")
-                        print("💡 Usage: transform-and-merge --string-transform \"A\":\"B\", \"C\":\"D\" [--quiet] [--verbose]")
+                        print("💡 Usage: transform-and-merge [--string-transform \"A\":\"B\", \"C\":\"D\"] [--quiet] [--verbose]")
                     continue
                 
                 # Check if it's a set-output-dir command

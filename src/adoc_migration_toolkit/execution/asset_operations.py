@@ -3662,9 +3662,14 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
             print(f"📄 Source file: {source_file}")
             print(f"📄 Target file: {target_file}")
             print(f"📄 Output file: {output_file}")
-            print(f"🔄 String transformations: {len(string_transforms)} transformations")
-            for source, target in string_transforms.items():
-                print(f"  '{source}' -> '{target}'")
+            
+            if not string_transforms:
+                print(f"🔄 String transformations: None (direct matching mode)")
+                print("💡 No transformations provided - attempting direct UID matching")
+            else:
+                print(f"🔄 String transformations: {len(string_transforms)} transformations")
+                for source, target in string_transforms.items():
+                    print(f"  '{source}' -> '{target}'")
             print("="*80)
         
         # Read source file
@@ -3714,22 +3719,35 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 # Apply string transformations to target_uid (C -> T)
                 original_target_uid = source_row['target_uid']
                 transformed_target_uid = original_target_uid
-                # Apply all string replacements
-
-                for source_str, target_str in string_transforms.items():
-                    # Check if the source_str provided by user exists in source uid (transformed_target_uid)
-                    if source_str in transformed_target_uid:
-                        transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
-                        transformed_count += 1
-                        if verbose_mode:
-                            print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")
-                            print(f"   Applied: '{source_str}' -> '{target_str}'")
+                
+                # Apply string transformations if provided
+                if string_transforms:
+                    for source_str, target_str in string_transforms.items():
+                        # Check if the source_str provided by user exists in source uid (transformed_target_uid)
+                        if source_str in transformed_target_uid:
+                            # Only count as transformation if the strings are actually different
+                            if source_str != target_str:
+                                transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
+                                transformed_count += 1
+                                if verbose_mode:
+                                    print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")
+                                    print(f"   Applied: '{source_str}' -> '{target_str}'")
+                            else:
+                                if verbose_mode:
+                                    print(f"⏭️  Skipped identical transformation: '{source_str}' -> '{target_str}' (no change needed)")
+                        else:
+                            if verbose_mode:
+                                print(f"🔍 No match found for transformation: '{source_str}' -> '{target_str}' in '{original_target_uid}'")
+                else:
+                    # No transformations provided - use original UID for direct matching
+                    if verbose_mode:
+                        print(f"🔍 Direct matching mode: using original UID '{original_target_uid}'")
 
                 # Write transformed record to temporary file
                 temp_row = {
                     'source_uid': source_row['source_uid'],  # A
                     'source_id': source_row['source_id'],    # B
-                    'target_uid': transformed_target_uid,    # T (transformed C)
+                    'target_uid': transformed_target_uid,    # T (transformed C or original)
                     'tags': source_row['tags'],               # D
                     'asset_type': source_row['asset_type']    # E
                 }
@@ -3773,6 +3791,44 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                     if verbose_mode:
                         print(f"❌ No match found for transformed UID: {transformed_target_uid}")
         print(f"merged_data : {merged_data}")
+        
+        # Provide detailed feedback about the matching process
+        if not merged_data:
+            print("\n🔍 MATCHING ANALYSIS:")
+            print("="*50)
+            
+            # Show sample source and target UIDs for debugging
+            if source_data and target_data:
+                print("📊 Sample Source UIDs (after transformation):")
+                sample_source_uids = [row['target_uid'] for row in source_data[:3]]
+                for i, uid in enumerate(sample_source_uids):
+                    print(f"  {i+1}. {uid}")
+                
+                print("\n📊 Sample Target UIDs (source_uid column):")
+                sample_target_uids = list(target_data.keys())[:3]
+                for i, uid in enumerate(sample_target_uids):
+                    print(f"  {i+1}. {uid}")
+                
+                print(f"\n💡 Matching Issue:")
+                print(f"   • Source records: {len(source_data)}")
+                print(f"   • Target records: {len(target_data)}")
+                print(f"   • Matches found: {matched_count}")
+                
+                if not string_transforms:
+                    print(f"\n⚠️  No transformations provided and no matches found!")
+                    print(f"   • Source and target UIDs are not compatible for direct matching")
+                    print(f"   • You need to provide string transformations to map source to target")
+                    print(f"   • Example: Use 'Snowflake':'snowflake_krish_pfizer' to transform UIDs")
+                elif transformed_count == 0:
+                    print(f"\n⚠️  No transformations were applied!")
+                    print(f"   • Your transformation '{list(string_transforms.keys())[0]}' -> '{list(string_transforms.values())[0]}' is identical")
+                    print(f"   • Expected: Transform source UIDs to match target environment")
+                    print(f"   • Example: Use 'Snowflake':'snowflake_krish_pfizer' instead of 'Snowflake':'Snowflake'")
+                else:
+                    print(f"\n⚠️  Transformations applied but no matches found!")
+                    print(f"   • Check if the transformed UIDs match the target environment")
+                    print(f"   • Verify the string transformation is correct for your environment")
+        
         # Clean up temporary file
         try:
             temp_source_file.unlink()
@@ -3799,11 +3855,29 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 print(f"Output file:          {output_file}")
                 print(f"Source records:       {len(source_data)}")
                 print(f"Target records:       {len(target_data)}")
-                print(f"Transformations applied: {transformed_count}")
+                if not string_transforms:
+                    print(f"Transformations applied: 0 (direct matching mode)")
+                else:
+                    print(f"Transformations applied: {transformed_count}")
                 print(f"Matched records:      {matched_count}")
                 print(f"Merged records:       {len(merged_data)}")
                 print(f"Match rate:           {(matched_count/len(source_data)*100):.1f}%")
                 print("="*80)
+                
+                # Provide specific feedback based on transformation count
+                if not string_transforms:
+                    print("ℹ️  Direct matching mode (no transformations provided)")
+                    print("💡 This mode attempts to match source and target UIDs directly")
+                    print("   • Use this when source and target environments have compatible UIDs")
+                    print("   • If no matches found, provide string transformations")
+                elif transformed_count == 0:
+                    print("ℹ️  No string transformations were applied")
+                    print("💡 This could be because:")
+                    print("   • Source and target strings are identical (e.g., 'Snowflake':'Snowflake')")
+                    print("   • Source strings were not found in the asset UIDs")
+                    print("   • No transformation was needed for this dataset")
+                elif transformed_count > 0:
+                    print(f"✅ {transformed_count} string transformations were successfully applied")
                 
                 if matched_count < len(source_data):
                     print("⚠️  Some source records could not be matched with target records")
@@ -3820,6 +3894,25 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
             print("   • String transformations are correct")
             print("   • Target file contains matching UIDs")
             print("   • Both files have the expected format")
+            
+            # Provide specific guidance for common issues
+            if not string_transforms:
+                print("\n🔧 SPECIFIC GUIDANCE:")
+                print("   • No transformations provided - attempting direct UID matching")
+                print("   • Source and target UIDs are not compatible for direct matching")
+                print("   • You need to provide string transformations to map source to target")
+                print("   • Example transformations:")
+                print("     - 'Snowflake':'snowflake_krish_pfizer'")
+                print("     - 'PROD_DB':'DEV_DB'")
+                print("     - 'old_tenant':'new_tenant'")
+            elif transformed_count == 0:
+                print("\n🔧 SPECIFIC GUIDANCE:")
+                print("   • No transformations were applied because source and target strings are identical")
+                print("   • You need to transform source environment strings to match target environment")
+                print("   • Example transformations:")
+                print("     - 'Snowflake':'snowflake_krish_pfizer'")
+                print("     - 'PROD_DB':'DEV_DB'")
+                print("     - 'old_tenant':'new_tenant'")
         
     except Exception as e:
         logger.error(f"Error executing transform-and-merge: {e}")
@@ -4252,7 +4345,9 @@ def verify_profile_configurations_after_import(csv_file: str, client, logger: lo
         thread_profile_not_found = 0
         thread_details = []
         
-        thread_name = f"Thread {thread_id}"
+        # Get thread names for consistent naming across commands
+        thread_names = get_thread_names()
+        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
         if not verbose_mode:
             thread_pbar = create_progress_bar(
                 total=len(chunk),
@@ -4946,6 +5041,19 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                         else:
                             detailed_mismatches.append(f"Auto Retry: Expected={expected_auto_retry}, Actual={actual_auto_retry}")
                     
+                    # Determine config status based on expected vs actual configuration
+                    config_status = "Default Config Present"
+                    if expected_asset_config:
+                        # Check if the expected config has any non-default values
+                        has_custom_config = False
+                        for key, expected_value in expected_asset_config.items():
+                            if expected_value is not None and expected_value != "":
+                                has_custom_config = True
+                                break
+                        
+                        if has_custom_config:
+                            config_status = "Config Changed"
+                    
                     if verification_passed:
                         if verbose_mode:
                             print(f"   ✅ {thread_name}: Configuration verified successfully for {target_uid}")
@@ -4957,7 +5065,8 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                             'error': None,
                             'has_config': True,
                             'config_details': config_verification,
-                            'verification_details': 'All configurations match'
+                            'verification_details': 'All configurations match',
+                            'config_status': config_status
                         })
                     else:
                         if verbose_mode:
@@ -4971,7 +5080,8 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                             'has_config': True,
                             'config_details': config_verification,
                             'verification_details': ', '.join(verification_details),
-                            'detailed_mismatches': detailed_mismatches
+                            'detailed_mismatches': detailed_mismatches,
+                            'config_status': config_status
                         })
                 
                 except Exception as e:
@@ -5185,20 +5295,14 @@ def generate_config_verification_csv_report(verification_results: dict, input_cs
             'Target_UID',
             'Asset_ID',
             'Verification_Status',
-            'Has_Schedule',
-            'Has_Timezone',
+            'Config_Status',
             'Has_Spark_Config',
             'Incremental_Strategy',
-            'Has_Notifications',
-            'Is_Pattern_Profile',
-            'Column_Level',
             'Resource_Strategy',
             'Auto_Retry_Enabled',
             'Is_User_Marked_Reference',
             'Is_Reference_Check_Valid',
             'Has_Reference_Check_Config',
-            'Profile_Anomaly_Sensitivity',
-            'Cadence_Anomaly_Training_Window',
             'Error_Message',
             'Verification_Details'
         ])
@@ -5220,20 +5324,14 @@ def generate_config_verification_csv_report(verification_results: dict, input_cs
             
             # Extract configuration details
             config_details = detail.get('config_details', {})
-            has_schedule = 'Yes' if config_details.get('has_schedule', False) else 'No'
-            has_timezone = 'Yes' if config_details.get('has_timezone', False) else 'No'
+            config_status = detail.get('config_status', 'Unknown')
             has_spark_config = 'Yes' if config_details.get('has_spark_config', False) else 'No'
             incremental_strategy = 'Yes' if config_details.get('incremental_strategy', False) else 'No'
-            has_notifications = 'Yes' if config_details.get('has_notifications', False) else 'No'
-            is_pattern_profile = 'Yes' if config_details.get('is_pattern_profile', False) else 'No'
-            column_level = config_details.get('column_level', 'N/A')
             resource_strategy = config_details.get('resource_strategy', 'N/A')
             auto_retry_enabled = 'Yes' if config_details.get('auto_retry_enabled', False) else 'No'
             is_user_marked_reference = 'Yes' if config_details.get('is_user_marked_reference', False) else 'No'
             is_reference_check_valid = 'Yes' if config_details.get('is_reference_check_valid', False) else 'No'
             has_reference_check_config = 'Yes' if config_details.get('has_reference_check_config', False) else 'No'
-            profile_anomaly_sensitivity = config_details.get('profile_anomaly_sensitivity', 'N/A')
-            cadence_anomaly_training_window = config_details.get('cadence_anomaly_training_window', 'N/A')
             
             # Error message for failed verifications
             error_message = detail.get('error', '')
@@ -5246,20 +5344,14 @@ def generate_config_verification_csv_report(verification_results: dict, input_cs
                 target_uid,
                 asset_id,
                 status_display,
-                has_schedule,
-                has_timezone,
+                config_status,
                 has_spark_config,
                 incremental_strategy,
-                has_notifications,
-                is_pattern_profile,
-                column_level,
                 resource_strategy,
                 auto_retry_enabled,
                 is_user_marked_reference,
                 is_reference_check_valid,
                 has_reference_check_config,
-                profile_anomaly_sensitivity,
-                cadence_anomaly_training_window,
                 error_message,
                 verification_details
             ])
