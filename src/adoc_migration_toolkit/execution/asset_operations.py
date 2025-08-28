@@ -12,8 +12,9 @@ import sys
 import threading
 import tempfile
 import os
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -749,7 +750,7 @@ def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, o
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             
             # Write header
-            writer.writerow(['target_uid', 'config_json'])
+            writer.writerow(['target_uid', 'config_json', 'source_uid'])
             
             for i, asset in enumerate(asset_data, 1):
                 source_uid = asset['source_uid']
@@ -791,9 +792,9 @@ def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, o
                     if not quiet_mode:
                         print(f"Writing asset configuration to CSV")
                     
-                    # Write the compressed JSON response to CSV with target_uid
+                    # Write the compressed JSON response to CSV with target_uid and source_uid
                     config_json = json.dumps(config_response, ensure_ascii=False, separators=(',', ':'))
-                    writer.writerow([target_uid, config_json])
+                    writer.writerow([target_uid, config_json, source_uid])
                     
                     if not quiet_mode:
                         print(f"✅ Written to file: {target_uid}")
@@ -826,21 +827,21 @@ def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, o
                 validation_errors = []
                 
                 # Validate header
-                if len(header) != 2:
-                    validation_errors.append(f"Invalid header: expected 2 columns, got {len(header)}")
-                elif header[0] != 'target_uid' or header[1] != 'config_json':
-                    validation_errors.append(f"Invalid header: expected ['target_uid', 'config_json'], got {header}")
+                if len(header) != 3:
+                    validation_errors.append(f"Invalid header: expected 3 columns, got {len(header)}")
+                elif header[0] != 'target_uid' or header[1] != 'config_json' or header[2] != 'source_uid':
+                    validation_errors.append(f"Invalid header: expected ['target_uid', 'config_json', 'source_uid'], got {header}")
                 
                 # Validate each row
                 for row_num, row in enumerate(reader, start=2):
                     row_count += 1
                     
                     # Check column count
-                    if len(row) != 2:
-                        validation_errors.append(f"Row {row_num}: Expected 2 columns, got {len(row)}")
+                    if len(row) != 3:
+                        validation_errors.append(f"Row {row_num}: Expected 3 columns, got {len(row)}")
                         continue
                     
-                    target_uid, config_json_str = row
+                    target_uid, config_json_str, source_uid = row
                     
                     # Check for empty values
                     if not target_uid.strip():
@@ -955,24 +956,37 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
             reader = csv.reader(f)
             # Skip header row if it exists
             header = next(reader, None)
-            if header and len(header) >= 2:
-                if 'target_uid' in header[0].lower() or 'config_json' in header[1].lower():
+            if header and len(header) >= 6:
+                if 'target_uid' in header[0].lower() or 'asset_config_json' in header[1].lower() or 'source_uid' in header[5].lower():
                     pass  # This is a header row, skip
                 else:
                     # This might be data, add it back
                     if header[0].strip() and header[1].strip():
                         asset_data.append({
                             'target_uid': header[0].strip(),
-                            'config_json': header[1].strip()
+                            'config_json': header[1].strip(),
+                            'source_uid': header[5].strip() if len(header) > 5 else 'Unknown'
                         })
             for row in reader:
-                if len(row) >= 2:  # Ensure we have at least target_uid and config_json
+                if len(row) >= 6:  # Ensure we have all 6 columns
                     target_uid = row[0].strip()
-                    config_json = row[1].strip()
+                    config_json = row[1].strip()  # asset_config_json column
+                    source_uid = row[5].strip()  # source_uid column (6th column)
                     if target_uid and config_json:  # Skip empty rows
                         asset_data.append({
                             'target_uid': target_uid,
-                            'config_json': config_json
+                            'config_json': config_json,
+                            'source_uid': source_uid
+                        })
+                elif len(row) >= 3:  # Fallback for 3-column format
+                    target_uid = row[0].strip()
+                    config_json = row[1].strip()
+                    source_uid = row[2].strip() if len(row) > 2 else 'Unknown'
+                    if target_uid and config_json:  # Skip empty rows
+                        asset_data.append({
+                            'target_uid': target_uid,
+                            'config_json': config_json,
+                            'source_uid': source_uid
                         })
         
         if not asset_data:
@@ -982,6 +996,22 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         
         if not quiet_mode:
             print(f"📊 Found {len(asset_data)} assets to process")
+        
+        # Check for and resolve duplicates before processing
+        duplicates_found = check_for_duplicates_in_asset_data(asset_data)
+        if duplicates_found:
+            if not quiet_mode:
+                print("🔍 Resolving duplicates interactively...")
+            
+            # Resolve duplicates interactively
+            resolved_asset_data = resolve_duplicates_interactively(asset_data, duplicates_found, quiet_mode, verbose_mode)
+            if resolved_asset_data is None:
+                print("❌ Duplicate resolution was cancelled by user")
+                return
+            else:
+                asset_data = resolved_asset_data
+                if not quiet_mode:
+                    print(f"✅ Duplicate resolution completed. Processing {len(asset_data)} unique configurations")
         
         # Create progress bar if in quiet mode
         if quiet_mode and not verbose_mode:
@@ -2913,10 +2943,10 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                     asset_target_id_to_uid_map_json = json.dumps(asset_target_id_to_uid_map, ensure_ascii=False,
                                                                  separators=(',', ':'))
 
-                    # Write the compressed JSON response to CSV with target_uid
+                    # Write the compressed JSON response to CSV with target_uid and source_uid
                     thread_results.append(
                         [target_uid, asset_config_json, asset_profile_anomaly_config_json, asset_id_to_uid_map_json,
-                         asset_target_id_to_uid_map_json])
+                         asset_target_id_to_uid_map_json, source_uid])
 
                     if verbose_mode:
                         print(f"[Thread {thread_id}] ✅ Written to file: {target_uid}")
@@ -2989,7 +3019,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
             # Write header
             writer.writerow(
                 ['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json',
-                 'asset_target_id_to_uid_map_json'])
+                 'asset_target_id_to_uid_map_json', 'source_uid'])
 
             # Write all results
             writer.writerows(all_results)
@@ -3006,30 +3036,27 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                 validation_errors = []
 
                 # Validate header
-                if len(header) != 4:
-                    validation_errors.append(f"Invalid header: expected 4 columns, got {len(header)}")
-                elif header[0] != 'target_uid' or header[1] != 'asset_config_json' or header[
-                    2] != 'asset_profile_anomaly_config_json' or header[3] != 'asset_id_to_uid_map_json' or header[
-                    4] != 'asset_target_id_to_uid_map_json':
-                    validation_errors.append(
-                        f"Invalid header: expected ['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json', 'asset_target_id_to_uid_map_json], got {header}")
+                if len(header) != 6:
+                    validation_errors.append(f"Invalid header: expected 6 columns, got {len(header)}")
+                elif header[0] != 'target_uid' or header[1] != 'asset_config_json' or header[2] != 'asset_profile_anomaly_config_json' or header[3] != 'asset_id_to_uid_map_json' or header[4] != 'asset_target_id_to_uid_map_json' or header[5] != 'source_uid':
+                    validation_errors.append(f"Invalid header: expected ['target_uid', 'asset_config_json', 'asset_profile_anomaly_config_json', 'asset_id_to_uid_map_json', 'asset_target_id_to_uid_map_json', 'source_uid'], got {header}")
 
                 # Validate each row
                 for row_num, row in enumerate(reader, start=2):
                     row_count += 1
 
                     # Check column count
-                    if len(row) != 4:
-                        validation_errors.append(f"Row {row_num}: Expected 4 columns, got {len(row)}")
+                    if len(row) != 6:
+                        validation_errors.append(f"Row {row_num}: Expected 6 columns, got {len(row)}")
                         continue
 
-                    target_uid, config_json_str, asset_profile_anomaly_config_json_str, asset_id_to_uid_map_json_str, asset_target_id_to_uid_map_json_str = row
+                    target_uid, asset_config_json_str, asset_profile_anomaly_config_json_str, asset_id_to_uid_map_json_str, asset_target_id_to_uid_map_json_str, source_uid = row
 
                     # Check for empty values
                     if not target_uid.strip():
                         validation_errors.append(f"Row {row_num}: Empty target_uid value")
 
-                    if not config_json_str.strip():
+                    if not asset_config_json_str.strip():
                         validation_errors.append(f"Row {row_num}: Empty asset_config_json value")
 
                     if not asset_profile_anomaly_config_json_str.strip():
@@ -3211,41 +3238,95 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
         csv.field_size_limit(sys.maxsize)
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
-            # Skip header row if it exists
-            header = next(reader, None)
-            if header and len(header) >= 2:
-                if 'target_uid' in header[0].lower() or 'config_json' in header[1].lower():
-                    pass  # This is a header row, skip
-                else:
-                    # This might be data, add it back
-                    if header[0].strip() and header[1].strip():
+            header = next(reader)  # Skip header
+            
+            # Determine CSV format (3-column or 6-column)
+            if len(header) == 3:
+                # 3-column format: target_uid, config_json, source_uid
+                for row in reader:
+                    if len(row) >= 3:
                         asset_data.append({
-                            'target_uid': header[0].strip(),
-                            'config_json': header[1].strip()
+                            'target_uid': row[0],
+                            'config_json': row[1],
+                            'source_uid': row[2]
                         })
-            for row in reader:
-                if len(row) >= 2:  # Ensure we have at least target_uid and config_json
-                    target_uid = row[0].strip()
-                    config_json = row[1].strip()
-                    asset_profile_anomaly_config_json = row[2].strip()
-                    asset_id_to_uid_map_json = row[3].strip()
-                    asset_target_id_to_uid_map_json = row[4].strip()
-                    if target_uid and config_json:  # Skip empty rows
+            elif len(header) >= 6:
+                # 6-column format: target_uid, asset_config_json, asset_profile_anomaly_config_json, asset_id_to_uid_map_json, asset_target_id_to_uid_map_json, source_uid
+                for row in reader:
+                    if len(row) >= 6:
                         asset_data.append({
-                            'target_uid': target_uid,
-                            'config_json': config_json,
-                            'asset_profile_anomaly_config_json': asset_profile_anomaly_config_json,
-                            'asset_id_to_uid_map_json': asset_id_to_uid_map_json,
-                            'asset_target_id_to_uid_map_json': asset_target_id_to_uid_map_json,
+                            'target_uid': row[0],
+                            'config_json': row[1],
+                            'source_uid': row[5]
+                        })
+            else:
+                # Fallback for other formats
+                for row in reader:
+                    if len(row) >= 2:
+                        asset_data.append({
+                            'target_uid': row[0],
+                            'config_json': row[1],
+                            'source_uid': row[2] if len(row) > 2 else 'Unknown'
                         })
 
         if not asset_data:
-            print("❌ No valid asset data found in CSV file")
-            logger.warning("No valid asset data found in CSV file")
+            print("❌ No asset data found in CSV file")
             return
 
         if not quiet_mode:
             print(f"📊 Found {len(asset_data)} assets to process")
+
+        # Check for and resolve duplicates before processing
+        duplicates_found = check_for_duplicates_in_asset_data(asset_data)
+        if duplicates_found:
+            if not quiet_mode:
+                print("🔍 Resolving duplicates interactively...")
+            
+            # Resolve duplicates interactively
+            resolved_asset_data = resolve_duplicates_interactively(asset_data, duplicates_found, quiet_mode, verbose_mode)
+            if resolved_asset_data is None:
+                print("❌ Duplicate resolution was cancelled by user")
+                return
+            else:
+                asset_data = resolved_asset_data
+                if not quiet_mode:
+                    print(f"✅ Duplicate resolution completed. Processing {len(asset_data)} unique configurations")
+
+        # Pre-analyze assets to provide better visibility
+        print(f"\n📊 ASSET CONFIG IMPORT ANALYSIS")
+        print("=" * 60)
+        print(f"📋 Total assets in CSV: {len(asset_data)}")
+        
+        # Categorize assets before processing
+        assets_with_config = 0
+        assets_without_config = 0
+        assets_with_null_config = 0
+        assets_with_empty_config = 0
+        
+        for asset in asset_data:
+            config_json = asset['config_json']
+            try:
+                config_data = json.loads(config_json)
+                if "assetConfiguration" in config_data:
+                    if config_data["assetConfiguration"] is not None:
+                        assets_with_config += 1
+                    else:
+                        assets_with_null_config += 1
+                else:
+                    assets_without_config += 1
+            except (json.JSONDecodeError, TypeError):
+                assets_with_empty_config += 1
+        
+        print(f"🔧 Assets with custom configuration: {assets_with_config}")
+        print(f"⚙️  Assets with null configuration: {assets_with_null_config}")
+        print(f"📄 Assets without configuration field: {assets_without_config}")
+        print(f"❌ Assets with invalid JSON: {assets_with_empty_config}")
+        print("=" * 60)
+        
+        if assets_with_config == 0:
+            print("⚠️  No assets with custom configurations found. All assets will be skipped.")
+            print("💡 This is normal if all assets have default configurations.")
+            return
 
         # Determine number of threads (max 5, min 1)
         num_threads = min(max_threads, max(1, len(asset_data)))
@@ -3318,7 +3399,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                             print(f"   ❌ {error_msg}")
                         thread_failed += 1
                         asset_not_found_thread += 1
-                        thread_results.append({'target_uid': target_uid, 'error': error_msg, 'status': 'failed'})
+                        thread_results.append({'target_uid': target_uid, 'error': error_msg, 'status': 'failed', 'reason': 'Asset not found in target'})
                         continue
 
                     asset_id = response['data'][0]['id']
@@ -3337,7 +3418,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                             print(f"[DRY RUN][Thread {thread_id}] Payload:")
                             print(json.dumps(transformed_config, indent=2))
                             thread_successful += 1
-                            thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'dry_run'})
+                            thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'dry_run', 'reason': 'Dry run mode'})
                             continue
 
                         config_response = client.make_api_call(
@@ -3353,7 +3434,7 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
 
                         if config_response:
                             thread_successful += 1
-                            thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'success'})
+                            thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'success', 'reason': 'Configuration imported successfully'})
                             if verbose_mode:
                                 print(f"   ✅ Successfully updated config for {target_uid}")
                         else:
@@ -3362,25 +3443,31 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                                 print(f"   ❌ {error_msg}")
                             thread_failed += 1
                             thread_results.append(
-                                {'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
+                                {'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg, 'reason': 'API call failed'})
                     else:
-                        error_msg = f"Asset configuration not found: {asset_id}"
+                        # Enhanced reason for skipping
+                        if "assetConfiguration" not in config_data:
+                            reason = "No assetConfiguration field in config"
+                        elif config_data["assetConfiguration"] is None:
+                            reason = "assetConfiguration is null (default config)"
+                        else:
+                            reason = "Invalid assetConfiguration format"
+                        
                         if verbose_mode:
-                            print(f"   ❌ {error_msg}")
+                            print(f"   ⏭️ Skipping {target_uid}: {reason}")
                         thread_failed += 1
                         asset_configs_not_per_thread += 1
-                        thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'failed', 'error': error_msg})
+                        thread_results.append({'target_uid': target_uid, 'asset_id': asset_id, 'status': 'skipped', 'reason': reason})
                         continue
 
-                    # Anomaly config exists only when asset configurations are present
-                    import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, quiet_mode, verbose_mode,
-                                                   dry_run)
+                    # Note: Profile anomaly configs are handled separately if needed
+                    # import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, quiet_mode, verbose_mode, dry_run)
                 except Exception as e:
                     error_msg = f"Error processing {target_uid}: {str(e)}"
                     if verbose_mode:
                         print(f"   ❌ {error_msg}")
                     thread_failed += 1
-                    thread_results.append({'target_uid': target_uid, 'status': 'failed', 'error': error_msg})
+                    thread_results.append({'target_uid': target_uid, 'status': 'failed', 'error': error_msg, 'reason': 'Exception occurred'})
 
                 # Update progress bar
                 if thread_pbar:
@@ -3399,51 +3486,26 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
                 asset_configs_not_found += asset_configs_not_per_thread
                 asset_not_found += asset_not_found_thread
 
-            return {
-                'thread_id': thread_id,
-                'successful': thread_successful,
-                'failed': thread_failed,
-                'total_assets': end_index - start_index,
-                'results': thread_results
-            }
-
-        # Calculate chunk sizes
+        # Create and start threads
+        threads = []
         chunk_size = len(asset_data) // num_threads
         remainder = len(asset_data) % num_threads
 
-        # Create and start threads
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = []
-            start_index = 0
+        start_index = 0
+        for i in range(num_threads):
+            end_index = start_index + chunk_size + (1 if i < remainder else 0)
+            thread = threading.Thread(target=process_asset_chunk, args=(i, start_index, end_index))
+            threads.append(thread)
+            thread.start()
+            start_index = end_index
 
-            for i in range(num_threads):
-                # Calculate end index for this thread
-                end_index = start_index + chunk_size
-                if i < remainder:  # Distribute remainder across first few threads
-                    end_index += 1
-
-                if start_index < end_index:  # Only create thread if there's work to do
-                    future = executor.submit(process_asset_chunk, i, start_index, end_index)
-                    futures.append(future)
-
-                start_index = end_index
-
-            # Collect results
-            thread_results = []
-            for future in as_completed(futures):
-                thread_results.append(future.result())
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
 
         # Close main progress bar
         if quiet_mode and not verbose_mode:
             pbar.close()
-
-        if thread_results:
-            print(f"\nThread Statistics:")
-            for result in thread_results:
-                thread_name = thread_names[result['thread_id']] if result['thread_id'] < len(
-                    thread_names) else f"Thread {result['thread_id']}"
-                print(
-                    f"  {thread_name}: {result['successful']} successful, {result['failed']} failed, {result['total_assets']} assets")
 
         if failed > 0:
             print(f"\nFailed assets:")
@@ -3458,15 +3520,36 @@ def execute_asset_config_import_parallel(csv_file: str, client, logger: logging.
         else:
             print(f"⚠️  Asset config import completed with {failed} failures. Check the details above.")
 
-        # Print summary
+        # Enhanced summary with detailed breakdown
         print("\n" + "=" * 60)
         print("ASSET CONFIG IMPORT SUMMARY")
         print("=" * 60)
-        print(f"Total assets processed: {total_assets_processed}")
-        print(f"Successful: {successful}")
-        print(f"Failed: {failed}")
-        print(f"Asset not found in the target:{asset_not_found}")
-        print(f"List of Asset's with default config not to be migrated :{asset_configs_not_found}")
+        print(f"📋 Total assets in CSV: {len(asset_data)}")
+        print(f"🔧 Assets with custom configuration: {assets_with_config}")
+        print(f"⚙️  Assets with null configuration: {assets_with_null_config}")
+        print(f"📄 Assets without configuration field: {assets_without_config}")
+        print(f"❌ Assets with invalid JSON: {assets_with_empty_config}")
+        print("-" * 60)
+        print(f"🔄 Total assets processed: {total_assets_processed}")
+        print(f"✅ Successfully imported: {successful}")
+        print(f"❌ Failed to import: {failed}")
+        print(f"🔍 Asset not found in target: {asset_not_found}")
+        print(f"⏭️  Assets skipped (default config): {asset_configs_not_found}")
+        print("=" * 60)
+        
+        # Show detailed reasons for skipped assets
+        if asset_configs_not_found > 0:
+            print(f"\n📋 DETAILED BREAKDOWN OF SKIPPED ASSETS:")
+            print("-" * 60)
+            skipped_reasons = {}
+            for result in all_results:
+                if result['status'] == 'skipped':
+                    reason = result.get('reason', 'Unknown reason')
+                    skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+            
+            for reason, count in skipped_reasons.items():
+                print(f"  • {reason}: {count} assets")
+            print("-" * 60)
 
     except Exception as e:
         error_msg = f"Error executing asset config import: {e}"
@@ -3761,7 +3844,8 @@ def import_profile_anomaly_configs(asset_data, assets_mapping, client, logger, q
     for asset in asset_data:
         target_uid = asset['target_uid']
         config_json = asset['config_json']
-        profile_anomaly_config_json = asset['asset_profile_anomaly_config_json']
+        # Safely get profile_anomaly_config_json, defaulting to None if not present
+        profile_anomaly_config_json = asset.get('asset_profile_anomaly_config_json', None)
         try:
             if profile_anomaly_config_json and profile_anomaly_config_json.strip() and profile_anomaly_config_json.strip() not in ('{}', 'null'):
                 if verbose_mode:
@@ -3980,7 +4064,7 @@ def detect_and_resolve_duplicates(csv_file: str, quiet_mode: bool = False, verbo
         return csv_file
     
     if not quiet_mode:
-        print(f"\n🔍 Found {len(duplicates)} target UIDs which are pointing to multiple UIDs from the source. So we have duplicate configurations present:")
+        print(f"\n🔍 Found {len(duplicates)} Source UIDs which are pointing to single Target UIDs. So we have duplicate configurations present:")
         print("="*80)
     
     # Let user choose for each duplicate
@@ -4095,6 +4179,18 @@ def verify_profile_configurations_after_import(csv_file: str, client, logger: lo
         if not quiet_mode:
             print(f"❌ CSV file not found: {csv_file}")
         return None
+    
+    # Check if a deduplicated version exists and use it for verification
+    csv_path = Path(csv_file)
+    deduplicated_csv = csv_path.parent / f"{csv_path.stem}_deduplicated{csv_path.suffix}"
+    
+    if deduplicated_csv.exists():
+        csv_file = str(deduplicated_csv)
+        if not quiet_mode:
+            print(f"📄 Using deduplicated CSV for verification: {csv_file}")
+    else:
+        if not quiet_mode:
+            print(f"📄 Using original CSV for verification: {csv_file}")
     
     if not quiet_mode:
         print(f"\n🔍 Verifying profile configurations in target environment...")
@@ -4333,6 +4429,51 @@ def verify_profile_configurations_after_import(csv_file: str, client, logger: lo
         print(f"🔍 Asset not found: {verification_results['asset_not_found']}")
         print(f"📋 Profile not found: {verification_results['profile_not_found']}")
         
+        if verification_results['successful'] > 0:
+            success_rate = (verification_results['successful'] / verification_results['total_checked']) * 100
+            print(f"📈 Success rate: {success_rate:.1f}%")
+        
+        # Enhanced detailed breakdown
+        print(f"\n🔍 DETAILED BREAKDOWN:")
+        print("=" * 60)
+        
+        # Categorize results by status
+        status_counts = {}
+        for detail in verification_results['details']:
+            status = detail.get('status', 'unknown')
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        for status, count in status_counts.items():
+            status_icon = {
+                'success': '✅',
+                'asset_not_found': '❌',
+                'profile_not_found': '❌',
+                'error': '❌'
+            }.get(status, '❓')
+            print(f"   {status_icon} {status.replace('_', ' ').title()}: {count} assets")
+        
+        # Show specific failure details
+        failed_results = [d for d in verification_results['details'] if d.get('status') != 'success']
+        if failed_results:
+            print(f"\n❌ FAILURE DETAILS:")
+            print("-" * 60)
+            failure_reasons = {}
+            for result in failed_results:
+                error_msg = result.get('error', 'Unknown error')
+                failure_reasons[error_msg] = failure_reasons.get(error_msg, 0) + 1
+            
+            for reason, count in failure_reasons.items():
+                print(f"   • {reason}: {count} assets")
+            
+            # Show examples of failed assets
+            print(f"\n📋 Examples of failed assets:")
+            for i, result in enumerate(failed_results[:3]):  # Show first 3 examples
+                print(f"   {i+1}. {result.get('target_uid', 'N/A')}: {result.get('error', 'Unknown error')}")
+            if len(failed_results) > 3:
+                print(f"   ... and {len(failed_results) - 3} more")
+        
+        print("=" * 60)
+        
         if csv_report_path:
             print(f"📄 Detailed CSV report: {csv_report_path}")
         
@@ -4348,13 +4489,6 @@ def verify_profile_configurations_after_import(csv_file: str, client, logger: lo
                 print(f"      - Enabled: {'✅' if config['is_enabled'] else '❌'}")
                 if config['has_notifications']:
                     print(f"      - Notification IDs: {config['notification_ids']}")
-        
-        # Show failed configurations
-        failed_configs = [d for d in verification_results['details'] if d['status'] != 'success']
-        if failed_configs:
-            print(f"\n❌ Failed verifications:")
-            for config in failed_configs[:5]:  # Show first 5
-                print(f"   - {config['target_uid']}: {config['error']}")
     
     return verification_results
 
@@ -4468,6 +4602,672 @@ def generate_verification_csv_report(verification_results: dict, input_csv_file:
         print(f"✅ CSV report generated successfully!")
         print(f"   📊 Total records: {len(verification_results['details'])}")
         
+        # Show detailed summary statistics
+        successful_count = len([d for d in verification_results['details'] if d['status'] == 'success'])
+        mismatch_count = len([d for d in verification_results['details'] if d['status'] == 'mismatch'])
+        error_count = len([d for d in verification_results['details'] if d['status'] == 'error'])
+        asset_not_found_count = len([d for d in verification_results['details'] if d['status'] == 'asset_not_found'])
+        config_not_found_count = len([d for d in verification_results['details'] if d['status'] == 'config_not_found'])
+        
+        print(f"   ✅ Passed: {successful_count}")
+        print(f"   ⚠️  Mismatch: {mismatch_count}")
+        print(f"   ❌ Error: {error_count}")
+        print(f"   🔍 Asset not found: {asset_not_found_count}")
+        print(f"   ⚙️  Config not found: {config_not_found_count}")
+        
+        # Show CSV report insights
+        if mismatch_count > 0:
+            print(f"\n📋 CSV Report Insights:")
+            print(f"   📄 Report file: {report_path}")
+            print(f"   🔍 Check 'Verification_Details' column for specific mismatch reasons")
+            print(f"   📊 Use 'Verification_Status' column to filter results")
+            print(f"   💡 Mismatched assets may need manual review or re-import")
+        
+        if verbose_mode:
+            print(f"   📁 Report location: {report_path}")
+    
+    return str(report_path)
+def verify_asset_configurations_after_import(input_csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5):
+    """
+    Verify that asset configurations were successfully imported by checking the target environment.
+    
+    Args:
+        input_csv_file: Path to the asset-config-import-ready.csv file
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+        max_threads: Maximum number of threads for parallel processing
+    
+    Returns:
+        dict: Verification results with summary and details
+    """
+    try:
+        # Check if CSV file exists
+        csv_path = Path(input_csv_file)
+        if not csv_path.exists():
+            error_msg = f"CSV file does not exist: {input_csv_file}"
+            print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return None
+        
+        # Read CSV data
+        asset_data = []
+        with open(input_csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            # Skip header row if it exists
+            header = next(reader, None)
+            if header and len(header) >= 2:
+                if 'target_uid' in header[0].lower() or 'config_json' in header[1].lower():
+                    pass  # This is a header row, skip
+                else:
+                    # This might be data, add it back
+                    if header[0].strip() and header[1].strip():
+                        asset_data.append({
+                            'target_uid': header[0].strip(),
+                            'config_json': header[1].strip()
+                        })
+            for row in reader:
+                if len(row) >= 2:  # Ensure we have at least target_uid and config_json
+                    target_uid = row[0].strip()
+                    config_json = row[1].strip()
+                    if target_uid and config_json:  # Skip empty rows
+                        asset_data.append({
+                            'target_uid': target_uid,
+                            'config_json': config_json
+                        })
+        
+        if not asset_data:
+            print("❌ No valid asset data found in CSV file")
+            logger.warning("No valid asset data found in CSV file")
+            return None
+        
+        if not quiet_mode:
+            print(f"🔍 Verifying {len(asset_data)} asset configurations...")
+        
+        # Determine number of threads
+        num_threads = min(max_threads, max(1, len(asset_data)))
+        
+        if not quiet_mode:
+            print(f"🔄 Using {num_threads} threads for verification")
+        
+        # Thread-safe counters
+        successful = 0
+        failed = 0
+        asset_not_found = 0
+        config_not_found = 0
+        lock = threading.Lock()
+        all_results = []
+        
+        # Create progress bar if in quiet mode
+        if quiet_mode and not verbose_mode:
+            pbar = tqdm(total=len(asset_data), desc="Verifying configs", colour='blue')
+        
+        def verify_asset_config_chunk(thread_id, start_index, end_index):
+            nonlocal successful, failed, asset_not_found, config_not_found
+            thread_successful = 0
+            thread_failed = 0
+            thread_asset_not_found = 0
+            thread_config_not_found = 0
+            thread_results = []
+            
+            thread_name = f"Thread-{thread_id}"
+            
+            for i in range(start_index, end_index):
+                if i >= len(asset_data):
+                    break
+                
+                asset = asset_data[i]
+                target_uid = asset['target_uid']
+                expected_config = asset['config_json']
+                
+                try:
+                    # Step 1: Get asset ID from target_uid
+                    if verbose_mode:
+                        print(f"\n🔍 {thread_name}: Processing asset {i+1}/{len(asset_data)}: {target_uid}")
+                        print(f"   GET /catalog-server/api/assets?uid={target_uid}")
+                    
+                    # Make GET request to get asset ID
+                    response = client.make_api_call(
+                        endpoint=f'/catalog-server/api/assets?uid={target_uid}',
+                        method='GET',
+                        use_target_auth=True,
+                        use_target_tenant=True
+                    )
+                    
+                    if not response or 'data' not in response or not response['data']:
+                        error_msg = f"No asset found for UID: {target_uid}"
+                        if verbose_mode:
+                            print(f"   ❌ {thread_name}: {error_msg}")
+                        thread_asset_not_found += 1
+                        thread_results.append({
+                            'target_uid': target_uid,
+                            'asset_id': None,
+                            'status': 'asset_not_found',
+                            'error': error_msg,
+                            'has_config': False,
+                            'config_details': {}
+                        })
+                        continue
+                    
+                    asset_id = response['data'][0].get('id')
+                    if not asset_id:
+                        error_msg = f"No asset ID found for UID: {target_uid}"
+                        if verbose_mode:
+                            print(f"   ❌ {thread_name}: {error_msg}")
+                        thread_asset_not_found += 1
+                        thread_results.append({
+                            'target_uid': target_uid,
+                            'asset_id': None,
+                            'status': 'asset_not_found',
+                            'error': error_msg,
+                            'has_config': False,
+                            'config_details': {}
+                        })
+                        continue
+                    
+                    # Step 2: Get asset configuration
+                    if verbose_mode:
+                        print(f"   GET /catalog-server/api/assets/{asset_id}/config")
+                    
+                    config_response = client.make_api_call(
+                        endpoint=f'/catalog-server/api/assets/{asset_id}/config',
+                        method='GET',
+                        use_target_auth=True,
+                        use_target_tenant=True
+                    )
+                    
+                    if not config_response or 'assetConfiguration' not in config_response:
+                        error_msg = f"No configuration found for asset ID: {asset_id}"
+                        if verbose_mode:
+                            print(f"   ❌ {thread_name}: {error_msg}")
+                        thread_config_not_found += 1
+                        thread_results.append({
+                            'target_uid': target_uid,
+                            'asset_id': asset_id,
+                            'status': 'config_not_found',
+                            'error': error_msg,
+                            'has_config': False,
+                            'config_details': {}
+                        })
+                        continue
+                    
+                    # Step 3: Compare configurations
+                    actual_config = config_response.get('assetConfiguration') or {}
+                    
+                    # Parse expected config JSON
+                    try:
+                        expected_config_dict = json.loads(expected_config)
+                        expected_asset_config = expected_config_dict.get('assetConfiguration') or {}
+                    except json.JSONDecodeError as e:
+                        error_msg = f"Invalid expected config JSON: {e}"
+                        if verbose_mode:
+                            print(f"   ❌ {thread_name}: {error_msg}")
+                        thread_failed += 1
+                        thread_results.append({
+                            'target_uid': target_uid,
+                            'asset_id': asset_id,
+                            'status': 'error',
+                            'error': error_msg,
+                            'has_config': True,
+                            'config_details': actual_config
+                        })
+                        continue
+                    
+                    # Comprehensive configuration verification
+                    config_verification = {
+                        'has_schedule': actual_config.get('scheduled', False),
+                        'has_timezone': bool(actual_config.get('timeZone')),
+                        'has_spark_config': bool(actual_config.get('sparkResourceConfig')),
+                        'incremental_strategy': bool(actual_config.get('markerConfiguration')),
+                        'has_notifications': bool(actual_config.get('notificationChannels')),
+                        'is_pattern_profile': actual_config.get('isPatternProfile', False),
+                        'column_level': actual_config.get('columnLevel'),
+                        'resource_strategy': actual_config.get('resourceStrategyType'),
+                        'auto_retry_enabled': actual_config.get('autoRetryEnabled', False),
+                        'is_user_marked_reference': actual_config.get('isUserMarkedReference', False),
+                        'is_reference_check_valid': actual_config.get('isReferenceCheckValid', False),
+                        'has_reference_check_config': bool(actual_config.get('referenceCheckConfiguration')),
+                        'profile_anomaly_sensitivity': actual_config.get('profileAnomalyModelSensitivity'),
+                        'cadence_anomaly_training_window': actual_config.get('cadenceAnomalyTrainingWindowMinimumInDays')
+                    }
+                    
+                    # Check if key configurations match
+                    verification_passed = True
+                    verification_details = []
+                    detailed_mismatches = []
+                    
+                    # Compare key fields with detailed mismatch information and default config detection
+                    expected_scheduled = expected_asset_config.get('scheduled')
+                    actual_scheduled = actual_config.get('scheduled')
+                    if expected_scheduled != actual_scheduled:
+                        verification_passed = False
+                        verification_details.append("Schedule mismatch")
+                        if expected_scheduled and not actual_scheduled:
+                            detailed_mismatches.append(f"Schedule: Default config present in source but missing in target")
+                        elif not expected_scheduled and actual_scheduled:
+                            detailed_mismatches.append(f"Schedule: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Schedule: Expected={expected_scheduled}, Actual={actual_scheduled}")
+                    
+                    expected_timezone = expected_asset_config.get('timeZone')
+                    actual_timezone = actual_config.get('timeZone')
+                    if expected_timezone != actual_timezone:
+                        verification_passed = False
+                        verification_details.append("Timezone mismatch")
+                        if expected_timezone and not actual_timezone:
+                            detailed_mismatches.append(f"Timezone: Default config present in source but missing in target")
+                        elif not expected_timezone and actual_timezone:
+                            detailed_mismatches.append(f"Timezone: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Timezone: Expected={expected_timezone}, Actual={actual_timezone}")
+                    
+                    expected_pattern = expected_asset_config.get('isPatternProfile')
+                    actual_pattern = actual_config.get('isPatternProfile')
+                    if expected_pattern != actual_pattern:
+                        verification_passed = False
+                        verification_details.append("Pattern profile mismatch")
+                        if expected_pattern and not actual_pattern:
+                            detailed_mismatches.append(f"Pattern Profile: Default config present in source but missing in target")
+                        elif not expected_pattern and actual_pattern:
+                            detailed_mismatches.append(f"Pattern Profile: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Pattern Profile: Expected={expected_pattern}, Actual={actual_pattern}")
+                    
+                    expected_column_level = expected_asset_config.get('columnLevel')
+                    actual_column_level = actual_config.get('columnLevel')
+                    if expected_column_level != actual_column_level:
+                        verification_passed = False
+                        verification_details.append("Column level mismatch")
+                        if expected_column_level and not actual_column_level:
+                            detailed_mismatches.append(f"Column Level: Default config present in source but missing in target")
+                        elif not expected_column_level and actual_column_level:
+                            detailed_mismatches.append(f"Column Level: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Column Level: Expected={expected_column_level}, Actual={actual_column_level}")
+                    
+                    expected_resource_strategy = expected_asset_config.get('resourceStrategyType')
+                    actual_resource_strategy = actual_config.get('resourceStrategyType')
+                    if expected_resource_strategy != actual_resource_strategy:
+                        verification_passed = False
+                        verification_details.append("Resource strategy mismatch")
+                        if expected_resource_strategy and not actual_resource_strategy:
+                            detailed_mismatches.append(f"Resource Strategy: Default config present in source but missing in target")
+                        elif not expected_resource_strategy and actual_resource_strategy:
+                            detailed_mismatches.append(f"Resource Strategy: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Resource Strategy: Expected={expected_resource_strategy}, Actual={actual_resource_strategy}")
+                    
+                    expected_user_reference = expected_asset_config.get('isUserMarkedReference')
+                    actual_user_reference = actual_config.get('isUserMarkedReference')
+                    if expected_user_reference != actual_user_reference:
+                        verification_passed = False
+                        verification_details.append("User marked reference mismatch")
+                        if expected_user_reference and not actual_user_reference:
+                            detailed_mismatches.append(f"User Marked Reference: Default config present in source but missing in target")
+                        elif not expected_user_reference and actual_user_reference:
+                            detailed_mismatches.append(f"User Marked Reference: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"User Marked Reference: Expected={expected_user_reference}, Actual={actual_user_reference}")
+                    
+                    expected_sensitivity = expected_asset_config.get('profileAnomalyModelSensitivity')
+                    actual_sensitivity = actual_config.get('profileAnomalyModelSensitivity')
+                    if expected_sensitivity != actual_sensitivity:
+                        verification_passed = False
+                        verification_details.append("Profile anomaly sensitivity mismatch")
+                        if expected_sensitivity and not actual_sensitivity:
+                            detailed_mismatches.append(f"Profile Anomaly Sensitivity: Default config present in source but missing in target")
+                        elif not expected_sensitivity and actual_sensitivity:
+                            detailed_mismatches.append(f"Profile Anomaly Sensitivity: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Profile Anomaly Sensitivity: Expected={expected_sensitivity}, Actual={actual_sensitivity}")
+                    
+                    expected_training_window = expected_asset_config.get('cadenceAnomalyTrainingWindowMinimumInDays')
+                    actual_training_window = actual_config.get('cadenceAnomalyTrainingWindowMinimumInDays')
+                    if expected_training_window != actual_training_window:
+                        verification_passed = False
+                        verification_details.append("Cadence anomaly training window mismatch")
+                        if expected_training_window and not actual_training_window:
+                            detailed_mismatches.append(f"Training Window: Default config present in source but missing in target")
+                        elif not expected_training_window and actual_training_window:
+                            detailed_mismatches.append(f"Training Window: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Training Window: Expected={expected_training_window}, Actual={actual_training_window}")
+                    
+                    expected_auto_retry = expected_asset_config.get('autoRetryEnabled')
+                    actual_auto_retry = actual_config.get('autoRetryEnabled')
+                    if expected_auto_retry != actual_auto_retry:
+                        verification_passed = False
+                        verification_details.append("Auto retry enabled mismatch")
+                        if expected_auto_retry and not actual_auto_retry:
+                            detailed_mismatches.append(f"Auto Retry: Default config present in source but missing in target")
+                        elif not expected_auto_retry and actual_auto_retry:
+                            detailed_mismatches.append(f"Auto Retry: Default config missing in source but present in target")
+                        else:
+                            detailed_mismatches.append(f"Auto Retry: Expected={expected_auto_retry}, Actual={actual_auto_retry}")
+                    
+                    if verification_passed:
+                        if verbose_mode:
+                            print(f"   ✅ {thread_name}: Configuration verified successfully for {target_uid}")
+                        thread_successful += 1
+                        thread_results.append({
+                            'target_uid': target_uid,
+                            'asset_id': asset_id,
+                            'status': 'success',
+                            'error': None,
+                            'has_config': True,
+                            'config_details': config_verification,
+                            'verification_details': 'All configurations match'
+                        })
+                    else:
+                        if verbose_mode:
+                            print(f"   ⚠️ {thread_name}: Configuration mismatch for {target_uid}: {', '.join(verification_details)}")
+                        thread_failed += 1
+                        thread_results.append({
+                            'target_uid': target_uid,
+                            'asset_id': asset_id,
+                            'status': 'mismatch',
+                            'error': f"Configuration mismatch: {', '.join(verification_details)}",
+                            'has_config': True,
+                            'config_details': config_verification,
+                            'verification_details': ', '.join(verification_details),
+                            'detailed_mismatches': detailed_mismatches
+                        })
+                
+                except Exception as e:
+                    error_msg = f"Error verifying asset {target_uid}: {str(e)}"
+                    if verbose_mode:
+                        print(f"   ❌ {thread_name}: {error_msg}")
+                    thread_failed += 1
+                    thread_results.append({
+                        'target_uid': target_uid,
+                        'asset_id': None,
+                        'status': 'error',
+                        'error': error_msg,
+                        'has_config': False,
+                        'config_details': {}
+                    })
+                
+                # Update progress bar
+                if quiet_mode and not verbose_mode:
+                    pbar.update(1)
+            
+            # Update global counters
+            with lock:
+                successful += thread_successful
+                failed += thread_failed
+                asset_not_found += thread_asset_not_found
+                config_not_found += thread_config_not_found
+                all_results.extend(thread_results)
+            
+            if verbose_mode:
+                print(f"🔍 {thread_name}: Completed - {thread_successful} success, {thread_failed} failed, {thread_asset_not_found} asset not found, {thread_config_not_found} config not found")
+        
+        # Create and start threads
+        threads = []
+        chunk_size = len(asset_data) // num_threads
+        remainder = len(asset_data) % num_threads
+        
+        start_index = 0
+        for thread_id in range(num_threads):
+            end_index = start_index + chunk_size + (1 if thread_id < remainder else 0)
+            thread = threading.Thread(
+                target=verify_asset_config_chunk,
+                args=(thread_id + 1, start_index, end_index)
+            )
+            threads.append(thread)
+            thread.start()
+            start_index = end_index
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Close progress bar
+        if quiet_mode and not verbose_mode:
+            pbar.close()
+        
+        # Compile results
+        verification_results = {
+            'summary': {
+                'total_assets': len(asset_data),
+                'successful': successful,
+                'failed': failed,
+                'asset_not_found': asset_not_found,
+                'config_not_found': config_not_found
+            },
+            'details': all_results
+        }
+        
+        # Display summary
+        if not quiet_mode:
+            print(f"\n📊 Asset Configuration Verification Summary:")
+            print(f"   📋 Total assets processed: {len(asset_data)}")
+            print(f"   ✅ Successfully verified: {successful}")
+            print(f"   ❌ Failed verification: {failed}")
+            print(f"   🔍 Asset not found: {asset_not_found}")
+            print(f"   ⚙️ Config not found: {config_not_found}")
+            
+            if successful > 0:
+                success_rate = (successful / len(asset_data)) * 100
+                print(f"   📈 Success rate: {success_rate:.1f}%")
+            
+            # Enhanced detailed breakdown
+            print(f"\n🔍 DETAILED BREAKDOWN:")
+            print("=" * 60)
+            
+            # Categorize results by status
+            status_counts = {}
+            for result in all_results:
+                status = result.get('status', 'unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
+            
+            for status, count in status_counts.items():
+                status_icon = {
+                    'success': '✅',
+                    'mismatch': '⚠️',
+                    'asset_not_found': '❌',
+                    'config_not_found': '❌',
+                    'error': '❌'
+                }.get(status, '❓')
+                print(f"   {status_icon} {status.replace('_', ' ').title()}: {count} assets")
+            
+            # Show specific mismatch details
+            mismatch_results = [r for r in all_results if r.get('status') == 'mismatch']
+            if mismatch_results:
+                print(f"\n⚠️  CONFIGURATION MISMATCHES DETAILS:")
+                print("-" * 60)
+                mismatch_reasons = {}
+                for result in mismatch_results:
+                    error_msg = result.get('error', 'Unknown mismatch')
+                    mismatch_reasons[error_msg] = mismatch_reasons.get(error_msg, 0) + 1
+                
+                for reason, count in mismatch_reasons.items():
+                    print(f"   • {reason}: {count} assets")
+                
+                # Show detailed mismatch reasons
+                print(f"\n🔍 DETAILED MISMATCH REASONS:")
+                print("-" * 60)
+                detailed_reasons = {}
+                for result in mismatch_results:
+                    detailed_mismatches = result.get('detailed_mismatches', [])
+                    for mismatch in detailed_mismatches:
+                        detailed_reasons[mismatch] = detailed_reasons.get(mismatch, 0) + 1
+                
+                # Group by configuration field for better readability
+                field_groups = {}
+                for reason, count in detailed_reasons.items():
+                    # Extract field name (everything before the colon)
+                    field_name = reason.split(':')[0].strip()
+                    if field_name not in field_groups:
+                        field_groups[field_name] = []
+                    field_groups[field_name].append((reason, count))
+                
+                for field_name, reasons in field_groups.items():
+                    print(f"   📋 {field_name}:")
+                    for reason, count in reasons:
+                        # Extract the specific reason (everything after the colon)
+                        specific_reason = reason.split(':', 1)[1].strip()
+                        print(f"      • {specific_reason}: {count} assets")
+                
+                # Show examples of mismatched assets with specific details
+                print(f"\n📋 Examples of mismatched assets:")
+                for i, result in enumerate(mismatch_results[:3]):  # Show first 3 examples with details
+                    print(f"   {i+1}. {result.get('target_uid', 'N/A')}")
+                    detailed_mismatches = result.get('detailed_mismatches', [])
+                    for mismatch in detailed_mismatches:
+                        print(f"      - {mismatch}")
+                if len(mismatch_results) > 3:
+                    print(f"   ... and {len(mismatch_results) - 3} more assets with similar mismatches")
+            
+            # Show error details
+            error_results = [r for r in all_results if r.get('status') == 'error']
+            if error_results:
+                print(f"\n❌ ERROR DETAILS:")
+                print("-" * 60)
+                error_types = {}
+                for result in error_results:
+                    error_msg = result.get('error', 'Unknown error')
+                    error_types[error_msg] = error_types.get(error_msg, 0) + 1
+                
+                for error_type, count in error_types.items():
+                    print(f"   • {error_type}: {count} assets")
+            
+            print("=" * 60)
+        
+        return verification_results
+    
+    except Exception as e:
+        error_msg = f"Error in asset configuration verification: {e}"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        return None
+
+def generate_config_verification_csv_report(verification_results: dict, input_csv_file: str, quiet_mode: bool = False, verbose_mode: bool = False):
+    """
+    Generate a detailed CSV report of asset configuration verification results.
+    
+    Args:
+        verification_results: Results from verify_asset_configurations_after_import
+        input_csv_file: Path to the input CSV file
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to enable verbose logging
+    
+    Returns:
+        str: Path to the generated CSV report
+    """
+    if not verification_results or 'details' not in verification_results:
+        if not quiet_mode:
+            print("❌ No verification results to report")
+        return None
+    
+    # Generate output file path
+    input_path = Path(input_csv_file)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create output directory if it doesn't exist
+    output_dir = input_path.parent / "verification-reports"
+    output_dir.mkdir(exist_ok=True)
+    
+    # Generate report filename
+    report_filename = f"config_verification_report_{timestamp}.csv"
+    report_path = output_dir / report_filename
+    
+    if not quiet_mode:
+        print(f"\n📄 Generating detailed CSV report: {report_path}")
+    
+    # Write CSV report
+    with open(report_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        
+        # Write header
+        writer.writerow([
+            'Target_UID',
+            'Asset_ID',
+            'Verification_Status',
+            'Has_Schedule',
+            'Has_Timezone',
+            'Has_Spark_Config',
+            'Incremental_Strategy',
+            'Has_Notifications',
+            'Is_Pattern_Profile',
+            'Column_Level',
+            'Resource_Strategy',
+            'Auto_Retry_Enabled',
+            'Is_User_Marked_Reference',
+            'Is_Reference_Check_Valid',
+            'Has_Reference_Check_Config',
+            'Profile_Anomaly_Sensitivity',
+            'Cadence_Anomaly_Training_Window',
+            'Error_Message',
+            'Verification_Details'
+        ])
+        
+        # Write data rows
+        for detail in verification_results['details']:
+            target_uid = detail.get('target_uid', 'N/A')
+            asset_id = detail.get('asset_id', 'N/A')
+            status = detail.get('status', 'unknown')
+            
+            # Format status for better readability
+            status_display = {
+                'success': '✅ PASSED',
+                'mismatch': '⚠️ MISMATCH',
+                'asset_not_found': '❌ ASSET_NOT_FOUND',
+                'config_not_found': '❌ CONFIG_NOT_FOUND',
+                'error': '❌ ERROR'
+            }.get(status, status.upper())
+            
+            # Extract configuration details
+            config_details = detail.get('config_details', {})
+            has_schedule = 'Yes' if config_details.get('has_schedule', False) else 'No'
+            has_timezone = 'Yes' if config_details.get('has_timezone', False) else 'No'
+            has_spark_config = 'Yes' if config_details.get('has_spark_config', False) else 'No'
+            incremental_strategy = 'Yes' if config_details.get('incremental_strategy', False) else 'No'
+            has_notifications = 'Yes' if config_details.get('has_notifications', False) else 'No'
+            is_pattern_profile = 'Yes' if config_details.get('is_pattern_profile', False) else 'No'
+            column_level = config_details.get('column_level', 'N/A')
+            resource_strategy = config_details.get('resource_strategy', 'N/A')
+            auto_retry_enabled = 'Yes' if config_details.get('auto_retry_enabled', False) else 'No'
+            is_user_marked_reference = 'Yes' if config_details.get('is_user_marked_reference', False) else 'No'
+            is_reference_check_valid = 'Yes' if config_details.get('is_reference_check_valid', False) else 'No'
+            has_reference_check_config = 'Yes' if config_details.get('has_reference_check_config', False) else 'No'
+            profile_anomaly_sensitivity = config_details.get('profile_anomaly_sensitivity', 'N/A')
+            cadence_anomaly_training_window = config_details.get('cadence_anomaly_training_window', 'N/A')
+            
+            # Error message for failed verifications
+            error_message = detail.get('error', '')
+            
+            # Verification details
+            verification_details = detail.get('verification_details', '')
+            
+            # Write row
+            writer.writerow([
+                target_uid,
+                asset_id,
+                status_display,
+                has_schedule,
+                has_timezone,
+                has_spark_config,
+                incremental_strategy,
+                has_notifications,
+                is_pattern_profile,
+                column_level,
+                resource_strategy,
+                auto_retry_enabled,
+                is_user_marked_reference,
+                is_reference_check_valid,
+                has_reference_check_config,
+                profile_anomaly_sensitivity,
+                cadence_anomaly_training_window,
+                error_message,
+                verification_details
+            ])
+    
+    if not quiet_mode:
+        print(f"✅ CSV report generated successfully!")
+        print(f"   📊 Total records: {len(verification_results['details'])}")
+        
         # Show summary statistics
         successful_count = len([d for d in verification_results['details'] if d['status'] == 'success'])
         failed_count = len([d for d in verification_results['details'] if d['status'] != 'success'])
@@ -4479,3 +5279,130 @@ def generate_verification_csv_report(verification_results: dict, input_csv_file:
             print(f"   📁 Report location: {report_path}")
     
     return str(report_path)
+
+def check_for_duplicates_in_asset_data(asset_data: List[Dict[str, str]]) -> Dict[str, List[Dict[str, str]]]:
+    """
+    Check for duplicate target UIDs in asset data.
+    
+    Args:
+        asset_data: List of asset dictionaries with target_uid and config_json
+    
+    Returns:
+        Dictionary mapping target_uid to list of duplicate configurations, empty if no duplicates
+    """
+    uid_groups = {}
+    
+    for asset in asset_data:
+        target_uid = asset['target_uid']
+        if target_uid not in uid_groups:
+            uid_groups[target_uid] = []
+        uid_groups[target_uid].append(asset)
+    
+    # Return only groups with more than one configuration
+    duplicates = {uid: configs for uid, configs in uid_groups.items() if len(configs) > 1}
+    return duplicates
+
+def resolve_duplicates_interactively(asset_data: List[Dict[str, str]], duplicates: Dict[str, List[Dict[str, str]]], quiet_mode: bool = False, verbose_mode: bool = False) -> Optional[List[Dict[str, str]]]:
+    """
+    Resolve duplicates interactively and return the resolved asset data.
+    
+    Args:
+        asset_data: Original list of asset dictionaries
+        duplicates: Dictionary of duplicate configurations
+        quiet_mode: Whether to suppress output
+        verbose_mode: Whether to enable verbose logging
+    
+    Returns:
+        Resolved asset data list, or None if user cancels
+    """
+    try:
+        resolved_assets = []
+        processed_uids = set()
+        
+        if not quiet_mode:
+            print(f"\n⚠️  Found {len(duplicates)} Source UIDs which are pointing to single Target UIDs. So we have duplicate configurations present:")
+            
+            # Check if we're using legacy format (no source UIDs available)
+            legacy_format_detected = False
+            for target_uid, configs in duplicates.items():
+                for config in configs:
+                    if config.get('source_uid', 'Unknown') == 'Unknown':
+                        legacy_format_detected = True
+                        break
+                if legacy_format_detected:
+                    break
+            
+            if legacy_format_detected:
+                print("💡 Note: Source UID information is not available (using legacy export format).")
+                print("   For better duplicate resolution, consider re-running 'asset-config-export' to get source UID information.")
+        
+        for target_uid, configs in duplicates.items():
+            if not quiet_mode:
+                print(f"\n🔍 Target UID: {target_uid}")
+                print(f"   Found {len(configs)} configurations:")
+                
+                for j, config in enumerate(configs):
+                    try:
+                        config_data = json.loads(config['config_json'])
+                        asset_config = config_data.get('assetConfiguration') or {}
+                        resource_strategy = asset_config.get('resourceStrategyType', 'N/A')
+                        auto_retry = asset_config.get('autoRetryEnabled', 'N/A')
+                        is_user_marked = asset_config.get('isUserMarkedReference', 'N/A')
+                        
+                        # Extract source information from the asset data
+                        source_uid = config.get('source_uid', 'Unknown')
+                        
+                        # If source_uid is Unknown or empty, show a message
+                        if source_uid == 'Unknown' or not source_uid or source_uid.strip() == '':
+                            source_uid = "Source UID: Not available (from legacy export)"
+                        else:
+                            # If we have a source_uid, display it properly
+                            source_uid = f"Source UID: {source_uid}"
+                        
+                        print(f"   Option {j+1}:")
+                        print(f"      {source_uid}")
+                        print(f"      Resource Strategy: {resource_strategy}")
+                        print(f"      Auto Retry Enabled: {auto_retry}")
+                        print(f"      User Marked Reference: {is_user_marked}")
+                    except json.JSONDecodeError:
+                        print(f"   Option {j+1}: (Invalid JSON)")
+                
+                # Ask user to choose
+                while True:
+                    try:
+                        choice = input(f"\n   Which configuration would you like to keep? (1-{len(configs)}): ").strip()
+                        choice_num = int(choice)
+                        if 1 <= choice_num <= len(configs):
+                            selected_config = configs[choice_num - 1]
+                            resolved_assets.append(selected_config)
+                            processed_uids.add(target_uid)
+                            if not quiet_mode:
+                                print(f"   ✅ Selected Option {choice_num}")
+                            break
+                        else:
+                            print(f"   ❌ Please enter a number between 1 and {len(configs)}")
+                    except ValueError:
+                        print("   ❌ Please enter a valid number")
+                    except KeyboardInterrupt:
+                        if not quiet_mode:
+                            print("\n❌ Operation cancelled by user")
+                        return None
+        
+        # Add non-duplicate assets
+        for asset in asset_data:
+            target_uid = asset['target_uid']
+            if target_uid not in processed_uids:
+                resolved_assets.append(asset)
+        
+        if not quiet_mode:
+            print(f"\n✅ Duplicate resolution completed!")
+            print(f"   📊 Original configurations: {len(asset_data)}")
+            print(f"   📊 Resolved configurations: {len(resolved_assets)}")
+            print(f"   📊 Duplicates resolved: {len(asset_data) - len(resolved_assets)}")
+        
+        return resolved_assets
+        
+    except Exception as e:
+        if not quiet_mode:
+            print(f"❌ Error resolving duplicates: {e}")
+        return None

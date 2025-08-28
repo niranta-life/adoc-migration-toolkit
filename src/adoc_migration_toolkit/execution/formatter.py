@@ -419,21 +419,64 @@ class PolicyExportFormatter:
                 self.logger.warning("asset-config-export.csv is empty")
                 return True
             
-            # Process the target_uid column (first column, index 0)
+            # Process the target_uid column (first column, index 0), config_json column (second column, index 1), and source_uid column (third column, index 2)
             changes_made = 0
             for i, row in enumerate(rows):
-                if len(row) >= 1:  # Ensure we have at least 1 column
+                if len(row) >= 2:  # Ensure we have at least 2 columns (backward compatibility)
                     target_uid = row[0]
+                    config_json = row[1]
+                    source_uid = row[2] if len(row) > 2 else ''  # Handle both 2 and 3 column formats
                     original_target_uid = target_uid
-                    # Apply string transformations
+                    original_config_json = config_json
+                    
+                    # Apply string transformations to target_uid
                     for source, target in self.string_transforms.items():
                         if source in target_uid:
                             target_uid = target_uid.replace(source, target)
                     
-                    if target_uid != original_target_uid:
+                    # Apply string transformations to config_json (for asset UIDs in JSON)
+                    try:
+                        if config_json.strip():
+                            config_data = json.loads(config_json)
+                            config_changed = False
+                            
+                            # Transform asset UIDs in the configuration
+                            if "assetConfiguration" in config_data and config_data["assetConfiguration"]:
+                                asset_config = config_data["assetConfiguration"]
+                                
+                                # Transform assetId if it exists
+                                if "assetId" in asset_config:
+                                    old_asset_id = str(asset_config["assetId"])
+                                    for source, target in self.string_transforms.items():
+                                        if source in old_asset_id:
+                                            asset_config["assetId"] = int(old_asset_id.replace(source, target))
+                                            config_changed = True
+                                
+                                # Transform freshnessColumnInfo.assetId if it exists
+                                if "freshnessColumnInfo" in asset_config and asset_config["freshnessColumnInfo"]:
+                                    freshness = asset_config["freshnessColumnInfo"]
+                                    if "assetId" in freshness:
+                                        old_freshness_asset_id = str(freshness["assetId"])
+                                        for source, target in self.string_transforms.items():
+                                            if source in old_freshness_asset_id:
+                                                freshness["assetId"] = int(old_freshness_asset_id.replace(source, target))
+                                                config_changed = True
+                            
+                            if config_changed:
+                                config_json = json.dumps(config_data, ensure_ascii=False, separators=(',', ':'))
+                    
+                    except (json.JSONDecodeError, ValueError) as e:
+                        self.logger.warning(f"Could not parse config JSON for row {i}: {e}")
+                    
+                    # Update row if any changes were made
+                    if target_uid != original_target_uid or config_json != original_config_json:
                         rows[i][0] = target_uid
+                        rows[i][1] = config_json
+                        # Preserve source_uid if it exists
+                        if len(rows[i]) > 2:
+                            rows[i][2] = source_uid
                         changes_made += 1
-                        self.logger.debug(f"Updated target_uid: {original_target_uid} -> {target_uid}")
+                        self.logger.debug(f"Updated row {i}: target_uid={original_target_uid}->{target_uid}, config_json transformed")
             
             # Create asset-import directory if it doesn't exist
             asset_import_dir = self.base_output_dir / "asset-import"
