@@ -4252,7 +4252,9 @@ def verify_profile_configurations_after_import(csv_file: str, client, logger: lo
         thread_profile_not_found = 0
         thread_details = []
         
-        thread_name = f"Thread {thread_id}"
+        # Get thread names for consistent naming across commands
+        thread_names = get_thread_names()
+        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
         if not verbose_mode:
             thread_pbar = create_progress_bar(
                 total=len(chunk),
@@ -4946,6 +4948,19 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                         else:
                             detailed_mismatches.append(f"Auto Retry: Expected={expected_auto_retry}, Actual={actual_auto_retry}")
                     
+                    # Determine config status based on expected vs actual configuration
+                    config_status = "Default Config Present"
+                    if expected_asset_config:
+                        # Check if the expected config has any non-default values
+                        has_custom_config = False
+                        for key, expected_value in expected_asset_config.items():
+                            if expected_value is not None and expected_value != "":
+                                has_custom_config = True
+                                break
+                        
+                        if has_custom_config:
+                            config_status = "Config Changed"
+                    
                     if verification_passed:
                         if verbose_mode:
                             print(f"   ✅ {thread_name}: Configuration verified successfully for {target_uid}")
@@ -4957,7 +4972,8 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                             'error': None,
                             'has_config': True,
                             'config_details': config_verification,
-                            'verification_details': 'All configurations match'
+                            'verification_details': 'All configurations match',
+                            'config_status': config_status
                         })
                     else:
                         if verbose_mode:
@@ -4971,7 +4987,8 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                             'has_config': True,
                             'config_details': config_verification,
                             'verification_details': ', '.join(verification_details),
-                            'detailed_mismatches': detailed_mismatches
+                            'detailed_mismatches': detailed_mismatches,
+                            'config_status': config_status
                         })
                 
                 except Exception as e:
@@ -5185,20 +5202,14 @@ def generate_config_verification_csv_report(verification_results: dict, input_cs
             'Target_UID',
             'Asset_ID',
             'Verification_Status',
-            'Has_Schedule',
-            'Has_Timezone',
+            'Config_Status',
             'Has_Spark_Config',
             'Incremental_Strategy',
-            'Has_Notifications',
-            'Is_Pattern_Profile',
-            'Column_Level',
             'Resource_Strategy',
             'Auto_Retry_Enabled',
             'Is_User_Marked_Reference',
             'Is_Reference_Check_Valid',
             'Has_Reference_Check_Config',
-            'Profile_Anomaly_Sensitivity',
-            'Cadence_Anomaly_Training_Window',
             'Error_Message',
             'Verification_Details'
         ])
@@ -5220,20 +5231,14 @@ def generate_config_verification_csv_report(verification_results: dict, input_cs
             
             # Extract configuration details
             config_details = detail.get('config_details', {})
-            has_schedule = 'Yes' if config_details.get('has_schedule', False) else 'No'
-            has_timezone = 'Yes' if config_details.get('has_timezone', False) else 'No'
+            config_status = detail.get('config_status', 'Unknown')
             has_spark_config = 'Yes' if config_details.get('has_spark_config', False) else 'No'
             incremental_strategy = 'Yes' if config_details.get('incremental_strategy', False) else 'No'
-            has_notifications = 'Yes' if config_details.get('has_notifications', False) else 'No'
-            is_pattern_profile = 'Yes' if config_details.get('is_pattern_profile', False) else 'No'
-            column_level = config_details.get('column_level', 'N/A')
             resource_strategy = config_details.get('resource_strategy', 'N/A')
             auto_retry_enabled = 'Yes' if config_details.get('auto_retry_enabled', False) else 'No'
             is_user_marked_reference = 'Yes' if config_details.get('is_user_marked_reference', False) else 'No'
             is_reference_check_valid = 'Yes' if config_details.get('is_reference_check_valid', False) else 'No'
             has_reference_check_config = 'Yes' if config_details.get('has_reference_check_config', False) else 'No'
-            profile_anomaly_sensitivity = config_details.get('profile_anomaly_sensitivity', 'N/A')
-            cadence_anomaly_training_window = config_details.get('cadence_anomaly_training_window', 'N/A')
             
             # Error message for failed verifications
             error_message = detail.get('error', '')
@@ -5246,20 +5251,14 @@ def generate_config_verification_csv_report(verification_results: dict, input_cs
                 target_uid,
                 asset_id,
                 status_display,
-                has_schedule,
-                has_timezone,
+                config_status,
                 has_spark_config,
                 incremental_strategy,
-                has_notifications,
-                is_pattern_profile,
-                column_level,
                 resource_strategy,
                 auto_retry_enabled,
                 is_user_marked_reference,
                 is_reference_check_valid,
                 has_reference_check_config,
-                profile_anomaly_sensitivity,
-                cadence_anomaly_training_window,
                 error_message,
                 verification_details
             ])
