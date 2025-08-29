@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
 from ..shared import globals
+import re
 
 
 class PolicyExportFormatter:
@@ -330,12 +331,7 @@ class PolicyExportFormatter:
                 
                 for uid in sorted_assets:
                     # Apply string transformations to create target-env
-                    target_env = uid
-                    transformations_applied = []
-                    for source, target in self.string_transforms.items():
-                        if source in target_env and source != target:  # Only apply if strings are different
-                            target_env = self.safe_replace(target_env, source, target)
-                            transformations_applied.append(f"'{source}' -> '{target}'")
+                    target_env = self.apply_string_transforms(uid)
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.extracted_assets)} unique assets to {csv_file}")
@@ -367,18 +363,12 @@ class PolicyExportFormatter:
                 
                 for uid in sorted_assets:
                     # Apply string transformations to create target-env
-                    target_env = uid
                     original_uid = uid
-                    transformations_applied = []
+                    target_env = self.apply_string_transforms(uid)
                     
-                    for source, target in self.string_transforms.items():
-                        if source in target_env:
-                            target_env = self.safe_replace(target_env, source, target)
-                            transformations_applied.append(f"'{source}' -> '{target}'")
-                    
-                    if transformations_applied:
+                    if target_env != original_uid:
                         transformation_count += 1
-                        self.logger.debug(f"Transformed '{original_uid}' -> '{target_env}' (applied: {', '.join(transformations_applied)})")
+                        self.logger.debug(f"Transformed '{original_uid}' -> '{target_env}'")
                     else:
                         # No transformation applied
                         no_change_count += 1
@@ -573,6 +563,62 @@ class PolicyExportFormatter:
             self.stats["errors"].append(error_msg)
             return False
     
+    def _exact_word_boundary_replace(self, text: str, source: str, target: str) -> str:
+        """Replace source string with target string only when it appears as a complete word.
+        
+        Args:
+            text (str): The text to transform
+            source (str): The source string to replace (must be exact word match)
+            target (str): The target string to replace with
+            
+        Returns:
+            str: The transformed text
+        """
+        if source == target:
+            return text
+        
+        # Escape special regex characters in the source string
+        escaped_source = re.escape(source)
+        # Create a regex pattern that matches the source as a complete word
+        # Word boundaries: \b matches at word boundaries (alphanumeric vs non-alphanumeric)
+        pattern = r'\b' + escaped_source + r'\b'
+        
+        # Replace all occurrences of the exact word
+        return re.sub(pattern, target, text)
+    
+    def apply_string_transforms(self, value: str) -> str:
+        """Apply string transformations to a value atomically to prevent cross-transformation interference.
+        Uses exact word boundary matching to prevent partial matches.
+        
+        Args:
+            value (str): The string value to transform
+            
+        Returns:
+            str: The transformed string
+        """
+        if not self.string_transforms:
+            return value
+        
+        # Phase 1: Replace all source strings with unique placeholders
+        # This prevents later transformations from affecting earlier ones
+        placeholders = {}
+        transformed_value = value
+        
+        for source, target in self.string_transforms.items():
+            if source != target:
+                # Use exact word boundary matching
+                if re.search(r'\b' + re.escape(source) + r'\b', transformed_value):
+                    # Create a unique placeholder for this transformation
+                    placeholder = f"__TRANSFORM_PLACEHOLDER_{len(placeholders)}__"
+                    placeholders[placeholder] = target
+                    transformed_value = self._exact_word_boundary_replace(transformed_value, source, placeholder)
+        
+        # Phase 2: Replace all placeholders with their target strings
+        for placeholder, target in placeholders.items():
+            transformed_value = transformed_value.replace(placeholder, target)
+        
+        return transformed_value
+    
     def replace_in_value(self, value: Any) -> Any:
         """Recursively replace substrings in a value with error handling.
         
@@ -584,18 +630,12 @@ class PolicyExportFormatter:
         """
         try:
             if isinstance(value, str):
-                # Apply all string transformations efficiently
+                # Apply all string transformations atomically
                 original_value = value
-                modified_value = value
-                changes_made = 0
+                modified_value = self.apply_string_transforms(value)
                 
-                for source, target in self.string_transforms.items():
-                    if source in modified_value and source != target:  # Only apply if strings are different
-                        modified_value = self.safe_replace(modified_value, source, target)
-                        changes_made += 1
-                
-                if changes_made > 0:
-                    self.stats["changes_made"] += changes_made
+                if modified_value != original_value:
+                    self.stats["changes_made"] += 1
                     self.logger.debug(f"Replaced '{original_value}' -> '{modified_value}'")
                     return modified_value
                 return value
@@ -1095,6 +1135,29 @@ class AssetExportFormatter:
         for source, target in self.string_transforms.items():
             self.logger.info(f"    '{source}' -> '{target}'")
     
+    def _exact_word_boundary_replace(self, text: str, source: str, target: str) -> str:
+        """Replace source string with target string only when it appears as a complete word.
+        
+        Args:
+            text (str): The text to transform
+            source (str): The source string to replace (must be exact word match)
+            target (str): The target string to replace with
+            
+        Returns:
+            str: The transformed text
+        """
+        if source == target:
+            return text
+        
+        # Escape special regex characters in the source string
+        escaped_source = re.escape(source)
+        # Create a regex pattern that matches the source as a complete word
+        # Word boundaries: \b matches at word boundaries (alphanumeric vs non-alphanumeric)
+        pattern = r'\b' + escaped_source + r'\b'
+        
+        # Replace all occurrences of the exact word
+        return re.sub(pattern, target, text)
+    
     def process_directory(self) -> Dict[str, Any]:
         """Process all asset CSV files in the input directory.
         
@@ -1201,14 +1264,18 @@ class AssetExportFormatter:
             
             for i, row in enumerate(rows, 1):
                 try:
-                    # Apply string transformations to all string fields
+                    # Apply string transformations to all string fields EXCEPT source_uid
                     processed_row = {}
                     for key, value in row.items():
                         if isinstance(value, str):
-                            transformed_value = self.apply_string_transforms(value)
-                            if transformed_value != value:
-                                changes_made += 1
-                            processed_row[key] = transformed_value
+                            # Skip transformation for source_uid column to preserve original source UIDs
+                            if key == 'source_uid':
+                                processed_row[key] = value  # Keep original source UID unchanged
+                            else:
+                                transformed_value = self.apply_string_transforms(value)
+                                if transformed_value != value:
+                                    changes_made += 1
+                                processed_row[key] = transformed_value
                         else:
                             processed_row[key] = value
                     
@@ -1225,12 +1292,10 @@ class AssetExportFormatter:
                 output_file = self.output_dir / "asset-config-import-ready.csv"
             elif csv_file_path.stem == "asset-profile-export":
                 output_file = self.output_dir / "asset-profile-import-ready.csv"
-            elif csv_file_path.stem == "asset-all-source-export":
-                output_file = self.output_dir / "asset-all-source-import-ready.csv"
-            elif csv_file_path.stem == "asset-all-target-export":
-                output_file = self.output_dir / "asset-all-target-import-ready.csv"
             else:
-                output_file = self.output_dir / f"{csv_file_path.stem}-ready.csv"
+                # Skip processing unused files to reduce clutter
+                self.logger.info(f"Skipping unused file: {csv_file_path.name}")
+                return True
             
             if processed_rows:
                 with open(output_file, 'w', newline='', encoding='utf-8') as f:
@@ -1281,7 +1346,8 @@ class AssetExportFormatter:
         return result
     
     def apply_string_transforms(self, value: str) -> str:
-        """Apply string transformations to a value.
+        """Apply string transformations to a value atomically to prevent cross-transformation interference.
+        Uses exact word boundary matching to prevent partial matches.
         
         Args:
             value (str): The string value to transform
@@ -1292,9 +1358,23 @@ class AssetExportFormatter:
         if not self.string_transforms:
             return value
         
+        # Phase 1: Replace all source strings with unique placeholders
+        # This prevents later transformations from affecting earlier ones
+        placeholders = {}
         transformed_value = value
+        
         for source, target in self.string_transforms.items():
-            transformed_value = self.safe_replace(transformed_value, source, target)
+            if source != target:
+                # Use exact word boundary matching
+                if re.search(r'\b' + re.escape(source) + r'\b', transformed_value):
+                    # Create a unique placeholder for this transformation
+                    placeholder = f"__TRANSFORM_PLACEHOLDER_{len(placeholders)}__"
+                    placeholders[placeholder] = target
+                    transformed_value = self._exact_word_boundary_replace(transformed_value, source, placeholder)
+        
+        # Phase 2: Replace all placeholders with their target strings
+        for placeholder, target in placeholders.items():
+            transformed_value = transformed_value.replace(placeholder, target)
         
         return transformed_value
 

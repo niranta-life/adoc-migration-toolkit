@@ -12,6 +12,7 @@ import sys
 import threading
 import tempfile
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
@@ -3720,27 +3721,40 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                 original_target_uid = source_row['target_uid']
                 transformed_target_uid = original_target_uid
                 
-                # Apply string transformations if provided
+                # Apply string transformations atomically if provided
                 if string_transforms:
+                    # Phase 1: Replace all source strings with unique placeholders
+                    # This prevents later transformations from affecting earlier ones
+                    placeholders = {}
+                    temp_uid = transformed_target_uid
+                    
                     for source_str, target_str in string_transforms.items():
-                        # Check if the source_str provided by user exists in source uid (transformed_target_uid)
-                        if source_str in transformed_target_uid:
-                            # Only count as transformation if the strings are actually different
-                            if source_str != target_str:
-                                # Use safe replacement to prevent recursive replacements
-                                placeholder = f"__TEMP_PLACEHOLDER_{hash(source_str)}__"
-                                transformed_target_uid = transformed_target_uid.replace(source_str, placeholder)
-                                transformed_target_uid = transformed_target_uid.replace(placeholder, target_str)
+                        if source_str != target_str:
+                            # Use exact word boundary matching
+                            if re.search(r'\b' + re.escape(source_str) + r'\b', temp_uid):
+                                # Create a unique placeholder for this transformation
+                                placeholder = f"__TRANSFORM_PLACEHOLDER_{len(placeholders)}__"
+                                placeholders[placeholder] = target_str
+                                # Use regex replacement for exact word boundary matching
+                                temp_uid = re.sub(r'\b' + re.escape(source_str) + r'\b', placeholder, temp_uid)
                                 transformed_count += 1
                                 if verbose_mode:
-                                    print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")
-                                    print(f"   Applied: '{source_str}' -> '{target_str}'")
-                            else:
-                                if verbose_mode:
-                                    print(f"⏭️  Skipped identical transformation: '{source_str}' -> '{target_str}' (no change needed)")
-                        else:
-                            if verbose_mode:
-                                print(f"🔍 No match found for transformation: '{source_str}' -> '{target_str}' in '{original_target_uid}'")
+                                    print(f"🔄 Phase 1: '{source_str}' -> '{placeholder}' in '{original_target_uid}'")
+                    
+                    # Phase 2: Replace all placeholders with their target strings
+                    for placeholder, target_str in placeholders.items():
+                        temp_uid = temp_uid.replace(placeholder, target_str)
+                        if verbose_mode:
+                            print(f"🔄 Phase 2: '{placeholder}' -> '{target_str}'")
+                    
+                    transformed_target_uid = temp_uid
+                    
+                    if transformed_target_uid != original_target_uid:
+                        if verbose_mode:
+                            print(f"🔄 Final transformation: '{original_target_uid}' -> '{transformed_target_uid}'")
+                    else:
+                        if verbose_mode:
+                            print(f"⏭️  No transformations applied to '{original_target_uid}'")
                 else:
                     # No transformations provided - use original UID for direct matching
                     if verbose_mode:
@@ -5441,8 +5455,12 @@ def resolve_duplicates_interactively(asset_data: List[Dict[str, str]], duplicate
                         config_data = json.loads(config['config_json'])
                         asset_config = config_data.get('assetConfiguration') or {}
                         resource_strategy = asset_config.get('resourceStrategyType', 'N/A')
-                        auto_retry = asset_config.get('autoRetryEnabled', 'N/A')
-                        is_user_marked = asset_config.get('isUserMarkedReference', 'N/A')
+                        auto_retry = asset_config.get('autoRetryEnabled', False)
+                        is_user_marked = asset_config.get('isUserMarkedReference', False)
+                        
+                        # Convert to boolean for proper display
+                        auto_retry_bool = bool(auto_retry) if auto_retry is not None else False
+                        is_user_marked_bool = bool(is_user_marked) if is_user_marked is not None else False
                         
                         # Extract source information from the asset data
                         source_uid = config.get('source_uid', 'Unknown')
@@ -5455,10 +5473,10 @@ def resolve_duplicates_interactively(asset_data: List[Dict[str, str]], duplicate
                             source_uid = f"Source UID: {source_uid}"
                         
                         print(f"   Option {j+1}:")
-                        print(f"      {source_uid}")
-                        print(f"      Resource Strategy: {resource_strategy}")
-                        print(f"      Auto Retry Enabled: {auto_retry}")
-                        print(f"      User Marked Reference: {is_user_marked}")
+                        print(f"     - {source_uid}")
+                        print(f"     - Resource Strategy: {resource_strategy}")
+                        print(f"     - Auto Retry Enabled: {'✅' if auto_retry_bool else '❌'}")
+                        print(f"     - User Marked Reference: {'✅' if is_user_marked_bool else '❌'}")
                     except json.JSONDecodeError:
                         print(f"   Option {j+1}: (Invalid JSON)")
                 
