@@ -14,6 +14,7 @@ import tempfile
 import shutil
 import os
 import csv
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Union, Optional, Set, Tuple
 from datetime import datetime
@@ -342,10 +343,14 @@ class PolicyTranformer:
                 for uid in sorted_assets:
                     # Apply the same string replacement logic to create target-env
                     # Use safe replacement to prevent recursive replacements
-                    if self.search_string in uid and self.search_string != self.replace_string:
-                        placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
-                        target_env = uid.replace(self.search_string, placeholder)
-                        target_env = target_env.replace(placeholder, self.replace_string)
+                    if self.search_string != self.replace_string:
+                        # Use regex for exact word boundary matching
+                        if re.search(r'\b' + re.escape(self.search_string) + r'\b', uid):
+                            placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
+                            target_env = re.sub(r'\b' + re.escape(self.search_string) + r'\b', placeholder, uid)
+                            target_env = target_env.replace(placeholder, self.replace_string)
+                        else:
+                            target_env = uid
                     else:
                         target_env = uid
                     writer.writerow([uid, target_env])
@@ -376,10 +381,14 @@ class PolicyTranformer:
                 for uid in sorted_assets:
                     # Apply the same string replacement logic to create target-env
                     # Use safe replacement to prevent recursive replacements
-                    if self.search_string in uid and self.search_string != self.replace_string:
-                        placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
-                        target_env = uid.replace(self.search_string, placeholder)
-                        target_env = target_env.replace(placeholder, self.replace_string)
+                    if self.search_string != self.replace_string:
+                        # Use regex for exact word boundary matching
+                        if re.search(r'\b' + re.escape(self.search_string) + r'\b', uid):
+                            placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
+                            target_env = re.sub(r'\b' + re.escape(self.search_string) + r'\b', placeholder, uid)
+                            target_env = target_env.replace(placeholder, self.replace_string)
+                        else:
+                            target_env = uid
                     else:
                         target_env = uid
                     writer.writerow([uid, target_env])
@@ -402,18 +411,17 @@ class PolicyTranformer:
         """
         try:
             if isinstance(value, str):
-                # Replace substring in string values
-                if self.search_string in value:
-                    # Use safe replacement to prevent recursive replacements
-                    if self.search_string != self.replace_string:
+                # Replace substring in string values using exact word boundary matching
+                if self.search_string != self.replace_string:
+                    # Use regex for exact word boundary matching
+                    if re.search(r'\b' + re.escape(self.search_string) + r'\b', value):
+                        # Use safe replacement to prevent recursive replacements
                         placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
-                        new_value = value.replace(self.search_string, placeholder)
+                        new_value = re.sub(r'\b' + re.escape(self.search_string) + r'\b', placeholder, value)
                         new_value = new_value.replace(placeholder, self.replace_string)
-                    else:
-                        new_value = value
-                    self.stats["changes_made"] += 1
-                    self.logger.debug(f"Replaced '{value}' -> '{new_value}'")
-                    return new_value
+                        self.stats["changes_made"] += 1
+                        self.logger.debug(f"Replaced '{value}' -> '{new_value}'")
+                        return new_value
                 return value
             elif isinstance(value, dict):
                 # Recursively process dictionary values
