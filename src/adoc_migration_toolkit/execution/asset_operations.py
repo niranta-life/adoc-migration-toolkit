@@ -3727,7 +3727,10 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                         if source_str in transformed_target_uid:
                             # Only count as transformation if the strings are actually different
                             if source_str != target_str:
-                                transformed_target_uid = transformed_target_uid.replace(source_str, target_str)
+                                # Use safe replacement to prevent recursive replacements
+                                placeholder = f"__TEMP_PLACEHOLDER_{hash(source_str)}__"
+                                transformed_target_uid = transformed_target_uid.replace(source_str, placeholder)
+                                transformed_target_uid = transformed_target_uid.replace(placeholder, target_str)
                                 transformed_count += 1
                                 if verbose_mode:
                                     print(f"🔄 Transformed: '{original_target_uid}' -> '{transformed_target_uid}'")

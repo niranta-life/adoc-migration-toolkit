@@ -334,7 +334,7 @@ class PolicyExportFormatter:
                     transformations_applied = []
                     for source, target in self.string_transforms.items():
                         if source in target_env and source != target:  # Only apply if strings are different
-                            target_env = target_env.replace(source, target)
+                            target_env = self.safe_replace(target_env, source, target)
                             transformations_applied.append(f"'{source}' -> '{target}'")
                     writer.writerow([uid, target_env])
             
@@ -373,7 +373,7 @@ class PolicyExportFormatter:
                     
                     for source, target in self.string_transforms.items():
                         if source in target_env:
-                            target_env = target_env.replace(source, target)
+                            target_env = self.safe_replace(target_env, source, target)
                             transformations_applied.append(f"'{source}' -> '{target}'")
                     
                     if transformations_applied:
@@ -435,7 +435,7 @@ class PolicyExportFormatter:
                     # Apply string transformations to target_uid
                     for source, target in self.string_transforms.items():
                         if source in target_uid and source != target:  # Only apply if strings are different
-                            target_uid = target_uid.replace(source, target)
+                            target_uid = self.safe_replace(target_uid, source, target)
                     
                     # Apply string transformations to config_json (for asset UIDs in JSON)
                     try:
@@ -452,7 +452,7 @@ class PolicyExportFormatter:
                                     old_asset_id = str(asset_config["assetId"])
                                     for source, target in self.string_transforms.items():
                                         if source in old_asset_id and source != target:  # Only apply if strings are different
-                                            asset_config["assetId"] = int(old_asset_id.replace(source, target))
+                                            asset_config["assetId"] = int(self.safe_replace(old_asset_id, source, target))
                                             config_changed = True
                                 
                                 # Transform freshnessColumnInfo.assetId if it exists
@@ -462,7 +462,7 @@ class PolicyExportFormatter:
                                         old_freshness_asset_id = str(freshness["assetId"])
                                         for source, target in self.string_transforms.items():
                                             if source in old_freshness_asset_id and source != target:  # Only apply if strings are different
-                                                freshness["assetId"] = int(old_freshness_asset_id.replace(source, target))
+                                                freshness["assetId"] = int(self.safe_replace(old_freshness_asset_id, source, target))
                                                 config_changed = True
                             
                             if config_changed:
@@ -541,7 +541,7 @@ class PolicyExportFormatter:
                     # Apply string transformations
                     for source, target in self.string_transforms.items():
                         if source in target_uid and source != target:  # Only apply if strings are different
-                            target_uid = target_uid.replace(source, target)
+                            target_uid = self.safe_replace(target_uid, source, target)
                     
                     if target_uid != original_target_uid:
                         rows[i][2] = target_uid
@@ -591,7 +591,7 @@ class PolicyExportFormatter:
                 
                 for source, target in self.string_transforms.items():
                     if source in modified_value and source != target:  # Only apply if strings are different
-                        modified_value = modified_value.replace(source, target)
+                        modified_value = self.safe_replace(modified_value, source, target)
                         changes_made += 1
                 
                 if changes_made > 0:
@@ -1259,6 +1259,27 @@ class AssetExportFormatter:
             self.stats["errors"].append(error_msg)
             return False
     
+    def safe_replace(self, text: str, source: str, target: str) -> str:
+        """Safely replace source string with target string, preventing recursive replacements.
+        
+        Args:
+            text (str): The text to transform
+            source (str): The source string to replace
+            target (str): The target string to replace with
+            
+        Returns:
+            str: The transformed text
+        """
+        if source not in text or source == target:
+            return text
+        
+        # Use a temporary placeholder to prevent recursive replacements
+        # when target contains source string
+        placeholder = f"__TEMP_PLACEHOLDER_{hash(source)}__"
+        result = text.replace(source, placeholder)
+        result = result.replace(placeholder, target)
+        return result
+    
     def apply_string_transforms(self, value: str) -> str:
         """Apply string transformations to a value.
         
@@ -1273,8 +1294,7 @@ class AssetExportFormatter:
         
         transformed_value = value
         for source, target in self.string_transforms.items():
-            if source in transformed_value and source != target:
-                transformed_value = transformed_value.replace(source, target)
+            transformed_value = self.safe_replace(transformed_value, source, target)
         
         return transformed_value
 

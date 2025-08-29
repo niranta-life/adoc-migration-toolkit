@@ -341,7 +341,13 @@ class PolicyTranformer:
                 
                 for uid in sorted_assets:
                     # Apply the same string replacement logic to create target-env
-                    target_env = uid.replace(self.search_string, self.replace_string)
+                    # Use safe replacement to prevent recursive replacements
+                    if self.search_string in uid and self.search_string != self.replace_string:
+                        placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
+                        target_env = uid.replace(self.search_string, placeholder)
+                        target_env = target_env.replace(placeholder, self.replace_string)
+                    else:
+                        target_env = uid
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.extracted_assets)} unique assets to {csv_file}")
@@ -369,7 +375,13 @@ class PolicyTranformer:
                 
                 for uid in sorted_assets:
                     # Apply the same string replacement logic to create target-env
-                    target_env = uid.replace(self.search_string, self.replace_string)
+                    # Use safe replacement to prevent recursive replacements
+                    if self.search_string in uid and self.search_string != self.replace_string:
+                        placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
+                        target_env = uid.replace(self.search_string, placeholder)
+                        target_env = target_env.replace(placeholder, self.replace_string)
+                    else:
+                        target_env = uid
                     writer.writerow([uid, target_env])
             
             self.logger.info(f"Extracted {len(self.all_asset_uids)} unique assets to {csv_file}")
@@ -392,7 +404,13 @@ class PolicyTranformer:
             if isinstance(value, str):
                 # Replace substring in string values
                 if self.search_string in value:
-                    new_value = value.replace(self.search_string, self.replace_string)
+                    # Use safe replacement to prevent recursive replacements
+                    if self.search_string != self.replace_string:
+                        placeholder = f"__TEMP_PLACEHOLDER_{hash(self.search_string)}__"
+                        new_value = value.replace(self.search_string, placeholder)
+                        new_value = new_value.replace(placeholder, self.replace_string)
+                    else:
+                        new_value = value
                     self.stats["changes_made"] += 1
                     self.logger.debug(f"Replaced '{value}' -> '{new_value}'")
                     return new_value
