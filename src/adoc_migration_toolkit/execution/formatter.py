@@ -1,7 +1,7 @@
 """
 Formatter execution functions.
 
-This module contains execution functions for policy formatter operations.
+This module contains execution functions for policy and asset formatter operations.
 """
 
 import json
@@ -20,7 +20,7 @@ from ..shared import globals
 
 
 class PolicyExportFormatter:
-    """Professional JSON string replacement tool with comprehensive error handling."""
+    """Professional JSON string replacement tool with comprehensive error handling for policy transformations."""
     
     def __init__(self, input_dir: str, string_transforms: dict, 
                  output_dir: Optional[str] = None, logger: Optional[logging.Logger] = None):
@@ -1020,6 +1020,265 @@ class PolicyExportFormatter:
             }
 
 
+class AssetExportFormatter:
+    """Professional asset transformation tool with comprehensive error handling for asset-specific operations."""
+    
+    def __init__(self, input_dir: str, string_transforms: dict, 
+                 output_dir: Optional[str] = None, logger: Optional[logging.Logger] = None):
+        """Initialize the AssetExportFormatter with validation.
+        
+        Args:
+            input_dir (str): Directory containing asset CSV files to process
+            string_transforms (dict): Dictionary of string transformations {source: target}
+            output_dir (str): Output directory (optional)
+            logger (Logger): Logger instance (optional)
+            
+        Raises:
+            ValueError: If input parameters are invalid
+            FileNotFoundError: If input directory doesn't exist
+        """
+        self.logger = logger or logging.getLogger(__name__)
+        
+        # Validate input parameters
+        if not input_dir or not input_dir.strip():
+            raise ValueError("Input directory cannot be empty")
+        
+        # Setup paths
+        self.input_dir = Path(input_dir).resolve()
+        self.string_transforms = string_transforms or {}
+        
+        # Validate input directory
+        if not self.input_dir.exists():
+            raise FileNotFoundError(f"Input directory does not exist: {self.input_dir}")
+        
+        if not self.input_dir.is_dir():
+            raise ValueError(f"Input path is not a directory: {self.input_dir}")
+        
+        # Setup output directory structure
+        if output_dir:
+            self.base_output_dir = Path(output_dir).resolve()
+        else:
+            # Use the same logic as other commands to find/create the output directory
+            if globals.GLOBAL_OUTPUT_DIR:
+                self.base_output_dir = globals.GLOBAL_OUTPUT_DIR
+            else:
+                from datetime import datetime
+                self.base_output_dir = Path.cwd() / f"adoc-migration-toolkit-{datetime.now().strftime('%Y%m%d%H%M')}"
+        
+        # Create organized output directory structure
+        self.output_dir = self.base_output_dir / "asset-import"  # For processed asset files
+        self.asset_export_dir = self.base_output_dir / "asset-export"  # For asset export files
+        
+        # Create all output directories
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            self.asset_export_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            raise PermissionError(f"Permission denied: Cannot create output directories")
+        except Exception as e:
+            raise RuntimeError(f"Failed to create output directories: {e}")
+        
+        # Initialize statistics
+        self.stats = {
+            "files_investigated": 0,
+            "changes_made": 0,
+            "csv_files_processed": 0,
+            "assets_processed": 0,
+            "errors": []
+        }
+        
+        self.logger.info(f"AssetExportFormatter initialized:")
+        self.logger.info(f"  Input directory: {self.input_dir}")
+        self.logger.info(f"  Output directory: {self.output_dir}")
+        self.logger.info(f"  Asset export directory: {self.asset_export_dir}")
+        self.logger.info(f"  String transformations: {len(self.string_transforms)} transformations")
+        for source, target in self.string_transforms.items():
+            self.logger.info(f"    '{source}' -> '{target}'")
+    
+    def process_directory(self) -> Dict[str, Any]:
+        """Process all asset CSV files in the input directory.
+        
+        Returns:
+            Dict[str, Any]: Statistics about the processing
+        """
+        try:
+            # Find all CSV files
+            csv_files = list(self.input_dir.rglob("*.csv"))
+            
+            total_files = len(csv_files)
+            
+            if total_files == 0:
+                self.logger.warning(f"No CSV files found in {self.input_dir}")
+                return {
+                    "total_files": 0,
+                    "csv_files": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "assets_processed": 0,
+                    "changes_made": 0,
+                    "errors": self.stats["errors"]
+                }
+            
+            self.logger.info(f"Found {len(csv_files)} CSV files to process")
+            
+            # Process CSV files
+            successful = 0
+            failed = 0
+            
+            for csv_file in csv_files:
+                if self.process_csv_file(csv_file):
+                    successful += 1
+                else:
+                    failed += 1
+            
+            stats = {
+                "total_files": total_files,
+                "csv_files": len(csv_files),
+                "successful": successful,
+                "failed": failed,
+                "files_investigated": self.stats["files_investigated"],
+                "changes_made": self.stats["changes_made"],
+                "assets_processed": self.stats["assets_processed"],
+                "errors": self.stats["errors"]
+            }
+            
+            self.logger.info(f"Asset processing complete: {successful} successful, {failed} failed")
+            return stats
+            
+        except Exception as e:
+            error_msg = f"Directory processing error: {e}"
+            self.logger.error(error_msg)
+            self.stats["errors"].append(error_msg)
+            return {
+                "total_files": 0,
+                "csv_files": 0,
+                "successful": 0,
+                "failed": 1,
+                "files_investigated": self.stats["files_investigated"],
+                "changes_made": self.stats["changes_made"],
+                "assets_processed": self.stats["assets_processed"],
+                "errors": self.stats["errors"]
+            }
+    
+    def process_csv_file(self, csv_file_path: Path) -> bool:
+        """Process a CSV file with asset data and apply string transformations.
+        
+        Args:
+            csv_file_path (Path): Path to the CSV file to process
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self.stats["files_investigated"] += 1
+            self.stats["csv_files_processed"] += 1
+            
+            self.logger.info(f"Processing asset CSV file: {csv_file_path}")
+            
+            # Validate CSV file
+            if not csv_file_path.exists():
+                raise FileNotFoundError(f"CSV file does not exist: {csv_file_path}")
+            
+            if not csv_file_path.is_file():
+                raise ValueError(f"Path is not a file: {csv_file_path}")
+            
+            # Read the CSV file
+            rows = []
+            with open(csv_file_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            
+            if not rows:
+                self.logger.warning(f"CSV file is empty: {csv_file_path}")
+                return True
+            
+            self.logger.info(f"Found {len(rows)} rows in CSV file: {csv_file_path}")
+            
+            # Process each row
+            processed_rows = []
+            assets_processed = 0
+            changes_made = 0
+            
+            for i, row in enumerate(rows, 1):
+                try:
+                    # Apply string transformations to all string fields
+                    processed_row = {}
+                    for key, value in row.items():
+                        if isinstance(value, str):
+                            transformed_value = self.apply_string_transforms(value)
+                            if transformed_value != value:
+                                changes_made += 1
+                            processed_row[key] = transformed_value
+                        else:
+                            processed_row[key] = value
+                    
+                    processed_rows.append(processed_row)
+                    assets_processed += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Error processing row {i} in CSV {csv_file_path}: {e}")
+                    # Keep original row if processing fails
+                    processed_rows.append(row)
+            
+            # Write processed CSV file with proper naming convention
+            if csv_file_path.stem == "asset-config-export":
+                output_file = self.output_dir / "asset-config-import-ready.csv"
+            elif csv_file_path.stem == "asset-profile-export":
+                output_file = self.output_dir / "asset-profile-import-ready.csv"
+            elif csv_file_path.stem == "asset-all-source-export":
+                output_file = self.output_dir / "asset-all-source-import-ready.csv"
+            elif csv_file_path.stem == "asset-all-target-export":
+                output_file = self.output_dir / "asset-all-target-import-ready.csv"
+            else:
+                output_file = self.output_dir / f"{csv_file_path.stem}-ready.csv"
+            
+            if processed_rows:
+                with open(output_file, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=processed_rows[0].keys())
+                    writer.writeheader()
+                    writer.writerows(processed_rows)
+                
+                self.logger.info(f"Processed CSV written to: {output_file}")
+                self.logger.info(f"Assets processed: {assets_processed}")
+                self.logger.info(f"Changes made: {changes_made}")
+                
+                # Update statistics
+                self.stats["assets_processed"] += assets_processed
+                self.stats["changes_made"] += changes_made
+            
+            return True
+                
+        except (FileNotFoundError, ValueError) as e:
+            error_msg = f"CSV processing error for {csv_file_path}: {e}"
+            self.logger.error(error_msg)
+            self.stats["errors"].append(error_msg)
+            return False
+        except Exception as e:
+            error_msg = f"Unexpected error processing CSV file {csv_file_path}: {e}"
+            self.logger.error(error_msg)
+            self.stats["errors"].append(error_msg)
+            return False
+    
+    def apply_string_transforms(self, value: str) -> str:
+        """Apply string transformations to a value.
+        
+        Args:
+            value (str): The string value to transform
+            
+        Returns:
+            str: The transformed string
+        """
+        if not self.string_transforms:
+            return value
+        
+        transformed_value = value
+        for source, target in self.string_transforms.items():
+            if source in transformed_value and source != target:
+                transformed_value = transformed_value.replace(source, target)
+        
+        return transformed_value
+
+
 def validate_arguments(args: argparse.Namespace) -> None:
     """Validate command line arguments.
     
@@ -1159,6 +1418,126 @@ def parse_formatter_command(command: str) -> tuple:
         print(f"❌ Error parsing policy-xfr command: {e}")
         return None, None, None, None, False
 
+
+def parse_asset_formatter_command(command: str) -> tuple:
+    """Parse asset-xfr command in interactive mode.
+    Args:
+        command (str): The command string
+    Returns:
+        tuple: (input_dir, string_transforms, output_dir, quiet_mode, verbose_mode)
+    """
+    try:
+        args_str = command[len('asset-xfr'):].strip()
+        input_dir = None
+        string_transforms = {}
+        output_dir = None
+        quiet_mode = False
+        verbose_mode = False
+        args = args_str.split()
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == '--input' and i + 1 < len(args):
+                input_dir = args[i + 1]
+                i += 2
+            elif arg == '--output-dir' and i + 1 < len(args):
+                output_dir = args[i + 1]
+                i += 2
+            elif arg == '--string-transform' and i + 1 < len(args):
+                # Collect all args until next -- or end
+                transform_parts = []
+                j = i + 1
+                while j < len(args) and not args[j].startswith('--'):
+                    transform_parts.append(args[j])
+                    j += 1
+                
+                if not transform_parts:
+                    print("❌ Missing string transform argument")
+                    print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                    return None, None, None, None, False
+                
+                transform_arg = ' '.join(transform_parts)
+                try:
+                    # Parse format: "A":"B", "C":"D", "E":"F"
+                    transforms = {}
+                    # Remove outer quotes if present
+                    if transform_arg.startswith('"') and transform_arg.endswith('"'):
+                        transform_arg = transform_arg[1:-1]
+                    
+                    # Split by comma and process each pair
+                    pairs = [pair.strip() for pair in transform_arg.split(',')]
+                    for pair in pairs:
+                        if ':' in pair:
+                            source, target = pair.split(':', 1)
+                            source = source.strip().strip('"')
+                            target = target.strip().strip('"')
+                            if source and target:
+                                transforms[source] = target
+                    
+                    string_transforms.update(transforms)
+                except Exception as e:
+                    print(f"❌ Error parsing string transform argument: {e}")
+                    print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                    return None, None, None, None, False
+                i = j
+            elif arg == '--source-env-string' and i + 1 < len(args):
+                # Legacy support for backward compatibility
+                source_string = args[i + 1]
+                target_string = args[i + 2] if i + 2 < len(args) else ""
+                if target_string and not target_string.startswith('--'):
+                    string_transforms[source_string] = target_string
+                    i += 3
+                else:
+                    print("❌ Missing target string for --source-env-string")
+                    print("💡 Use 'asset-xfr --help' for usage information")
+                    return None, None, None, None, False
+            elif arg == '--target-env-string' and i + 1 < len(args):
+                # This should only be used with --source-env-string, skip here
+                i += 2
+            elif arg == '--quiet' or arg == '-q':
+                quiet_mode = True
+                i += 1
+            elif arg == '--verbose' or arg == '-v':
+                verbose_mode = True
+                i += 1
+            elif arg == '--help' or arg == '-h':
+                print("\n" + "="*60)
+                print("ASSET-XFR COMMAND HELP")
+                print("="*60)
+                print("Usage: asset-xfr [--input <input_dir>] [--string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"] [options]")
+                print("\nArguments:")
+                print("  --string-transform <transforms>  Multiple string transformations [OPTIONAL]")
+                print("                                   Format: \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                print("                                   If not provided, processes files without transformations")
+                print("\nOptions:")
+                print("  --input <dir>                 Input directory (auto-detected from asset-export if not specified)")
+                print("  --output-dir <dir>            Output directory (defaults to organized subdirectories)")
+                print("  --quiet, -q                   Quiet mode (minimal output)")
+                print("  --verbose, -v                 Verbose mode (detailed output)")
+                print("  --help, -h                    Show this help message")
+                print("\nExamples:")
+                print("  asset-xfr --string-transform \"PROD_DB\":\"DEV_DB\", \"PROD_URL\":\"DEV_URL\"")
+                print("  asset-xfr --input data/samples --string-transform \"old\":\"new\", \"test\":\"prod\"")
+                print("  asset-xfr --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\" --verbose")
+                print("\nLegacy Support:")
+                print("  asset-xfr --source-env-string \"PROD_DB\" --target-env-string \"DEV_DB\"")
+                print("\nNotes:")
+                print("  • Specifically designed for asset configuration and profile transformations")
+                print("  • Input directory is auto-detected from asset-export if not specified")
+                print("  • Output files are organized in asset-import and asset-export subdirectories")
+                print("="*60)
+                return None, None, None, None, False
+            else:
+                print(f"❌ Unknown argument: {arg}")
+                print("💡 Use 'asset-xfr --help' for usage information")
+                return None, None, None, None, False
+        
+        # string_transforms can be empty (direct processing mode)
+        return input_dir, string_transforms, output_dir, quiet_mode, verbose_mode
+    except Exception as e:
+        print(f"❌ Error parsing asset-xfr command: {e}")
+        return None, None, None, None, False
+
 def execute_formatter(input_dir: str, string_transforms: dict, output_dir: str, 
                      quiet_mode: bool, verbose_mode: bool, logger):
     """Execute formatter command in interactive mode.
@@ -1271,4 +1650,103 @@ def execute_formatter(input_dir: str, string_transforms: dict, output_dir: str,
             print("✅ Formatter completed successfully!")
     except Exception as e:
         print(f"❌ Error executing formatter: {e}")
-        logger.error(f"Error executing formatter: {e}") 
+        logger.error(f"Error executing formatter: {e}")
+
+
+def execute_asset_formatter(input_dir: str, string_transforms: dict, output_dir: str, 
+                           quiet_mode: bool, verbose_mode: bool, logger):
+    """Execute asset formatter command in interactive mode.
+    Args:
+        input_dir (str): Input directory (can be None for auto-detection)
+        string_transforms (dict): Dictionary of string transformations {source: target}
+        output_dir (str): Output directory (can be None for default)
+        quiet_mode (bool): Quiet mode flag
+        verbose_mode (bool): Verbose mode flag
+        logger: Logger instance
+    """
+    try:
+        if not input_dir:
+            if globals.GLOBAL_OUTPUT_DIR:
+                global_asset_export_dir = globals.GLOBAL_OUTPUT_DIR / "asset-export"
+                if global_asset_export_dir.exists() and global_asset_export_dir.is_dir():
+                    input_dir = str(global_asset_export_dir)
+                    if not quiet_mode:
+                        print(f"📁 Using global output directory: {input_dir}")
+                else:
+                    if not quiet_mode:
+                        print(f"📁 Global output directory asset-export not found: {global_asset_export_dir}")
+            if not input_dir:
+                current_dir = Path.cwd()
+                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                if not toolkit_dirs:
+                    print("❌ No adoc-migration-toolkit directory found.")
+                    print("💡 Please specify an input directory or run 'asset-config-export' first to generate CSV files")
+                    return
+                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                latest_toolkit_dir = toolkit_dirs[0]
+                input_dir = str(latest_toolkit_dir / "asset-export")
+                if not quiet_mode:
+                    print(f"📁 Using input directory: {input_dir}")
+        
+        formatter = AssetExportFormatter(
+            input_dir=input_dir,
+            string_transforms=string_transforms,
+            output_dir=output_dir,
+            logger=logger
+        )
+        stats = formatter.process_directory()
+        
+        if not quiet_mode:
+            print("\n" + "="*60)
+            print("ASSET PROCESSING SUMMARY")
+            print("="*60)
+            print(f"Input directory:     {input_dir}")
+            print(f"Output directory:    {formatter.output_dir}")
+            print(f"Asset export dir:    {formatter.asset_export_dir}")
+            if not string_transforms:
+                print(f"String transformations: None (direct processing mode)")
+                print("  💡 No transformations provided - processing files without string replacements")
+            else:
+                print(f"String transformations: {len(string_transforms)} transformations")
+                identical_transforms = 0
+                for source, target in string_transforms.items():
+                    if source == target:
+                        print(f"  '{source}' -> '{target}' (identical - will be skipped)")
+                        identical_transforms += 1
+                    else:
+                        print(f"  '{source}' -> '{target}'")
+                if identical_transforms > 0:
+                    print(f"  Note: {identical_transforms} identical transformation(s) will be skipped")
+            print(f"Total files found:   {stats['total_files']}")
+            if stats['csv_files'] > 0:
+                print(f"CSV files:           {stats['csv_files']}")
+            print(f"Files investigated:  {stats.get('files_investigated', 0)}")
+            print(f"Changes made:        {stats.get('changes_made', 0)}")
+            print(f"Assets processed:    {stats.get('assets_processed', 0)}")
+            if not string_transforms:
+                print("  ℹ️  Direct processing mode (no transformations provided)")
+                print("  💡 This mode processes files without string replacements")
+                print("     • Use this when no environment-specific string changes are needed")
+                print("     • Files are copied and organized without modifications")
+            elif stats.get('changes_made', 0) == 0:
+                print("  ℹ️  No string transformations were applied")
+                print("  💡 This could be because:")
+                print("     • Source and target strings are identical (e.g., 'Snowflake':'Snowflake')")
+                print("     • Source strings were not found in the files")
+                print("     • No transformation was needed for this dataset")
+            print(f"Successful:          {stats['successful']}")
+            print(f"Failed:              {stats['failed']}")
+            if stats['errors']:
+                print(f"\nErrors encountered:  {len(stats['errors'])}")
+                for error in stats['errors'][:5]:
+                    print(f"  - {error}")
+                if len(stats['errors']) > 5:
+                    print(f"  ... and {len(stats['errors']) - 5} more errors")
+            print("="*60)
+        if stats['failed'] > 0 or stats['errors']:
+            print("⚠️  Asset processing completed with errors. Check log file for details.")
+        else:
+            print("✅ Asset formatter completed successfully!")
+    except Exception as e:
+        print(f"❌ Error executing asset formatter: {e}")
+        logger.error(f"Error executing asset formatter: {e}") 

@@ -1606,6 +1606,14 @@ def run_interactive(args):
                     execute_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
                     continue
                 
+                # Check if it's an asset-xfr command
+                if command.lower().startswith('asset-xfr'):
+                    from .formatter import parse_asset_formatter_command, execute_asset_formatter
+                    input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_asset_formatter_command(command)
+                    # Execute regardless of whether string_transforms is empty (direct processing mode)
+                    execute_asset_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
+                    continue
+                
                 # Check if it's a profile-check command
                 if command.lower().startswith('profile-check'):
                     from .command_parsing import parse_profile_command
