@@ -576,14 +576,14 @@ def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool 
                 else:
                     output_dir = Path("policy-export")
             output_dir.mkdir(parents=True, exist_ok=True)
-            excluded_file = output_dir / "excluded_sql_view_policies.csv"
-            with open(excluded_file, 'w', newline='', encoding='utf-8') as f:
+            sql_view_policies_file = output_dir / "sql_view_policies.csv"
+            with open(sql_view_policies_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f, quoting=csv.QUOTE_ALL)
                 writer.writerow(["asset_id", "policy_id", "policy_name", "source_asset_uid"])
                 for asset_id, policy_id, policy_name, source_asset_uid in excluded_policies_all:
                     writer.writerow([asset_id, policy_id, policy_name, source_asset_uid])
             if not quiet_mode:
-                print(f"\nExcluded policies written to: {excluded_file}")
+                print(f"\nSQL view policies written to: {sql_view_policies_file}")
         
     except Exception as e:
         error_msg = f"Error in policy-list-export: {e}"
@@ -606,8 +606,8 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
     try:
         # Determine output file path using the policy-export category
         output_file = get_output_file_path("", "policies-all-export.csv", category="policy-export")
-        sql_policies_output_file = get_output_file_path("", "policies-sql-export.csv", category="policy-export")
-        sql_view_policies_output_file = get_output_file_path("", "policies-sql-view-export.csv", category="policy-export")
+        custom_sql_policies_output_file = get_output_file_path("", "policies-with-custom-sql-export.csv", category="policy-export")
+        sql_view_referencing_policies_output_file = get_output_file_path("", "policies-referencing-sql-views-export.csv", category="policy-export")
         if not quiet_mode:
             print(f"\nExporting all rules from ADOC environment (Parallel Mode)")
             if existing_target_assets_mode:
@@ -1029,22 +1029,22 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             writer.writerow(header)
             writer.writerows(rows)
-        # Write SQL based policies to separate file
-        with open(sql_policies_output_file, 'w', newline='', encoding='utf-8') as f:
+        # Write custom SQL based policies to separate file
+        with open(custom_sql_policies_output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             writer.writerow(header)
             for row in rows:
                 if row[7] == 'SQL':
                     writer.writerow(row)
-        print(f"SQL based policies exported to {sql_policies_output_file}")
-        # Write SQL View based policies to separate file
-        with open(sql_view_policies_output_file, 'w', newline='', encoding='utf-8') as f:
+        print(f"Custom SQL based policies exported to {custom_sql_policies_output_file}")
+        # Write policies referencing SQL View assets to separate file
+        with open(sql_view_referencing_policies_output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
             writer.writerow(header)
             for row in rows:
                 if any(val.strip() == 'SQL_VIEW' for val in row[9].split(',')):
                     writer.writerow(row)
-        print(f"SQL based policies exported to {sql_view_policies_output_file}")
+        print(f"Policies referencing SQL views exported to {sql_view_referencing_policies_output_file}")
         # Step 9: Print statistics
         if not quiet_mode:
             print("\n" + "="*80)
@@ -1100,14 +1100,14 @@ def execute_policy_list_export_parallel(client, logger: logging.Logger, quiet_mo
                 else:
                     output_dir = Path("policy-export")
             output_dir.mkdir(parents=True, exist_ok=True)
-            excluded_sql_view_policiesfile = output_dir / "excluded_sql_view_policies.csv"
-            with open(excluded_sql_view_policiesfile, 'w', newline='', encoding='utf-8') as f:
+            sql_view_policies_file = output_dir / "sql_view_policies.csv"
+            with open(sql_view_policies_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f, quoting=csv.QUOTE_ALL)
                 writer.writerow(["asset_id", "source_asset_uid", "policy_id", "policy_name"])
                 for asset_id, source_asset_uid, policy_id, policy_name in excluded_policies_all:
                     writer.writerow([asset_id, source_asset_uid, policy_id, policy_name])
             if not quiet_mode:
-                print(f"\nExcluded policies written to: {excluded_sql_view_policiesfile}")
+                print(f"\nSQL view policies written to: {sql_view_policies_file}")
         
     except Exception as e:
         error_msg = f"Failed to execute parallel policy list export: {e}"
