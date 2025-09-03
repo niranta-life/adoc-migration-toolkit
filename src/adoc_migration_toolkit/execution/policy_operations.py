@@ -1827,7 +1827,7 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     files=files,
                     use_target_auth=True,
                     use_target_tenant=True,
-                    timeout=60  # Increase timeout for file uploads
+                    timeout=300  # Increase timeout for file uploads to 5 minutes
                 )
                 
                 if not upload_response:
