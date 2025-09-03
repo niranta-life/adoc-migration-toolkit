@@ -1816,7 +1816,8 @@ def run_interactive(args):
                         # Detailed Timeout Configuration
                         print(f"\n⏱️  DETAILED TIMEOUT CONFIGURATION:")
                         print(f"  Global HTTP Config: {http_config['timeout']} seconds")
-                        print(f"  API Client Default: 10 seconds")
+                        from ..shared.api_client import DEFAULT_TIMEOUT
+                        print(f"  API Client Default: {DEFAULT_TIMEOUT} seconds")
                         print(f"  Policy Import: 300 seconds (file uploads)")
                         print(f"  Asset Operations: Uses global config ({http_config['timeout']} seconds)")
                         print(f"  Policy Operations: Uses global config ({http_config['timeout']} seconds)")
