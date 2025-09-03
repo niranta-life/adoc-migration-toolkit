@@ -1809,9 +1809,18 @@ def run_interactive(args):
                         # HTTP Configuration
                         print(f"\n🌐 HTTP CONFIGURATION:")
                         http_config = shared_globals.HTTP_CONFIG.copy()
-                        print(f"  Timeout: {http_config['timeout']} seconds")
+                        print(f"  Global Timeout: {http_config['timeout']} seconds")
                         print(f"  Retry:   {http_config['retry']} attempts")
                         print(f"  Proxy:   {http_config['proxy'] or 'None'}")
+                        
+                        # Detailed Timeout Configuration
+                        print(f"\n⏱️  DETAILED TIMEOUT CONFIGURATION:")
+                        print(f"  Global HTTP Config: {http_config['timeout']} seconds")
+                        print(f"  API Client Default: 10 seconds")
+                        print(f"  Policy Import: 300 seconds (file uploads)")
+                        print(f"  Asset Operations: Uses global config ({http_config['timeout']} seconds)")
+                        print(f"  Policy Operations: Uses global config ({http_config['timeout']} seconds)")
+                        print(f"  Note: Explicit timeouts override global config")
                         
                         # Log Level
                         print(f"\n📝 LOGGING CONFIGURATION:")
