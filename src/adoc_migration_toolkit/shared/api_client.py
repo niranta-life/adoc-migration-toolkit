@@ -40,8 +40,8 @@ from adoc_migration_toolkit.shared.globals import HTTP_CONFIG
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Default timeout for all API calls (60 seconds)
-DEFAULT_TIMEOUT = 60
+# Default timeout for all API calls (10 seconds)
+DEFAULT_TIMEOUT = 10
 
 class AcceldataAPIClient:
     """
@@ -63,8 +63,8 @@ class AcceldataAPIClient:
         target_tenant (Optional[str]): Target environment tenant
     """
     
-    # Default timeout for all API calls (60 seconds)
-    DEFAULT_TIMEOUT = 60
+    # Default timeout for all API calls (10 seconds)
+    DEFAULT_TIMEOUT = 10
     
     def __init__(self, host: Optional[str] = None, access_key: Optional[str] = None, 
                  secret_key: Optional[str] = None, tenant: Optional[str] = None, 
