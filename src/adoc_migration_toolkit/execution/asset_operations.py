@@ -1173,22 +1173,19 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
             print("="*80)
 
         query_params = [
-            f"size=0",
             f"page=0",
-            f"parents=true"
+            f"size=500",
+            f"sortBy=dataQualityPolicyCount:DESC"
         ]
 
         if asset_type_ids not in [None, 'None', 'null', '']:
             query_params.append(f"asset_type_ids={asset_type_ids}")
 
-        if source_type_ids not in [None, 'None', 'null', '']:
-            query_params.append(f"source_type_ids={source_type_ids}")
-
         if assembly_ids not in [None, 'None', 'null', '']:
             query_params.append(f"assembly_ids={assembly_ids}")
 
         query_string = "&".join(query_params)
-        end_point = f"/catalog-server/api/assets/discover?{query_string}"
+        end_point = f"/catalog-server/api/assets/list?{query_string}"
 
         # Step 1: Get total count of assets
         if not quiet_mode:
@@ -1214,14 +1211,15 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
             print("\nCount Response:")
             print(json.dumps(count_response, indent=2, ensure_ascii=False))
         
-        # Extract total count
-        if not count_response or 'meta' not in count_response or 'count' not in count_response['meta']:
-            error_msg = "Failed to get total asset count from response"
+        # Extract total count - new API structure
+        if not count_response or 'assets' not in count_response:
+            error_msg = "Failed to get assets from response"
             print(f"❌ {error_msg}")
             logger.error(error_msg)
             return
         
-        total_count = count_response['meta']['count']
+        # Use the total field from the new API response
+        total_count = count_response.get('meta', {}).get('total', len(count_response['assets']))
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
         
         if not quiet_mode:
@@ -1241,22 +1239,19 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
             
             try:
                 query_params = [
-                    f"size={page_size}",
                     f"page={page}",
-                    f"parents=true"
+                    f"size={page_size}",
+                    f"sortBy=dataQualityPolicyCount:DESC"
                 ]
 
                 if asset_type_ids not in [None, 'None', 'null', '']:
                     query_params.append(f"asset_type_ids={asset_type_ids}")
 
-                if source_type_ids not in [None, 'None', 'null', '']:
-                    query_params.append(f"source_type_ids={source_type_ids}")
-
                 if assembly_ids not in [None, 'None', 'null', '']:
                     query_params.append(f"assembly_ids={assembly_ids}")
 
                 query_string = "&".join(query_params)
-                end_point_per_page = f"/catalog-server/api/assets/discover?{query_string}"
+                end_point_per_page = f"/catalog-server/api/assets/list?{query_string}"
 
                 if verbose_mode:
                     print(f"\nGET Request Headers:")
@@ -1278,10 +1273,10 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                     print(f"\nPage {page + 1} Response:")
                     print(json.dumps(page_response, indent=2, ensure_ascii=False))
                 
-                # Extract assets from response
-                if page_response and 'data' in page_response and 'assets' in page_response['data']:
-                    page_assets = page_response['data']['assets']
-                    # Store the full asset wrapper to preserve tags
+                # Extract assets from response - new API structure
+                if page_response and 'assets' in page_response:
+                    page_assets = page_response['assets']
+                    # Store the assets directly (no wrapper in new API)
                     all_assets.extend(page_assets)
                     
                     if not quiet_mode:
@@ -1303,14 +1298,14 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                     
                     # Try alternative response structures
                     assets_found = False
-                    if page_response and 'data' in page_response:
+                    if page_response:
                         # Try different possible locations for assets
                         possible_asset_locations = ['assets', 'asset', 'items', 'results']
                         for location in possible_asset_locations:
-                            if location in page_response['data']:
-                                page_assets = page_response['data'][location]
+                            if location in page_response:
+                                page_assets = page_response[location]
                                 if isinstance(page_assets, list):
-                                    # Store the full asset wrapper to preserve tags
+                                    # Store the assets directly (no wrapper in new API)
                                     all_assets.extend(page_assets)
                                     if not quiet_mode:
                                         print(f"✅ Page {page + 1}: Found {len(page_assets)} assets in 'data.{location}'")
@@ -1347,32 +1342,21 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
             # Write header: source_uid, source_id, target_uid, tags
             writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags'])
             
-            # Write asset data
-            for asset_wrapper in all_assets:
-                # Extract asset information from the wrapper structure
-                if 'asset' in asset_wrapper:
-                    asset = asset_wrapper['asset']
-                else:
-                    # Fallback: if no 'asset' wrapper, use the object directly
-                    asset = asset_wrapper
-                
-                # Extract required fields
-                asset_id = asset.get('id', '')
-                asset_uid = asset.get('uid', '')
+            # Write asset data - new API structure
+            for asset in all_assets:
+                # Extract required fields from new API structure
+                asset_id = asset.get('assetId', '')
+                asset_uid = asset.get('assetUid', '')
                 
                 # Extract tags and concatenate with colon separator
+                # Note: New API structure may not have tags in the same format
                 tags = []
-                if 'tags' in asset_wrapper and asset_wrapper['tags']:
-                    for tag in asset_wrapper['tags']:
-                        if 'name' in tag:
-                            # Check if autoTagged is true and skip if so
-                            if tag.get('autoTagged', False):
-                                continue
-                            tags.append(tag['name'])
+                # For now, we'll leave tags empty as the new API structure doesn't show tags
+                # This can be updated once we see the actual response structure
                 
                 tags_str = ':'.join(tags) if tags else ''
                 
-                # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
+                # Write row: source_uid (asset.assetUid), source_id (asset.assetId), target_uid (asset.assetUid), tags
                 writer.writerow([asset_uid, asset_id, asset_uid, tags_str])
         
         # Step 4: Sort the CSV file by source_uid, then source_id
@@ -1475,22 +1459,19 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
 
 
         query_params = [
-            f"size=0",
             f"page=0",
-            f"parents=true"
+            f"size=500",
+            f"sortBy=dataQualityPolicyCount:DESC"
         ]
 
         if asset_type_ids not in [None, 'None', 'null', '']:
             query_params.append(f"asset_type_ids={asset_type_ids}")
 
-        if source_type_ids not in [None, 'None', 'null', '']:
-            query_params.append(f"source_type_ids={source_type_ids}")
-
         if assembly_ids not in [None, 'None', 'null', '']:
             query_params.append(f"assembly_ids={assembly_ids}")
 
         query_string = "&".join(query_params)
-        end_point = f"/catalog-server/api/assets/discover?{query_string}"
+        end_point = f"/catalog-server/api/assets/list?{query_string}"
 
         # Step 1: Get total count of assets
         if not quiet_mode:
@@ -1516,14 +1497,15 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             print("\nCount Response:")
             print(json.dumps(count_response, indent=2, ensure_ascii=False))
         
-        # Extract total count
-        if not count_response or 'meta' not in count_response or 'count' not in count_response['meta']:
-            error_msg = "Failed to get total asset count from response"
+        # Extract total count - new API structure
+        if not count_response or 'assets' not in count_response:
+            error_msg = "Failed to get assets from response"
             print(f"❌ {error_msg}")
             logger.error(error_msg)
             return
         
-        total_count = count_response['meta']['count']
+        # Use the total field from the new API response
+        total_count = count_response.get('meta', {}).get('total', len(count_response['assets']))
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
         
         if not quiet_mode:
@@ -1592,23 +1574,20 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             for page in range(start_page, end_page):
                 try:
                     query_params = [
-                        f"size={page_size}",
                         f"page={page}",
-                        f"parents=true"
+                        f"size={page_size}",
+                        f"sortBy=dataQualityPolicyCount:DESC"
                     ]
 
                     if asset_type_ids not in [None, 'None', 'null', '']:
                         query_params.append(f"asset_type_ids={asset_type_ids}")
-
-                    if source_type_ids not in [None, 'None', 'null', '']:
-                        query_params.append(f"source_type_ids={source_type_ids}")
 
                     if assembly_ids not in [None, 'None', 'null', '']:
                         query_params.append(f"assembly_ids={assembly_ids}")
 
                     query_string = "&".join(query_params)
                     print(f"Query::: {query_string}")
-                    end_point_per_page = f"/catalog-server/api/assets/discover?{query_string}"
+                    end_point_per_page = f"/catalog-server/api/assets/list?{query_string}"
                     if verbose_mode:
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
                         print(f"\n{thread_name} - Processing page {page + 1}")
@@ -1630,44 +1609,31 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                         print(f"\n{thread_name} - Page {page + 1} Response:")
                         print(json.dumps(page_response, indent=2, ensure_ascii=False))
                     
-                    # Extract assets from response
-                    if page_response and 'data' in page_response and 'assets' in page_response['data']:
-                        page_assets = page_response['data']['assets']
+                    # Extract assets from response - new API structure
+                    if page_response and 'assets' in page_response:
+                        page_assets = page_response['assets']
                         
                         # Write assets to temporary CSV file
                         with open(temp_file.name, 'a', newline='', encoding='utf-8') as f:
                             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
                             
-                            # Write asset data
-                            for asset_wrapper in page_assets:
-                                # Extract asset information from the wrapper structure
-                                if 'asset' in asset_wrapper:
-                                    asset = asset_wrapper['asset']
-                                else:
-                                    # Fallback: if no 'asset' wrapper, use the object directly
-                                    asset = asset_wrapper
-                                
-                                # Extract required fields
-                                asset_id = asset.get('id', '')
-                                asset_uid = asset.get('uid', '')
+                            # Write asset data - new API structure
+                            for asset in page_assets:
+                                # Extract required fields from new API structure
+                                asset_id = asset.get('assetId', '')
+                                asset_uid = asset.get('assetUid', '')
                                 assembly_id = asset.get('assemblyId', '')
-
-                                asset_type_definition = asset.get('assetType')
-                                if asset_type_definition:
-                                    asset_type = asset_type_definition.get('name')
+                                asset_type = asset.get('assetType', '')
+                                
                                 # Extract tags and concatenate with colon separator
+                                # Note: New API structure may not have tags in the same format
                                 tags = []
-                                if 'tags' in asset_wrapper and asset_wrapper['tags']:
-                                    for tag in asset_wrapper['tags']:
-                                        if 'name' in tag:
-                                            # Check if autoTagged is true and skip if so
-                                            if tag.get('autoTagged', False):
-                                                continue
-                                            tags.append(tag['name'])
+                                # For now, we'll leave tags empty as the new API structure doesn't show tags
+                                # This can be updated once we see the actual response structure
                                 
                                 tags_str = ':'.join(tags) if tags else ''
                                 
-                                # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
+                                # Write row: source_uid (asset.assetUid), source_id (asset.assetId), target_uid (asset.assetUid), tags, assembly_id, asset_type
                                 writer.writerow([asset_uid, asset_id, asset_uid, tags_str, assembly_id, asset_type])
                         
                         total_assets += len(page_assets)
@@ -1679,48 +1645,34 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                     else:
                         # Try alternative response structures
                         assets_found = False
-                        if page_response and 'data' in page_response:
+                        if page_response:
                             # Try different possible locations for assets
                             possible_asset_locations = ['assets', 'asset', 'items', 'results']
                             for location in possible_asset_locations:
-                                if location in page_response['data']:
-                                    page_assets = page_response['data'][location]
+                                if location in page_response:
+                                    page_assets = page_response[location]
                                     if isinstance(page_assets, list):
                                         # Write assets to temporary CSV file
                                         with open(temp_file.name, 'a', newline='', encoding='utf-8') as f:
                                             writer = csv.writer(f, quoting=csv.QUOTE_ALL)
                                             
-                                            # Write asset data
-                                            for asset_wrapper in page_assets:
-                                                # Extract asset information from the wrapper structure
-                                                if 'asset' in asset_wrapper:
-                                                    asset = asset_wrapper['asset']
-                                                else:
-                                                    # Fallback: if no 'asset' wrapper, use the object directly
-                                                    asset = asset_wrapper
-                                                
-                                                # Extract required fields
-                                                asset_id = asset.get('id', '')
-                                                asset_uid = asset.get('uid', '')
+                                            # Write asset data - new API structure
+                                            for asset in page_assets:
+                                                # Extract required fields from new API structure
+                                                asset_id = asset.get('assetId', '')
+                                                asset_uid = asset.get('assetUid', '')
                                                 assembly_id = asset.get('assemblyId', '')
-
-                                                asset_type_definition = asset.get('assetType')
-                                                if asset_type_definition:
-                                                    asset_type = asset_type_definition.get('name')
+                                                asset_type = asset.get('assetType', '')
                                                 
                                                 # Extract tags and concatenate with colon separator
+                                                # Note: New API structure may not have tags in the same format
                                                 tags = []
-                                                if 'tags' in asset_wrapper and asset_wrapper['tags']:
-                                                    for tag in asset_wrapper['tags']:
-                                                        if 'name' in tag:
-                                                            # Check if autoTagged is true and skip if so
-                                                            if tag.get('autoTagged', False):
-                                                                continue
-                                                            tags.append(tag['name'])
+                                                # For now, we'll leave tags empty as the new API structure doesn't show tags
+                                                # This can be updated once we see the actual response structure
                                                 
                                                 tags_str = ':'.join(tags) if tags else ''
                                                 
-                                                # Write row: source_uid (asset.uid), source_id (asset.id), target_uid (asset.uid), tags
+                                                # Write row: source_uid (asset.assetUid), source_id (asset.assetId), target_uid (asset.assetUid), tags, assembly_id, asset_type
                                                 writer.writerow([asset_uid, asset_id, asset_uid, tags_str, assembly_id, asset_type])
                                         
                                         total_assets += len(page_assets)
