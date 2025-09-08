@@ -520,6 +520,53 @@ def parse_asset_list_export_command(command: str) -> tuple:
 
     return quiet_mode, verbose_mode, parallel_mode, use_target, page_size, source_type_ids, asset_type_ids, assembly_ids, max_threads
 
+def parse_asset_tag_export_command(command: str) -> tuple:
+    """Parse an asset-tag-export command string into components.
+
+    Args:
+        command: Command string like "asset-tag-export [--quiet] [--verbose] [--target] [--max-threads <num>]"
+
+    Returns:
+        Tuple of (quiet_mode, verbose_mode, use_target, max_threads)
+    """
+    parts = command.strip().split()
+    print(f"Command arguments {parts}")
+    if not parts or parts[0].lower() != 'asset-tag-export':
+        return False, False, False, 5
+
+    quiet_mode = False
+    verbose_mode = False
+    use_target = False
+    max_threads = 5
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--quiet':
+            quiet_mode = True
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            parts.remove('--verbose')
+        elif parts[i] == '--target':
+            use_target = True
+            parts.remove('--target')
+        elif parts[i] == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads < 1:
+                    raise ValueError("max_threads must be at least 1")
+            except ValueError as e:
+                raise ValueError(f"Invalid max_threads value: {e}")
+            parts.pop(i)  # Remove --max-threads
+            parts.pop(i)  # Remove the max_threads value
+        else:
+            i += 1
+
+    return quiet_mode, verbose_mode, use_target, max_threads
+
 def parse_notifications_check_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
 

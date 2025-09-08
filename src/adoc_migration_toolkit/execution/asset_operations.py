@@ -1514,14 +1514,9 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             print(f"Page size: {page_size}")
             print(f"Total pages to retrieve: {total_pages}")
         
-        # Calculate thread configuration
-        min_pages_per_thread = 2
-        if total_pages < min_pages_per_thread:
-            num_threads = 1
-            pages_per_thread = total_pages
-        else:
-            num_threads = min(max_threads, (total_pages + min_pages_per_thread - 1) // min_pages_per_thread)
-            pages_per_thread = (total_pages + num_threads - 1) // num_threads
+        # Calculate thread configuration - use all available threads up to max_threads
+        num_threads = min(max_threads, total_pages)  # Use up to max_threads, but not more than total_pages
+        pages_per_thread = (total_pages + num_threads - 1) // num_threads
         
         if not quiet_mode:
             print(f"Using {num_threads} threads to process {total_pages} pages")
@@ -1586,7 +1581,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                         query_params.append(f"assembly_ids={assembly_ids}")
 
                     query_string = "&".join(query_params)
-                    print(f"Query::: {query_string}")
+                    # Removed verbose query output for cleaner progress display
                     end_point_per_page = f"/catalog-server/api/assets/list?{query_string}"
                     if verbose_mode:
                         thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
@@ -2253,28 +2248,54 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             header = next(reader)  # Skip header
+            
+            # Check if this is asset-tag-import-ready.csv format or asset-merged-all.csv format
+            is_tag_import_ready = len(header) >= 5 and header[0] == 'source_uid' and header[1] == 'target_uid'
+            
             for row in reader:
-                if len(row) >= 5:  # Ensure we have at least 5 columns (asset-merged-all.csv format)
-                    source_id = row[0]
-                    source_uid = row[1]
-                    target_id = row[2]
-                    target_uid = row[3]
-                    tags_str = row[4]  # 5th column contains tags
+                if len(row) >= 5:  # Ensure we have at least 5 columns
+                    if is_tag_import_ready:
+                        # asset-tag-import-ready.csv format: source_uid, target_uid, source_id, tags, error
+                        source_uid = row[0]
+                        target_uid = row[1]
+                        source_id = row[2]
+                        tags_str = row[3]  # 4th column contains tags
+                        error = row[4] if len(row) > 4 else ''
+                        
+                        # Skip rows with errors
+                        if error and error.strip():
+                            continue
+                    else:
+                        # asset-merged-all.csv format: source_id, source_uid, target_id, target_uid, tags
+                        source_id = row[0]
+                        source_uid = row[1]
+                        target_id = row[2]
+                        target_uid = row[3]
+                        tags_str = row[4]  # 5th column contains tags
                     
                     # Parse tags (colon-separated)
                     tags = []
                     if tags_str and tags_str.strip():
                         tags = [tag.strip() for tag in tags_str.split(':') if tag.strip()]
                     
-                    asset_data.append({
-                        'source_uid': source_uid,
-                        'source_id': source_id,
-                        'target_uid': target_uid,
-                        'tags': tags
-                    })
+                    # Only process assets that have tags
+                    if tags:
+                        asset_data.append({
+                            'source_uid': source_uid,
+                            'source_id': source_id,
+                            'target_uid': target_uid,
+                            'tags': tags
+                        })
         
         if not asset_data:
             print("❌ No valid asset data found in CSV file")
+            if not quiet_mode:
+                print("💡 Make sure the CSV file contains assets with tags and no errors")
+                if is_tag_import_ready:
+                    print("   Expected format: source_uid, target_uid, source_id, tags, error")
+                    print("   Only rows with tags and no errors will be processed")
+                else:
+                    print("   Expected format: source_id, source_uid, target_id, target_uid, tags")
             logger.warning("No valid asset data found in CSV file")
             return
         
@@ -5471,3 +5492,321 @@ def resolve_duplicates_interactively(asset_data: List[Dict[str, str]], duplicate
         if not quiet_mode:
             print(f"❌ Error resolving duplicates: {e}")
         return None
+
+
+def execute_asset_tag_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, max_threads: int = 5):
+    """Execute the asset-tag-export command.
+    
+    This command reads asset-merged-all.csv and exports tags for each asset using the tags API.
+    Creates asset-tag-import-ready.csv for importing tags to target environment.
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to show detailed output
+        use_target: Whether to use target environment
+        max_threads: Maximum number of threads for parallel processing
+    """
+    try:
+        # Determine environment
+        env_name = "TARGET" if use_target else "SOURCE"
+        env_host = client.target_host if use_target else client.host
+        env_tenant = getattr(client, 'target_tenant', None) if use_target else getattr(client, 'tenant', None)
+        
+        if not quiet_mode:
+            print(f"Exporting asset tags from ADOC {env_name} environment")
+            print(f"Environment: {env_name}")
+            print(f"Host: {env_host}")
+            if env_tenant:
+                print(f"Tenant: {env_tenant}")
+        
+        # Get global output directory
+        from ..shared import globals
+        if globals.GLOBAL_OUTPUT_DIR:
+            output_dir = globals.GLOBAL_OUTPUT_DIR
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+            if toolkit_dirs:
+                # Sort by modification time and get the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                output_dir = toolkit_dirs[0]
+            else:
+                output_dir = current_dir
+        
+        # Define input and output files
+        input_file = output_dir / "asset-import" / "asset-merged-all.csv"
+        output_file = output_dir / "asset-import" / "asset-tag-import-ready.csv"
+        
+        if not quiet_mode:
+            print(f"Input file: {input_file}")
+            print(f"Output file: {output_file}")
+            if globals.GLOBAL_OUTPUT_DIR:
+                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
+            print("="*80)
+        
+        # Check if input file exists
+        if not input_file.exists():
+            error_msg = f"Input file not found: {input_file}. Please run 'transform-and-merge' first to create asset-merged-all.csv"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+                if globals.GLOBAL_OUTPUT_DIR:
+                    print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv")
+                else:
+                    print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-merged-all.csv")
+            logger.error(error_msg)
+            return
+        
+        # Read asset data from merged file
+        if not quiet_mode:
+            print("Reading asset data from asset-merged-all.csv...")
+        
+        asset_data = []
+        try:
+            with open(input_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    asset_data.append(row)
+        except Exception as e:
+            error_msg = f"Failed to read input file: {e}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not asset_data:
+            error_msg = "No asset data found in input file"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"Found {len(asset_data)} assets to process")
+        
+        # Filter assets that have target_uid (these are the ones that exist in target)
+        target_assets = [asset for asset in asset_data if asset.get('target_uid') and asset.get('target_uid').strip()]
+        
+        if not quiet_mode:
+            print(f"Found {len(target_assets)} assets with target_uid (will be processed)")
+            if len(target_assets) < len(asset_data):
+                print(f"Skipping {len(asset_data) - len(target_assets)} assets without target_uid")
+        
+        if not target_assets:
+            error_msg = "No assets with target_uid found. Cannot export tags."
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        # Process assets in parallel to fetch tags
+        if not quiet_mode:
+            print(f"Fetching tags for {len(target_assets)} assets using {max_threads} threads...")
+        
+        
+        # Process assets in parallel with individual thread progress bars
+        tag_results = []
+        successful_count = 0
+        failed_count = 0
+        
+        # Calculate thread configuration
+        min_assets_per_thread = 10
+        if len(target_assets) < min_assets_per_thread:
+            num_threads = 1
+            assets_per_thread = len(target_assets)
+        else:
+            num_threads = min(max_threads, (len(target_assets) + min_assets_per_thread - 1) // min_assets_per_thread)
+            assets_per_thread = (len(target_assets) + num_threads - 1) // num_threads
+        
+        if not quiet_mode:
+            print(f"🚀 Starting parallel processing with {num_threads} threads...")
+            print(f"Assets per thread: {assets_per_thread}")
+            print("="*80)
+        
+        # Get thread names
+        from .utils import get_thread_names
+        thread_names = get_thread_names()
+        
+        def process_asset_chunk(thread_id, start_index, end_index):
+            """Process a chunk of assets for a specific thread."""
+            # Create a thread-local client instance
+            thread_client = type(client)(
+                host=client.host,
+                access_key=client.access_key,
+                secret_key=client.secret_key,
+                tenant=getattr(client, 'tenant', None)
+            )
+            # Copy target credentials to thread client
+            thread_client.target_access_key = getattr(client, 'target_access_key', None)
+            thread_client.target_secret_key = getattr(client, 'target_secret_key', None)
+            thread_client.target_host = getattr(client, 'target_host', None)
+            thread_client.target_tenant = getattr(client, 'target_tenant', None)
+            
+            # Get assets for this thread
+            thread_assets = target_assets[start_index:end_index]
+            thread_results = []
+            thread_successful = 0
+            thread_failed = 0
+            
+            # Create progress bar for this thread
+            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+            progress_bar = create_progress_bar(
+                total=len(thread_assets),
+                desc=thread_name,
+                unit="assets",
+                disable=quiet_mode or verbose_mode
+            )
+            
+            for asset in thread_assets:
+                try:
+                    source_uid = asset.get('source_uid', '')
+                    target_uid = asset.get('target_uid', '')
+                    source_id = asset.get('source_id', '')
+                    
+                    if not source_id:
+                        result = {
+                            'source_uid': source_uid,
+                            'target_uid': target_uid,
+                            'source_id': source_id,
+                            'tags': [],
+                            'error': 'No source_id found'
+                        }
+                        thread_results.append(result)
+                        thread_failed += 1
+                        progress_bar.update(1)
+                        continue
+                    
+                    # Fetch tags using source_id
+                    tags_response = thread_client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets/{source_id}/tags",
+                        method='GET',
+                        use_target_auth=use_target,
+                        use_target_tenant=use_target
+                    )
+                    
+                    tags = []
+                    if tags_response and 'assetTags' in tags_response:
+                        # Extract only non-auto-tagged tags (manual tags)
+                        for tag in tags_response['assetTags']:
+                            if not tag.get('autoTagged', True):  # Only include manually tagged items
+                                tag_name = tag.get('name', '')
+                                if tag_name:
+                                    tags.append(tag_name)
+                    
+                    if verbose_mode and tags:
+                        print(f"  📋 {thread_name} - Asset {source_uid}: Found {len(tags)} manual tags: {', '.join(tags)}")
+                    
+                    result = {
+                        'source_uid': source_uid,
+                        'target_uid': target_uid,
+                        'source_id': source_id,
+                        'tags': tags,
+                        'error': None
+                    }
+                    thread_results.append(result)
+                    thread_successful += 1
+                    
+                except Exception as e:
+                    error_msg = f"Failed to fetch tags for asset {source_uid}: {e}"
+                    if verbose_mode:
+                        print(f"  ⚠️  {thread_name} - {error_msg}")
+                    result = {
+                        'source_uid': source_uid,
+                        'target_uid': target_uid,
+                        'source_id': source_id,
+                        'tags': [],
+                        'error': error_msg
+                    }
+                    thread_results.append(result)
+                    thread_failed += 1
+                
+                progress_bar.update(1)
+            
+            progress_bar.close()
+            
+            return {
+                'thread_id': thread_id,
+                'thread_name': thread_name,
+                'results': thread_results,
+                'successful': thread_successful,
+                'failed': thread_failed
+            }
+        
+        # Submit thread tasks
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = []
+            for i in range(num_threads):
+                start_index = i * assets_per_thread
+                end_index = min((i + 1) * assets_per_thread, len(target_assets))
+                if start_index < len(target_assets):
+                    future = executor.submit(process_asset_chunk, i, start_index, end_index)
+                    futures.append(future)
+            
+            # Collect results
+            for future in futures:
+                thread_result = future.result()
+                tag_results.extend(thread_result['results'])
+                successful_count += thread_result['successful']
+                failed_count += thread_result['failed']
+        
+        # Write results to output file
+        if not quiet_mode:
+            print(f"\nWriting tag data to {output_file}...")
+        
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            
+            # Write header
+            writer.writerow(['source_uid', 'target_uid', 'source_id', 'tags', 'error'])
+            
+            # Write tag data
+            for result in tag_results:
+                tags_str = ':'.join(result['tags']) if result['tags'] else ''
+                writer.writerow([
+                    result['source_uid'],
+                    result['target_uid'],
+                    result['source_id'],
+                    tags_str,
+                    result['error'] or ''
+                ])
+        
+        # Summary
+        if not quiet_mode:
+            print("="*80)
+            print("ASSET TAG EXPORT COMPLETED")
+            print("="*80)
+            print(f"Environment: {env_name}")
+            print(f"Input file: {input_file}")
+            print(f"Output file: {output_file}")
+            print(f"Total assets processed: {len(target_assets)}")
+            print(f"Successful: {successful_count}")
+            print(f"Failed: {failed_count}")
+            print(f"Threads used: {num_threads}")
+            print(f"Assets with tags found: {len([r for r in tag_results if r['tags']])}")
+            print(f"Assets without tags: {len([r for r in tag_results if not r['tags'] and not r['error']])}")
+            
+            # Show assets with tags
+            assets_with_tags = [r for r in tag_results if r['tags']]
+            if assets_with_tags:
+                print(f"\nAssets with manual tags: {len(assets_with_tags)}")
+                if verbose_mode:
+                    for result in assets_with_tags[:10]:  # Show first 10
+                        print(f"  📋 {result['source_uid']}: {', '.join(result['tags'])}")
+                    if len(assets_with_tags) > 10:
+                        print(f"  ... and {len(assets_with_tags) - 10} more")
+            
+            print("\nNext steps:")
+            print("1. Review asset-tag-import-ready.csv")
+            print("2. Use asset-tag-import to import tags to target environment")
+            print("="*80)
+        
+        logger.info(f"Asset tag export completed. Processed {len(target_assets)} assets, {successful_count} successful, {failed_count} failed")
+        
+    except Exception as e:
+        error_msg = f"Asset tag export failed: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise
