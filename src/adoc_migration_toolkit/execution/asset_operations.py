@@ -1130,7 +1130,7 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         logger.error(error_msg)
 
 
-def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500):
+def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 100):
     """Execute the asset-list-export command.
     
     Args:
@@ -1139,7 +1139,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
         use_target: Whether to use target environment instead of source
-        page_size: Number of assets per page (default: 500)
+        page_size: Number of assets per page (default: 100)
     """
     try:
         # Determine output file path based on environment
@@ -1174,7 +1174,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
 
         query_params = [
             f"page=0",
-            f"size=500",
+            f"size={page_size}",
             f"sortBy=dataQualityPolicyCount:DESC"
         ]
 
@@ -1415,7 +1415,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
         logger.error(error_msg)
 
 
-def execute_asset_list_export_parallel(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 500, max_threads: int = 5):
+def execute_asset_list_export_parallel(client, logger: logging.Logger, source_type_ids: str = None, asset_type_ids: str = None, assembly_ids: str = None, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, page_size: int = 100, max_threads: int = 5):
     """Execute the asset-list-export command with parallel processing.
     Args:
         client: API client instance
@@ -1423,7 +1423,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
         use_target: Whether to use target environment instead of source
-        page_size: Number of assets per page (default: 500)
+        page_size: Number of assets per page (default: 100)
         max_threads: Maximum number of threads to use (default: 5)
     """
     try:
@@ -1460,7 +1460,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
 
         query_params = [
             f"page=0",
-            f"size=500",
+            f"size={page_size}",
             f"sortBy=dataQualityPolicyCount:DESC"
         ]
 
