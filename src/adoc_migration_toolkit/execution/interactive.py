@@ -20,7 +20,7 @@ from .segment_operations import execute_segments_export, execute_segments_import
 from ..shared.logging import setup_logging
 from adoc_migration_toolkit.execution.output_management import load_global_output_directory
 from ..shared.api_client import create_api_client
-from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import
+from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import, execute_asset_tag_export
 from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
 from .formatter import execute_formatter, parse_formatter_command
@@ -135,6 +135,8 @@ def show_interactive_help():
     print("    Import asset configurations to target environment from CSV file")
     print(f"  {BOLD}asset-list-export{RESET} [--quiet] [--verbose] [--parallel] [--target] [--page-size <size>]")
     print("    Export all assets from source or target environment to CSV file")
+    print(f"  {BOLD}asset-tag-export{RESET} [--quiet] [--verbose] [--target] [--max-threads <num>]")
+    print("    Export tags for assets from asset-merged-all.csv to asset-import/asset-tag-import-ready.csv")
     print(f"  {BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
     print("    Import tags for assets from CSV file")
     
@@ -421,6 +423,32 @@ def show_command_help(command_name: str):
         print("      • Provides comprehensive statistics upon completion")
         print("      • Parallel mode: Divides pages among threads, combines results, deletes temp files")
         print("      • Target mode: Uses target access key, secret key, and tenant for authentication")
+    
+    elif command_name == 'asset-tag-export':
+        print(f"\n{BOLD}asset-tag-export{RESET} [--quiet] [--verbose] [--target] [--max-threads <num>]")
+        print("    Description: Export tags for assets from asset-merged-all.csv to asset-import/asset-tag-import-ready.csv")
+        print("    Arguments:")
+        print("      --quiet: Suppress console output, show only summary")
+        print("      --verbose: Show detailed output including tag details")
+        print("      --target: Use target environment instead of source environment")
+        print("      --max-threads: Maximum number of threads for parallel processing (default: 5)")
+        print("    Examples:")
+        print("      asset-tag-export")
+        print("      asset-tag-export --quiet")
+        print("      asset-tag-export --verbose")
+        print("      asset-tag-export --target")
+        print("      asset-tag-export --max-threads 10")
+        print("      asset-tag-export --target --verbose --max-threads 20")
+        print("    Behavior:")
+        print("      • Requires asset-merged-all.csv as input (created by transform-and-merge)")
+        print("      • Uses '/catalog-server/api/assets/{asset_id}/tags' endpoint")
+        print("      • Only exports manual tags (autoTagged: false)")
+        print("      • Output: <output-dir>/asset-import/asset-tag-import-ready.csv")
+        print("      • CSV columns: source_uid, target_uid, source_id, tags, error")
+        print("      • Processes only assets with target_uid (existing in target environment)")
+        print("      • Shows progress bar during tag fetching")
+        print("      • Provides comprehensive statistics upon completion")
+        print("      • Next step: Use asset-tag-import to import tags to target environment")
     
     elif command_name == 'asset-tag-import':
         print(f"\n{BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
@@ -1025,7 +1053,7 @@ def setup_autocomplete():
     commands = [
         'segments-export', 'segments-import',
         'asset-profile-export', 'asset-profile-import',
-        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-import',
+        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-export', 'asset-tag-import',
         'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
         'vcs-config', 'vcs-init', 'vcs-pull', 'vcs-push',
         'GET', 'PUT',  # REST API commands
@@ -1039,6 +1067,7 @@ def setup_autocomplete():
         'asset-config-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-config-import': ['--dry-run', '--quiet', '--verbose', '--parallel'],
                     'asset-list-export': ['--quiet', '--verbose', '--parallel', '--target', '--page-size'],
+                    'asset-tag-export': ['--quiet', '--verbose', '--target', '--max-threads'],
         'asset-profile-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-profile-import': ['--dry-run', '--quiet', '--verbose'],
         'verify-profiles': ['--quiet', '--verbose', '--max-threads'],
@@ -1410,7 +1439,7 @@ def run_interactive(args):
                 valid_commands = [
                     'segments-export', 'segments-import',
                     'asset-profile-export', 'asset-profile-import',
-                    'asset-config-export', 'asset-list-export', 'asset-tag-import',
+                    'asset-config-export', 'asset-list-export', 'asset-tag-export', 'asset-tag-import',
                     'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
                     'vcs-config',
                     'vcs-init',
@@ -1499,6 +1528,13 @@ def run_interactive(args):
                         execute_asset_list_export_parallel(client, logger, source_type_ids, asset_type_ids, assembly_ids, quiet_mode, verbose_mode, use_target, page_size, max_threads)
                     else:
                         execute_asset_list_export(client, logger, source_type_ids, asset_type_ids, assembly_ids, quiet_mode, verbose_mode, use_target, page_size)
+                    continue
+                
+                # Check if it's an asset-tag-export command
+                if command.lower().startswith('asset-tag-export'):
+                    from .command_parsing import parse_asset_tag_export_command
+                    quiet_mode, verbose_mode, use_target, max_threads = parse_asset_tag_export_command(command)
+                    execute_asset_tag_export(client, logger, quiet_mode, verbose_mode, use_target, max_threads)
                     continue
             
                 
