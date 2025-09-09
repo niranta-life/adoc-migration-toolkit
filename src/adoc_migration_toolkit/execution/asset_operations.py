@@ -1742,13 +1742,34 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             # Write header
             writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags', 'assembly_id', 'asset_type'])
             
-            # Combine all temporary files
-            for temp_file in temp_files:
-                if os.path.exists(temp_file):
-                    with open(temp_file, 'r', newline='', encoding='utf-8') as temp_f:
-                        reader = csv.reader(temp_f)
-                        for row in reader:
-                            writer.writerow(row)
+        # Combine all temporary files with deduplication
+        seen_assets = set()  # Track unique assets by assetId
+        duplicate_count = 0
+        total_processed = 0
+        
+        for temp_file in temp_files:
+            if os.path.exists(temp_file):
+                with open(temp_file, 'r', newline='', encoding='utf-8') as temp_f:
+                    reader = csv.reader(temp_f)
+                    for row in reader:
+                        total_processed += 1
+                        if len(row) >= 2:  # Ensure we have at least source_uid and source_id
+                            asset_id = row[1]  # source_id is the second column
+                            if asset_id not in seen_assets:
+                                seen_assets.add(asset_id)
+                                writer.writerow(row)
+                            else:
+                                duplicate_count += 1
+                                if verbose_mode:
+                                    print(f"🔄 Duplicate asset found: {row[0]} (ID: {asset_id})")
+        
+        if not quiet_mode:
+            print(f"\n📊 Deduplication Results:")
+            print(f"  Total assets processed: {total_processed}")
+            print(f"  Unique assets written: {len(seen_assets)}")
+            print(f"  Duplicates removed: {duplicate_count}")
+            if duplicate_count > 0:
+                print(f"  ⚠️  Found {duplicate_count} duplicate assets - this indicates API pagination issues")
         
         # Clean up temporary files
         for temp_file in temp_files:
@@ -4153,7 +4174,7 @@ def detect_and_resolve_duplicates(csv_file: str, quiet_mode: bool = False, verbo
         return csv_file
     
     if not quiet_mode:
-        print(f"\n🔍 Found {len(duplicates)} Source UIDs which are pointing to single Target UIDs. So we have duplicate configurations present:")
+        print(f"\n🔍 Found {len(duplicates)} Target UIDs which have multiple configurations. So we have duplicate configurations present:")
         print("="*80)
     
     # Let user choose for each duplicate
@@ -4187,11 +4208,25 @@ def detect_and_resolve_duplicates(csv_file: str, quiet_mode: bool = False, verbo
                     if len(entry.get('raw_row', [])) >= 3:
                         source_uid = entry['raw_row'][2].strip()
                     
+                    # If source UID is empty or unknown, try to extract from profile JSON
+                    if source_uid == "Unknown" or not source_uid or source_uid.strip() == "":
+                        try:
+                            # Try to get source UID from profile data (already loaded above)
+                            source_uid = profile_data.get('sourceUid', 'Not available')
+                            if source_uid == 'Not available':
+                                source_uid = f"Config #{i} (no source UID)"
+                        except:
+                            source_uid = f"Config #{i} (no source UID)"
+                    
                     print(f"   Option {i}:")
                     print(f"     - Source UID: {source_uid}")
                     print(f"     - Notifications: {'✅' if has_notifications else '❌'}")
                     print(f"     - Schedule: {'✅' if has_schedule else '❌'}")
                     print(f"     - Profiling Enabled: {'✅' if is_enabled else '❌'}")
+                    
+                    # Add row number for additional identification when Source UIDs are the same
+                    if len(entry.get('raw_row', [])) > 0:
+                        print(f"     - Row Number: {entry.get('row_number', 'Unknown')}")
                     
                 except Exception as e:
                     print(f"   Option {i}: Row {entry['row_num']} (Could not parse configuration: {e})")
