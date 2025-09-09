@@ -1175,7 +1175,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
         query_params = [
             f"page=0",
             f"size={page_size}",
-            f"sortBy=dataQualityPolicyCount:DESC"
+            f"sortBy=id:ASC"
         ]
 
         if asset_type_ids not in [None, 'None', 'null', '']:
@@ -1241,7 +1241,7 @@ def execute_asset_list_export(client, logger: logging.Logger, source_type_ids: s
                 query_params = [
                     f"page={page}",
                     f"size={page_size}",
-                    f"sortBy=dataQualityPolicyCount:DESC"
+                    f"sortBy=id:ASC"
                 ]
 
                 if asset_type_ids not in [None, 'None', 'null', '']:
@@ -1461,7 +1461,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         query_params = [
             f"page=0",
             f"size={page_size}",
-            f"sortBy=dataQualityPolicyCount:DESC"
+            f"sortBy=id:ASC"
         ]
 
         if asset_type_ids not in [None, 'None', 'null', '']:
@@ -1571,7 +1571,7 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
                     query_params = [
                         f"page={page}",
                         f"size={page_size}",
-                        f"sortBy=dataQualityPolicyCount:DESC"
+                        f"sortBy=id:ASC"
                     ]
 
                     if asset_type_ids not in [None, 'None', 'null', '']:
