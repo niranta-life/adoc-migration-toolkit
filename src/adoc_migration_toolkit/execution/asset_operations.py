@@ -2245,6 +2245,8 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
         
         # Read CSV data
         asset_data = []
+        # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
+        csv.field_size_limit(sys.maxsize)
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             header = next(reader)  # Skip header
@@ -3648,6 +3650,8 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         
         # Read source file
         source_data = []
+        # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
+        csv.field_size_limit(sys.maxsize)
         with open(source_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -3664,6 +3668,8 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         
         # Read target file
         target_data = {}
+        # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
+        csv.field_size_limit(sys.maxsize)
         with open(target_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
