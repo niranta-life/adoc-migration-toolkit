@@ -1735,33 +1735,43 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
         # Create output directory if needed
         output_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # Combine all temporary files
-        with open(output_file, 'w', newline='', encoding='utf-8') as output_f:
-            writer = csv.writer(output_f, quoting=csv.QUOTE_ALL)
-            
-            # Write header
-            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags', 'assembly_id', 'asset_type'])
-            
         # Combine all temporary files with deduplication
         seen_assets = set()  # Track unique assets by assetId
         duplicate_count = 0
         total_processed = 0
         
-        for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                with open(temp_file, 'r', newline='', encoding='utf-8') as temp_f:
-                    reader = csv.reader(temp_f)
-                    for row in reader:
-                        total_processed += 1
-                        if len(row) >= 2:  # Ensure we have at least source_uid and source_id
-                            asset_id = row[1]  # source_id is the second column
-                            if asset_id not in seen_assets:
-                                seen_assets.add(asset_id)
-                                writer.writerow(row)
-                            else:
-                                duplicate_count += 1
-                                if verbose_mode:
-                                    print(f"🔄 Duplicate asset found: {row[0]} (ID: {asset_id})")
+        # Create duplicates file path
+        duplicates_file = output_file.parent / f"{output_file.stem}-duplicates.csv"
+        
+        with open(output_file, 'w', newline='', encoding='utf-8') as output_f, \
+             open(duplicates_file, 'w', newline='', encoding='utf-8') as duplicates_f:
+            
+            writer = csv.writer(output_f, quoting=csv.QUOTE_ALL)
+            duplicates_writer = csv.writer(duplicates_f, quoting=csv.QUOTE_ALL)
+            
+            # Write headers
+            writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags', 'assembly_id', 'asset_type'])
+            duplicates_writer.writerow(['source_uid', 'source_id', 'target_uid', 'tags', 'assembly_id', 'asset_type', 'duplicate_reason'])
+            
+            # Process all temporary files with deduplication
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    with open(temp_file, 'r', newline='', encoding='utf-8') as temp_f:
+                        reader = csv.reader(temp_f)
+                        for row in reader:
+                            total_processed += 1
+                            if len(row) >= 2:  # Ensure we have at least source_uid and source_id
+                                asset_id = row[1]  # source_id is the second column
+                                if asset_id not in seen_assets:
+                                    seen_assets.add(asset_id)
+                                    writer.writerow(row)
+                                else:
+                                    duplicate_count += 1
+                                    # Save duplicate to separate file with reason
+                                    duplicate_row = row + ['Duplicate assetId found in multiple pages/threads']
+                                    duplicates_writer.writerow(duplicate_row)
+                                    if verbose_mode:
+                                        print(f"🔄 Duplicate asset found: {row[0]} (ID: {asset_id})")
         
         if not quiet_mode:
             print(f"\n📊 Deduplication Results:")
@@ -1770,6 +1780,8 @@ def execute_asset_list_export_parallel(client, logger: logging.Logger, source_ty
             print(f"  Duplicates removed: {duplicate_count}")
             if duplicate_count > 0:
                 print(f"  ⚠️  Found {duplicate_count} duplicate assets - this indicates API pagination issues")
+                print(f"  📄 Duplicates saved to: {duplicates_file}")
+                print(f"  💡 Review duplicates file to analyze API pagination issues")
         
         # Clean up temporary files
         for temp_file in temp_files:
