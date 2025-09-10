@@ -447,13 +447,13 @@ def parse_asset_list_export_command(command: str) -> tuple:
     parts = command.strip().split()
     print(f"Command arguments {parts}")
     if not parts or parts[0].lower() != 'asset-list-export':
-        return False, False, False, False, 500, None, None, None, 5
+        return False, False, False, False, 100, None, None, None, 5
 
     quiet_mode = False
     verbose_mode = False
     parallel_mode = False
     use_target = False
-    page_size = 500  # Default page size
+    page_size = 100  # Default page size
     source_type_ids = None
     asset_type_ids = None
     assembly_ids = None

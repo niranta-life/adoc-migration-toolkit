@@ -15,7 +15,7 @@ GLOBAL_OUTPUT_DIR: Optional[Path] = None
 
 # Global HTTP config for timeout, retry, and proxy
 HTTP_CONFIG = {
-    'timeout': 120,   # seconds
+    'timeout': 300,   # seconds
     'retry': 3,     # number of retries
     'proxy': None   # proxy URL or None
 }
