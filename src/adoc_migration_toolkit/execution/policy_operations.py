@@ -19,6 +19,74 @@ from .utils import create_progress_bar, get_thread_names
 from ..shared import globals
 from ..shared.file_utils import get_output_file_path
 
+# Hard-coded batch sizes for different policy types
+POLICY_TYPE_BATCH_SIZES = {
+    'DATA_QUALITY': 50,       # Standard complexity
+    'DATA_DRIFT': 50,         # High complexity, smaller batches
+    'SCHEMA_DRIFT': 50,       # Lower complexity, larger batches  
+    'PROFILE_ANOMALY': 50,    # Very high complexity, smallest batches
+    'DATA_CADENCE': 50,       # Simple policies, largest batches
+    'EQUALITY': 2,            # Reconciliation policies (smaller batches)
+    'default': 50             # Fallback for unknown types
+}
+
+
+def get_batch_sizes_for_policy_types(user_batch_size: int = None) -> dict:
+    """Get batch sizes for all policy types with user override option.
+    
+    Args:
+        user_batch_size: If provided, triggers interactive mode for user input
+        
+    Returns:
+        dict: Batch sizes for each policy type
+    """
+    if user_batch_size is None:
+        # Use hard-coded values
+        return POLICY_TYPE_BATCH_SIZES.copy()
+    else:
+        # Interactive mode - ask user for each type
+        batch_sizes = {}
+        print("\n🔧 Custom Batch Size Configuration")
+        print("=" * 50)
+        print("Enter batch size for each policy type (press Enter to use default)")
+        print("Note: Batch size must be a positive integer")
+        print()
+        
+        for policy_type, default_size in POLICY_TYPE_BATCH_SIZES.items():
+            if policy_type == 'default':
+                continue
+                
+            while True:
+                try:
+                    user_input = input(f"{policy_type} (default: {default_size}): ").strip()
+                    if user_input == "":
+                        # User pressed Enter - use default
+                        batch_sizes[policy_type] = default_size
+                        print(f"  ✅ Using default: {default_size}")
+                        break
+                    else:
+                        # User provided value
+                        batch_size = int(user_input)
+                        if batch_size > 0:
+                            batch_sizes[policy_type] = batch_size
+                            print(f"  ✅ Set to: {batch_size}")
+                            break
+                        else:
+                            print("  ❌ Batch size must be positive. Try again.")
+                except ValueError:
+                    print("  ❌ Invalid number. Try again.")
+        
+        batch_sizes['default'] = POLICY_TYPE_BATCH_SIZES['default']
+        
+        print("\n📊 Final Batch Size Configuration:")
+        print("-" * 40)
+        for policy_type, size in batch_sizes.items():
+            if policy_type != 'default':
+                print(f"  {policy_type}: {size}")
+        print()
+        
+        return batch_sizes
+
 
 def execute_policy_list_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, existing_target_assets_mode: bool = False):
     """Execute the policy-list-export command.
@@ -1124,12 +1192,15 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
-        batch_size: Number of policies to export in each batch
+        batch_size: Number of policies to export in each batch (if provided, triggers interactive mode)
         export_type: Type of export (rule-types, engine-types, assemblies, source-types)
         filter_value: Optional filter value within the export type
         filter_versions: Whether to filter policy versions
     """
     try:
+        # Get batch sizes for policy types (hard-coded or interactive)
+        policy_batch_sizes = get_batch_sizes_for_policy_types(batch_size if batch_size == 1 else None)
+        
         # Determine input and output file paths
         if globals.GLOBAL_OUTPUT_DIR:
             input_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
@@ -1293,10 +1364,11 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         failed_exports = 0
         export_results = {}
         
-        # Calculate total batches for progress bar
+        # Calculate total batches for progress bar using policy-type-specific batch sizes
         total_batches = 0
-        for policy_ids in policies_by_category.values():
-            total_batches += (len(policy_ids) + batch_size - 1) // batch_size
+        for policy_type, policy_ids in policies_by_category.items():
+            type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+            total_batches += (len(policy_ids) + type_batch_size - 1) // type_batch_size
         
         current_batch = 0
         failed_batch_indices = set()
@@ -1308,6 +1380,9 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         
         batch_idx = 0
         for policy_type, policy_ids in policies_by_category.items():
+            # Get batch size for this specific policy type
+            type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+            
             if not quiet_mode:
                 # Update status line for new policy type (but don't reset progress bar)
                 # Calculate current progress
@@ -1328,14 +1403,14 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         bar += '░'  # Empty block
                 
                 print(f"\033[2F\033[KExporting: [{bar}] {current_batch}/{total_batches} ({percentage:.1f}%)")
-                print(f"\033[KStatus: Processing {policy_type} ({len(policy_ids)} policies)")
+                print(f"\033[KStatus: Processing {policy_type} ({len(policy_ids)} policies, batch size: {type_batch_size})")
             else:
-                print(f"Processing {policy_type}: {len(policy_ids)} policies")
+                print(f"Processing {policy_type}: {len(policy_ids)} policies (batch size: {type_batch_size})")
             
-            type_total_batches = (len(policy_ids) + batch_size - 1) // batch_size
+            type_total_batches = (len(policy_ids) + type_batch_size - 1) // type_batch_size
             for batch_num in range(type_total_batches):
-                start_idx = batch_num * batch_size
-                end_idx = min((batch_num + 1) * batch_size, len(policy_ids))
+                start_idx = batch_num * type_batch_size
+                end_idx = min((batch_num + 1) * type_batch_size, len(policy_ids))
                 batch_ids = policy_ids[start_idx:end_idx]
                 current_batch += 1
                 
@@ -1978,7 +2053,51 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
             print("-" * 50)
             print(f"Total Policies: {aggregated_stats['totalPolicyCount']}")
             print(f"Data Quality Policies: {aggregated_stats['totalDataQualityPolicyCount']}")
-            print(f"Data Sources: {aggregated_stats['totalDataSourceCount']}")
+            
+            # Calculate unique data sources from the source CSV file
+            unique_data_sources = 0
+            try:
+                # Find the policies-all-export.csv file
+                if globals.GLOBAL_OUTPUT_DIR:
+                    csv_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
+                else:
+                    # Look for the most recent adoc-migration-toolkit directory
+                    current_dir = Path.cwd()
+                    toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+                    if toolkit_dirs:
+                        toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                        latest_toolkit_dir = toolkit_dirs[0]
+                        csv_file = latest_toolkit_dir / "policy-export" / "policies-all-export.csv"
+                    else:
+                        csv_file = Path("policies-all-export.csv")
+                
+                if csv_file.exists():
+                    import csv
+                    assembly_names = set()
+                    with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+                        reader = csv.reader(f)
+                        header = next(reader)  # Skip header
+                        for row in reader:
+                            if len(row) >= 6:  # Ensure we have enough columns
+                                assembly_names_str = row[5].strip()  # assemblyNames column
+                                if assembly_names_str:
+                                    # Split by comma and add individual assembly names
+                                    for name in assembly_names_str.split(','):
+                                        clean_name = name.strip()
+                                        if clean_name:
+                                            assembly_names.add(clean_name)
+                    unique_data_sources = len(assembly_names)
+                    print(f"Unique Data Sources: {unique_data_sources}")
+                    if verbose_mode and assembly_names:
+                        print(f"  Data Source Names: {sorted(list(assembly_names))}")
+                else:
+                    print(f"Data Sources: {aggregated_stats['totalDataSourceCount']} (CSV file not found at {csv_file})")
+            except Exception as e:
+                print(f"Data Sources: {aggregated_stats['totalDataSourceCount']} (Error reading CSV: {e})")
+                if verbose_mode:
+                    import traceback
+                    print(f"  Traceback: {traceback.format_exc()}")
+            
             print(f"Business Rules: {aggregated_stats['totalBusinessRules']}")
             print(f"Data Cadence Policies: {aggregated_stats['totalDataCadencePolicyCount']}")
             print(f"Data Drift Policies: {aggregated_stats['totalDataDriftPolicyCount']}")
@@ -2271,13 +2390,16 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
-        batch_size: Number of policies to export in each batch
+        batch_size: Number of policies to export in each batch (if provided, triggers interactive mode)
         export_type: Type of export (rule-types, engine-types, assemblies, source-types)
         filter_value: Optional filter value within the export type
         max_threads: Maximum number of threads to use (default: 5)
         filter_versions: Whether to filter policy versions to keep only the latest (default: True)
     """
     try:
+        # Get batch sizes for policy types (hard-coded or interactive)
+        policy_batch_sizes = get_batch_sizes_for_policy_types(batch_size if batch_size == 1 else None)
+        
         # Determine input and output file paths
         if globals.GLOBAL_OUTPUT_DIR:
             input_file = globals.GLOBAL_OUTPUT_DIR / "policy-export" / "policies-all-export.csv"
@@ -2469,10 +2591,11 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
             # Get categories for this thread
             category_items = list(policies_by_category.items())[start_index:end_index]
             
-            # Create progress bar for this thread
+            # Create progress bar for this thread using policy-type-specific batch sizes
             total_batches = 0
-            for _, policy_ids in category_items:
-                total_batches += (len(policy_ids) + batch_size - 1) // batch_size
+            for policy_type, policy_ids in category_items:
+                type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+                total_batches += (len(policy_ids) + type_batch_size - 1) // type_batch_size
             thread_names = get_thread_names()
             thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
             progress_bar = create_progress_bar(
@@ -2490,11 +2613,14 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
             
             # Process each category in this thread's range
             for policy_type, policy_ids in category_items:
-                type_total_batches = (len(policy_ids) + batch_size - 1) // batch_size
+                # Get batch size for this specific policy type
+                type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+                
+                type_total_batches = (len(policy_ids) + type_batch_size - 1) // type_batch_size
                 
                 for batch_num in range(type_total_batches):
-                    start_idx = batch_num * batch_size
-                    end_idx = min((batch_num + 1) * batch_size, len(policy_ids))
+                    start_idx = batch_num * type_batch_size
+                    end_idx = min((batch_num + 1) * type_batch_size, len(policy_ids))
                     batch_ids = policy_ids[start_idx:end_idx]
                     
                     # Generate filename with range information

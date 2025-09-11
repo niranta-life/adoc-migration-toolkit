@@ -695,15 +695,21 @@ def parse_policy_export_command(command: str) -> tuple:
             filter_value = parts[i + 1]
             parts.pop(i)  # Remove --filter
             parts.pop(i)  # Remove the filter value
-        elif parts[i] == '--batch-size' and i + 1 < len(parts):
-            try:
-                batch_size = int(parts[i + 1])
-                if batch_size <= 0:
-                    raise ValueError("Batch size must be positive")
+        elif parts[i] == '--batch-size':
+            if i + 1 < len(parts) and not parts[i + 1].startswith('--'):
+                # User provided a value
+                try:
+                    batch_size = int(parts[i + 1])
+                    if batch_size <= 0:
+                        raise ValueError("Batch size must be positive")
+                    parts.pop(i)  # Remove --batch-size
+                    parts.pop(i)  # Remove the batch size value
+                except (ValueError, IndexError):
+                    raise ValueError("Invalid batch size. Must be a positive integer")
+            else:
+                # User provided --batch-size without value - trigger interactive mode
+                batch_size = 1  # Use 1 as a flag to trigger interactive mode
                 parts.pop(i)  # Remove --batch-size
-                parts.pop(i)  # Remove the batch size value
-            except (ValueError, IndexError):
-                raise ValueError("Invalid batch size. Must be a positive integer")
         elif parts[i] == '--max-threads' and i + 1 < len(parts):
             try:
                 max_threads = int(parts[i + 1])
@@ -1026,7 +1032,7 @@ def parse_asset_tag_import_command(command: str) -> tuple:
             print("  asset-tag-import --parallel")
             print("  asset-tag-import /path/to/asset-data.csv --verbose --parallel")
             print("="*60)
-            return None, False, False, False
+            return None, False, False, False, False
         else:
             # This should be the CSV file path
             if csv_file is None:
