@@ -4837,9 +4837,9 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
         lock = threading.Lock()
         all_results = []
         
-        # Create progress bar if in quiet mode
-        if quiet_mode and not verbose_mode:
-            pbar = tqdm(total=len(asset_data), desc="Verifying configs", colour='blue')
+        # Get thread names for progress bars
+        from .utils import get_thread_names
+        thread_names = get_thread_names()
         
         def verify_asset_config_chunk(thread_id, start_index, end_index):
             nonlocal successful, failed, asset_not_found, config_not_found
@@ -4849,7 +4849,16 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
             thread_config_not_found = 0
             thread_results = []
             
-            thread_name = f"Thread-{thread_id}"
+            # Create individual progress bar for this thread
+            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+            thread_pbar = create_progress_bar(
+                total=end_index - start_index,
+                desc=thread_name,
+                unit="",
+                disable=verbose_mode,  # Disable if verbose mode
+                position=thread_id,
+                leave=False
+            )
             
             for i in range(start_index, end_index):
                 if i >= len(asset_data):
@@ -5141,9 +5150,9 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                         'config_details': {}
                     })
                 
-                # Update progress bar
-                if quiet_mode and not verbose_mode:
-                    pbar.update(1)
+                # Update thread progress bar
+                if thread_pbar:
+                    thread_pbar.update(1)
             
             # Update global counters
             with lock:
@@ -5152,6 +5161,10 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
                 asset_not_found += thread_asset_not_found
                 config_not_found += thread_config_not_found
                 all_results.extend(thread_results)
+            
+            # Close thread progress bar
+            if thread_pbar:
+                thread_pbar.close()
             
             if verbose_mode:
                 print(f"🔍 {thread_name}: Completed - {thread_successful} success, {thread_failed} failed, {thread_asset_not_found} asset not found, {thread_config_not_found} config not found")
@@ -5176,9 +5189,7 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
         for thread in threads:
             thread.join()
         
-        # Close progress bar
-        if quiet_mode and not verbose_mode:
-            pbar.close()
+        # Progress bars are closed by individual threads
         
         # Compile results
         verification_results = {
