@@ -953,6 +953,7 @@ def execute_asset_config_import(csv_file: str, client, logger: logging.Logger, q
         
         # Read CSV data
         asset_data = []
+        csv.field_size_limit(sys.maxsize)  # Handle large JSON fields
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             # Skip header row if it exists
@@ -2149,6 +2150,7 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
         
         # Read all rows from temporary files
         all_rows = []
+        csv.field_size_limit(sys.maxsize)  # Handle large JSON fields
         for temp_file in temp_files:
             try:
                 with open(temp_file, 'r', newline='', encoding='utf-8') as temp_csv:
@@ -4155,6 +4157,7 @@ def detect_and_resolve_duplicates(csv_file: str, quiet_mode: bool = False, verbo
     
     # Read all entries
     entries = []
+    csv.field_size_limit(sys.maxsize)  # Handle large JSON fields
     with open(csv_file, 'r', newline='', encoding='utf-8') as f:
         reader = csv.reader(f)
         header = next(reader)  # Skip header
@@ -4335,6 +4338,7 @@ def verify_profile_configurations_after_import(csv_file: str, client, logger: lo
     
     # Read target UIDs from CSV
     target_uids = []
+    csv.field_size_limit(sys.maxsize)  # Handle large JSON fields
     with open(csv_file, 'r', newline='', encoding='utf-8') as f:
         reader = csv.reader(f)
         header = next(reader)  # Skip header
@@ -4791,6 +4795,7 @@ def verify_asset_configurations_after_import(input_csv_file: str, client, logger
         
         # Read CSV data
         asset_data = []
+        csv.field_size_limit(sys.maxsize)  # Handle large JSON fields
         with open(input_csv_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             # Skip header row if it exists
