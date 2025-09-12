@@ -524,20 +524,21 @@ def parse_asset_tag_export_command(command: str) -> tuple:
     """Parse an asset-tag-export command string into components.
 
     Args:
-        command: Command string like "asset-tag-export [--quiet] [--verbose] [--target] [--max-threads <num>]"
+        command: Command string like "asset-tag-export [--quiet] [--verbose] [--target] [--max-threads <num>] [--assembly-id <id>]"
 
     Returns:
-        Tuple of (quiet_mode, verbose_mode, use_target, max_threads)
+        Tuple of (quiet_mode, verbose_mode, use_target, max_threads, assembly_id)
     """
     parts = command.strip().split()
     print(f"Command arguments {parts}")
     if not parts or parts[0].lower() != 'asset-tag-export':
-        return False, False, False, 5
+        return False, False, False, 5, None
 
     quiet_mode = False
     verbose_mode = False
     use_target = False
     max_threads = 5
+    assembly_id = None
     
     # Check for flags and options
     i = 1
@@ -562,10 +563,21 @@ def parse_asset_tag_export_command(command: str) -> tuple:
                 raise ValueError(f"Invalid max_threads value: {e}")
             parts.pop(i)  # Remove --max-threads
             parts.pop(i)  # Remove the max_threads value
+        elif parts[i] == '--assembly-id':
+            if i + 1 >= len(parts):
+                raise ValueError("--assembly-id requires a value")
+            try:
+                assembly_id = int(parts[i + 1])
+                if assembly_id < 1:
+                    raise ValueError("assembly_id must be at least 1")
+            except ValueError as e:
+                raise ValueError(f"Invalid assembly_id value: {e}")
+            parts.pop(i)  # Remove --assembly-id
+            parts.pop(i)  # Remove the assembly_id value
         else:
             i += 1
 
-    return quiet_mode, verbose_mode, use_target, max_threads
+    return quiet_mode, verbose_mode, use_target, max_threads, assembly_id
 
 def parse_notifications_check_command(command: str) -> tuple:
     """Parse an asset-list-export command string into components.
@@ -1019,7 +1031,7 @@ def parse_asset_tag_import_command(command: str) -> tuple:
             print("="*60)
             print("Usage: asset-tag-import [csv_file] [options]")
             print("\nArguments:")
-            print("  csv_file: Path to CSV file (defaults to asset-merged-all.csv)")
+            print("  csv_file: Path to CSV file (defaults to transformed_tag_assets_output.csv)")
             print("\nOptions:")
             print("  --quiet, -q: Suppress console output, show only summary")
             print("  --verbose, -v: Show detailed output including API calls")
@@ -1030,9 +1042,13 @@ def parse_asset_tag_import_command(command: str) -> tuple:
             print("  asset-tag-import --quiet")
             print("  asset-tag-import --verbose")
             print("  asset-tag-import --parallel")
-            print("  asset-tag-import /path/to/asset-data.csv --verbose --parallel")
+            print("  asset-tag-import /path/to/transformed_tag_assets_output.csv --verbose --parallel")
+            print("\nNotes:")
+            print("  • Uses transformed_tag_assets_output.csv from tag-xfr command")
+            print("  • Applies source tags to target assets using POST API calls")
+            print("  • Requires target environment configuration")
             print("="*60)
-            return None, False, False, False, False
+            return None, False, False, False
         else:
             # This should be the CSV file path
             if csv_file is None:
@@ -1043,7 +1059,108 @@ def parse_asset_tag_import_command(command: str) -> tuple:
                 return None, False, False, False
             i += 1
     
-    return csv_file, quiet_mode, verbose_mode, parallel_mode 
+    # Return None for csv_file if not provided, let calling code handle path resolution
+    # if csv_file is None:
+    #     csv_file = "transformed_tag_assets_output.csv"
+    
+    return csv_file, quiet_mode, verbose_mode, parallel_mode
+
+
+def parse_tag_xfr_command(command: str) -> tuple:
+    """Parse a tag-xfr command string into components.
+    
+    Args:
+        command: Command string like "tag-xfr [--string-transform \"A\":\"B\", \"C\":\"D\"] [--quiet] [--verbose]"
+        
+    Returns:
+        Tuple of (string_transforms, quiet_mode, verbose_mode)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'tag-xfr':
+        return None, False, False
+    
+    string_transforms = {}
+    quiet_mode = False
+    verbose_mode = False
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        arg = parts[i]
+        if arg == '--string-transform' and i + 1 < len(parts):
+            # Collect all args until next -- or end
+            transform_parts = []
+            j = i + 1
+            while j < len(parts) and not parts[j].startswith('--'):
+                transform_parts.append(parts[j])
+                j += 1
+            
+            if not transform_parts:
+                print("❌ Missing string transform argument")
+                print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                return None, False, False
+            
+            transform_arg = ' '.join(transform_parts)
+            try:
+                # Parse format: "A":"B", "C":"D", "E":"F"
+                transforms = {}
+                # Remove outer quotes if present
+                if transform_arg.startswith('"') and transform_arg.endswith('"'):
+                    transform_arg = transform_arg[1:-1]
+                
+                # Split by comma and process each pair
+                pairs = [pair.strip() for pair in transform_arg.split(',')]
+                for pair in pairs:
+                    if ':' in pair:
+                        source, target = pair.split(':', 1)
+                        source = source.strip().strip('"')
+                        target = target.strip().strip('"')
+                        if source and target:
+                            transforms[source] = target
+                
+                string_transforms.update(transforms)
+            except Exception as e:
+                print(f"❌ Error parsing string transform argument: {e}")
+                print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                return None, False, False
+            i = j
+        elif arg == '--quiet' or arg == '-q':
+            quiet_mode = True
+            i += 1
+        elif arg == '--verbose' or arg == '-v':
+            verbose_mode = True
+            i += 1
+        elif arg == '--help' or arg == '-h':
+            print("\n" + "="*60)
+            print("TAG-XFR COMMAND HELP")
+            print("="*60)
+            print("Usage: tag-xfr [--string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"] [options]")
+            print("\nArguments:")
+            print("  --string-transform <transforms>  Multiple string transformations [OPTIONAL]")
+            print("                                   Format: \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+            print("                                   If not provided, processes files without transformations")
+            print("\nOptions:")
+            print("  --quiet, -q                   Quiet mode (minimal output)")
+            print("  --verbose, -v                 Verbose mode (detailed output)")
+            print("  --help, -h                    Show this help message")
+            print("\nExamples:")
+            print("  tag-xfr --string-transform \"Snowflake\":\"snowflake_krish_pfizer\", \"SNOWFLAKE_SAMPLE_DATA\":\"KRISH_TEST\"")
+            print("  tag-xfr --string-transform \"PROD_DB\":\"DEV_DB\", \"PROD_URL\":\"DEV_URL\" --verbose")
+            print("  tag-xfr  # No transformations - direct processing")
+            print("\nNotes:")
+            print("  • Processes tag_assets_output.csv from asset-tag-export")
+            print("  • Applies UID transformations to create Target_Asset_UID")
+            print("  • Fetches target asset data (Target_Asset_ID and Asset_Type)")
+            print("  • Saves transformed_tag_assets_output.csv for asset-tag-import")
+            print("="*60)
+            return None, False, False
+        else:
+            print(f"❌ Unknown argument: {arg}")
+            print("💡 Use 'tag-xfr --help' for usage information")
+            return None, False, False
+    
+    # string_transforms can be empty (direct processing mode)
+    return string_transforms, quiet_mode, verbose_mode 
 
 def parse_asset_config_import_command(command: str) -> tuple:
     """Parse an asset-config-import command string into components.
@@ -1659,5 +1776,151 @@ def print_verify_configs_command_help():
     print("  • Detailed verification status for each asset")
     print()
     print("💡 Use 'verify-configs --help' for usage information") 
+
+
+def parse_tag_xfr_command(command: str) -> tuple:
+    """Parse a tag-xfr command string into components.
+
+    Args:
+        command: Command string like "tag-xfr [--string-transform \"A\":\"B\", \"C\":\"D\"] [options]"
+
+    Returns:
+        Tuple of (string_transforms, quiet_mode, verbose_mode, max_threads)
+    """
+    parts = command.strip().split()
+    if not parts or parts[0].lower() != 'tag-xfr':
+        return {}, False, False, 5
+
+    string_transforms = {}
+    quiet_mode = False
+    verbose_mode = False
+    max_threads = 5
+    
+    # Check for flags and options
+    i = 1
+    while i < len(parts):
+        if parts[i] == '--quiet':
+            quiet_mode = True
+            parts.remove('--quiet')
+        elif parts[i] == '--verbose':
+            verbose_mode = True
+            parts.remove('--verbose')
+        elif parts[i] == '--max-threads':
+            if i + 1 >= len(parts):
+                raise ValueError("--max-threads requires a value")
+            try:
+                max_threads = int(parts[i + 1])
+                if max_threads < 1:
+                    raise ValueError("max_threads must be at least 1")
+            except ValueError as e:
+                raise ValueError(f"Invalid max_threads value: {e}")
+            parts.pop(i)  # Remove --max-threads
+            parts.pop(i)  # Remove the max_threads value
+        elif parts[i] == '--string-transform':
+            if i + 1 >= len(parts):
+                raise ValueError("--string-transform requires a value")
+            try:
+                # Parse the string transform argument
+                transform_str = parts[i + 1]
+                string_transforms = parse_string_transforms(transform_str)
+            except ValueError as e:
+                raise ValueError(f"Invalid string-transform value: {e}")
+            parts.pop(i)  # Remove --string-transform
+            parts.pop(i)  # Remove the string-transform value
+        else:
+            i += 1
+
+    return string_transforms, quiet_mode, verbose_mode, max_threads
+
+
+def parse_string_transforms(transform_str: str) -> dict:
+    """Parse string transformation argument into a dictionary.
+    
+    Args:
+        transform_str: String like '"A":"B", "C":"D", "E":"F"'
+        
+    Returns:
+        Dictionary of transformations {source: target}
+    """
+    import re
+    import json
+    
+    # Remove outer quotes if present
+    transform_str = transform_str.strip()
+    if transform_str.startswith('"') and transform_str.endswith('"'):
+        transform_str = transform_str[1:-1]
+    
+    # Try to parse as JSON-like format
+    try:
+        # Replace single quotes with double quotes for JSON parsing
+        json_str = transform_str.replace("'", '"')
+        # Wrap in braces to make it a valid JSON object
+        json_str = "{" + json_str + "}"
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        # Try alternative JSON parsing - ensure all keys and values are properly quoted
+        try:
+            # Split by comma and process each key:value pair
+            parts = []
+            current_part = ""
+            in_quotes = False
+            quote_char = None
+            
+            for char in transform_str:
+                if char in ['"', "'"] and (not in_quotes or char == quote_char):
+                    in_quotes = not in_quotes
+                    quote_char = char if in_quotes else None
+                elif char == ',' and not in_quotes:
+                    parts.append(current_part.strip())
+                    current_part = ""
+                    continue
+                current_part += char
+            
+            if current_part.strip():
+                parts.append(current_part.strip())
+            
+            # Build proper JSON string
+            json_parts = []
+            for part in parts:
+                if ':' in part:
+                    key, value = part.split(':', 1)
+                    key = key.strip().strip('"\'')
+                    value = value.strip().strip('"\'')
+                    json_parts.append(f'"{key}": "{value}"')
+            
+            if json_parts:
+                json_str = "{" + ", ".join(json_parts) + "}"
+                return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+        # Fallback: try to parse manually
+        transforms = {}
+        # Split by comma, but be careful with nested quotes
+        parts = []
+        current_part = ""
+        in_quotes = False
+        quote_char = None
+        
+        for char in transform_str:
+            if char in ['"', "'"] and (not in_quotes or char == quote_char):
+                in_quotes = not in_quotes
+                quote_char = char if in_quotes else None
+            elif char == ',' and not in_quotes:
+                parts.append(current_part.strip())
+                current_part = ""
+                continue
+            current_part += char
+        
+        if current_part.strip():
+            parts.append(current_part.strip())
+        
+        for part in parts:
+            if ':' in part:
+                key, value = part.split(':', 1)
+                key = key.strip().strip('"\'')
+                value = value.strip().strip('"\'')
+                transforms[key] = value
+        
+        return transforms
 
  
