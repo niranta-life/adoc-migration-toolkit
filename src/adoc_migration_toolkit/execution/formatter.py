@@ -1853,4 +1853,612 @@ def execute_asset_formatter(input_dir: str, string_transforms: dict, output_dir:
             print("✅ Asset formatter completed successfully!")
     except Exception as e:
         print(f"❌ Error executing asset formatter: {e}")
-        logger.error(f"Error executing asset formatter: {e}") 
+        logger.error(f"Error executing asset formatter: {e}")
+
+
+def parse_tag_formatter_command(command: str) -> tuple:
+    """Parse tag-xfr command in interactive mode.
+    Args:
+        command (str): The command string
+    Returns:
+        tuple: (string_transforms, quiet_mode, verbose_mode)
+    """
+    try:
+        args_str = command[len('tag-xfr'):].strip()
+        string_transforms = {}
+        quiet_mode = False
+        verbose_mode = False
+        args = args_str.split()
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == '--string-transform' and i + 1 < len(args):
+                # Collect all args until next -- or end
+                transform_parts = []
+                j = i + 1
+                while j < len(args) and not args[j].startswith('--'):
+                    transform_parts.append(args[j])
+                    j += 1
+                
+                if not transform_parts:
+                    print("❌ Missing string transform argument")
+                    print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                    return None, None, False
+                
+                transform_arg = ' '.join(transform_parts)
+                try:
+                    # Parse format: "A":"B", "C":"D", "E":"F"
+                    transforms = {}
+                    # Remove outer quotes if present
+                    if transform_arg.startswith('"') and transform_arg.endswith('"'):
+                        transform_arg = transform_arg[1:-1]
+                    
+                    # Split by comma and process each pair
+                    pairs = [pair.strip() for pair in transform_arg.split(',')]
+                    for pair in pairs:
+                        if ':' in pair:
+                            source, target = pair.split(':', 1)
+                            source = source.strip().strip('"')
+                            target = target.strip().strip('"')
+                            if source and target:
+                                transforms[source] = target
+                    
+                    string_transforms.update(transforms)
+                except Exception as e:
+                    print(f"❌ Error parsing string transform argument: {e}")
+                    print("💡 Expected format: --string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                    return None, None, False
+                i = j
+            elif arg == '--quiet' or arg == '-q':
+                quiet_mode = True
+                i += 1
+            elif arg == '--verbose' or arg == '-v':
+                verbose_mode = True
+                i += 1
+            elif arg == '--help' or arg == '-h':
+                print("\n" + "="*60)
+                print("TAG-XFR COMMAND HELP")
+                print("="*60)
+                print("Usage: tag-xfr [--string-transform \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"] [options]")
+                print("\nArguments:")
+                print("  --string-transform <transforms>  Multiple string transformations [OPTIONAL]")
+                print("                                   Format: \"A\":\"B\", \"C\":\"D\", \"E\":\"F\"")
+                print("                                   If not provided, processes files without transformations")
+                print("\nOptions:")
+                print("  --quiet, -q                   Quiet mode (minimal output)")
+                print("  --verbose, -v                 Verbose mode (detailed output)")
+                print("  --help, -h                    Show this help message")
+                print("\nExamples:")
+                print("  tag-xfr --string-transform \"Snowflake\":\"snowflake_krish_pfizer\", \"SNOWFLAKE_SAMPLE_DATA\":\"KRISH_TEST\"")
+                print("  tag-xfr --string-transform \"PROD_DB\":\"DEV_DB\", \"PROD_URL\":\"DEV_URL\" --verbose")
+                print("  tag-xfr  # No transformations - direct processing")
+                print("\nNotes:")
+                print("  • Processes tag_assets_output.csv from asset-tag-export")
+                print("  • Applies UID transformations to create Target_Asset_UID")
+                print("  • Fetches target asset data (Target_Asset_ID and Asset_Type)")
+                print("  • Saves transformed_tag_assets_output.csv for asset-tag-import")
+                print("="*60)
+                return None, None, False
+            else:
+                print(f"❌ Unknown argument: {arg}")
+                print("💡 Use 'tag-xfr --help' for usage information")
+                return None, None, False
+        
+        # string_transforms can be empty (direct processing mode)
+        return string_transforms, quiet_mode, verbose_mode
+    except Exception as e:
+        print(f"❌ Error parsing tag-xfr command: {e}")
+        return None, None, False
+
+
+def execute_tag_formatter(string_transforms: dict, quiet_mode: bool, verbose_mode: bool, logger, client):
+    """Execute tag formatter command in interactive mode.
+    Args:
+        string_transforms (dict): Dictionary of string transformations {source: target}
+        quiet_mode (bool): Quiet mode flag
+        verbose_mode (bool): Verbose mode flag
+        logger: Logger instance
+        client: API client instance
+    """
+    try:
+        # Get global output directory
+        if globals.GLOBAL_OUTPUT_DIR:
+            output_dir = globals.GLOBAL_OUTPUT_DIR
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+            if toolkit_dirs:
+                # Sort by modification time and get the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                output_dir = toolkit_dirs[0]
+            else:
+                output_dir = current_dir
+        
+        # Define input and output files in tags-migration subdirectory
+        input_file = output_dir / "tags-migration" / "tag_assets_output.csv"
+        output_file = output_dir / "tags-migration" / "transformed_tag_assets_output.csv"
+        
+        if not quiet_mode:
+            print("="*80)
+            print("TAG TRANSFORMATION (TAG-XFR)")
+            print("="*80)
+            print(f"Input file: {input_file}")
+            print(f"Output file: {output_file}")
+            if string_transforms:
+                print(f"Transformations: {len(string_transforms)}")
+                for source, target in string_transforms.items():
+                    print(f"  '{source}' -> '{target}'")
+            else:
+                print("Transformations: None (direct processing)")
+            print("="*80)
+        
+        # Check if input file exists
+        if not input_file.exists():
+            error_msg = f"Input file not found: {input_file}. Please run 'asset-tag-export' first."
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        # Read tag assets data
+        if not quiet_mode:
+            print("Reading tag assets data...")
+        
+        tag_assets_data = []
+        try:
+            with open(input_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    tag_assets_data.append(row)
+        except Exception as e:
+            error_msg = f"Failed to read input file: {e}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not tag_assets_data:
+            error_msg = "No tag assets data found in input file"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"Found {len(tag_assets_data)} tag assets to process")
+        
+        # Step 5: Apply transformations to create Target_Asset_UID
+        if string_transforms:
+            if not quiet_mode:
+                print("\nStep 5: Applying UID transformations...")
+            
+            transformation_count = 0
+            for mapping in tag_assets_data:
+                source_uid = mapping.get('source_Asset_UID', '')
+                if source_uid:
+                    target_uid = transform_asset_uid(source_uid, string_transforms)
+                    mapping['Target_Asset_UID'] = target_uid
+                    if target_uid != source_uid:
+                        transformation_count += 1
+                        if not quiet_mode:
+                            print(f"  '{source_uid}' -> '{target_uid}'")
+                else:
+                    mapping['Target_Asset_UID'] = ''
+            
+            if not quiet_mode:
+                print(f"✅ Applied {transformation_count} transformations")
+        else:
+            if not quiet_mode:
+                print("\nStep 5: No transformations - copying source UIDs to target UIDs...")
+            
+            for mapping in tag_assets_data:
+                source_uid = mapping.get('source_Asset_UID', '')
+                mapping['Target_Asset_UID'] = source_uid
+        
+        # Step 6: Fetch target asset data (Target_Asset_ID and Asset_Type)
+        if not quiet_mode:
+            print("\nStep 6: Fetching target asset data...")
+        
+        enriched_mappings = enrich_with_target_assets_from_api(
+            client, logger, tag_assets_data, quiet_mode
+        )
+        
+        if not quiet_mode:
+            print(f"✅ Enriched {len(enriched_mappings)} mappings with target data")
+        
+        # Step 7: Save final transformed_tag_assets_output.csv
+        if not quiet_mode:
+            print("\nStep 7: Saving transformed tag assets to CSV...")
+        
+        save_transformed_tag_assets_to_csv(enriched_mappings, output_file, quiet_mode)
+        
+        if not quiet_mode:
+            print("="*80)
+            print("✅ Tag transformation completed successfully!")
+            print(f"📁 Input file: {input_file}")
+            print(f"📁 Output file: {output_file}")
+            print(f"📊 Total mappings: {len(enriched_mappings)}")
+            if string_transforms:
+                print(f"🔄 Transformations applied: {len(string_transforms)}")
+            else:
+                print("ℹ️  No transformations applied (direct processing)")
+            print("="*80)
+        
+    except Exception as e:
+        error_msg = f"Tag transformation failed: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise
+
+
+def transform_asset_uid(source_uid: str, transformation_mappings: Dict[str, str]) -> str:
+    """
+    Transform asset UID using word boundary matching for precise replacements.
+    
+    Args:
+        source_uid: The original asset UID (e.g., "Snowflake.SNOWFLAKE_SAMPLE_DATA.SCHEMA.TABLE")
+        transformation_mappings: Dictionary mapping source words to target words
+                               (e.g., {"SNOWFLAKE_SAMPLE_DATA": "KRISH_TEST", "Snowflake": "snowflake_krish_pfizer"})
+    
+    Returns:
+        Transformed UID with exact word replacements applied using word boundaries
+    """
+    if not source_uid or not transformation_mappings:
+        return source_uid
+    
+    result = source_uid
+    
+    # Apply each transformation using word boundaries for exact matching
+    for source_word, target_word in transformation_mappings.items():
+        # Use word boundaries (\b) to ensure exact word matching
+        # re.escape() handles special regex characters in the source word
+        pattern = r'\b' + re.escape(source_word) + r'\b'
+        result = re.sub(pattern, target_word, result)
+    
+    return result
+
+
+def enrich_with_target_assets_from_api(client, logger: logging.Logger, mappings: List[Dict[str, Any]], quiet_mode: bool = False) -> List[Dict[str, Any]]:
+    """Enrich transformed mappings with target asset data."""
+    enriched_mappings = []
+    total_mappings = len(mappings)
+    
+    if not quiet_mode:
+        print(f"Enriching {total_mappings} transformed mappings with target asset data...")
+    
+    # Create progress bar
+    from tqdm import tqdm
+    with tqdm(total=total_mappings, desc="Target Asset Enrichment", disable=quiet_mode) as pbar:
+        for mapping in mappings:
+            try:
+                target_uid = mapping.get('Target_Asset_UID', '')
+                if target_uid:
+                    # Fetch target asset by UID
+                    response = client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                        method='GET',
+                        use_target_auth=True,
+                        use_target_tenant=True
+                    )
+                    
+                    target_info = extract_target_asset_info(response)
+                    
+                    enriched_mapping = mapping.copy()
+                    if target_info['found']:
+                        enriched_mapping.update({
+                            'Target_Asset_ID': target_info['target_asset_id'],
+                            'Asset_Type': target_info['asset_type']
+                        })
+                        if not quiet_mode:
+                            print(f"✅ Found target asset: {target_uid} → ID: {target_info['target_asset_id']}")
+                    else:
+                        enriched_mapping.update({
+                            'Target_Asset_ID': '',
+                            'Asset_Type': ''
+                        })
+                        if not quiet_mode:
+                            print(f"❌ Target asset not found: {target_uid}")
+                    
+                    enriched_mappings.append(enriched_mapping)
+                else:
+                    # No target UID, add as-is
+                    enriched_mapping = mapping.copy()
+                    enriched_mapping.update({
+                        'Target_Asset_ID': '',
+                        'Asset_Type': ''
+                    })
+                    enriched_mappings.append(enriched_mapping)
+                
+            except Exception as e:
+                if not quiet_mode:
+                    print(f"❌ Error fetching target asset {mapping.get('Target_Asset_UID', 'unknown')}: {str(e)}")
+                # Add mapping without target data
+                enriched_mapping = mapping.copy()
+                enriched_mapping.update({
+                    'Target_Asset_ID': '',
+                    'Asset_Type': ''
+                })
+                enriched_mappings.append(enriched_mapping)
+            
+            pbar.update(1)
+    
+    return enriched_mappings
+
+
+def extract_target_asset_info(api_response: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract target asset ID and type from target API response.
+    
+    Args:
+        api_response: API response from target asset search
+    
+    Returns:
+        Dictionary with target asset information
+    """
+    result = {
+        'found': False,
+        'target_asset_id': '',
+        'asset_type': ''
+    }
+    
+    try:
+        data = api_response.get('data', [])
+        if data and len(data) > 0:
+            asset = data[0]  # Take the first match
+            result.update({
+                'found': True,
+                'target_asset_id': str(asset.get('id', '')),
+                'asset_type': asset.get('assetType', {}).get('name', '')
+            })
+    except Exception as e:
+        print(f"Error extracting target asset info: {e}")
+    
+    return result
+
+
+def save_transformed_tag_assets_to_csv(mappings: List[Dict[str, Any]], output_file: Path, quiet_mode: bool = False):
+    """Save enriched asset mappings with transformations to a separate CSV file."""
+    try:
+        with open(output_file, 'w', newline='') as f:
+            # Define field order with 'source' prefix + Target columns
+            fieldnames = ['source_Tag_ID', 'Source_Tag_Name', 'source_Asset_ID', 'source_Assembly_ID', 'source_Asset_UID', 'Target_Asset_UID', 'Target_Asset_ID', 'Asset_Type', 'source_Assembly_Name']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            
+            # Write header
+            writer.writeheader()
+            
+            # Write data
+            for mapping in mappings:
+                # Map original fields to prefixed fields + target columns
+                row = {
+                    'source_Tag_ID': mapping.get('source_Tag_ID', ''),
+                    'Source_Tag_Name': mapping.get('Source_Tag_Name', ''),
+                    'source_Asset_ID': mapping.get('source_Asset_ID', ''),
+                    'source_Assembly_ID': mapping.get('source_Assembly_ID', ''),
+                    'source_Asset_UID': mapping.get('source_Asset_UID', ''),
+                    'Target_Asset_UID': mapping.get('Target_Asset_UID', ''),
+                    'Target_Asset_ID': mapping.get('Target_Asset_ID', ''),
+                    'Asset_Type': mapping.get('Asset_Type', ''),
+                    'source_Assembly_Name': mapping.get('source_Assembly_Name', '')
+                }
+                writer.writerow(row)
+        
+        if not quiet_mode:
+            print(f"✅ Transformed tag assets saved to {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error saving transformed tag assets to CSV: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        raise 
+
+
+def execute_tag_xfr(client, logger: logging.Logger, string_transforms: dict = None, quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5):
+    """Execute the tag-xfr command.
+    
+    This command combines steps 5-8 from fetch_tags.py:
+    5. Prompt for UID transformation mappings (interactive configuration)
+    6. Apply transformations and create Target_Asset_UID
+    7. Fetch target asset data (Target_Asset_ID and Asset_Type)
+    8. Save final transformed_tag_assets_output.csv with complete mapping
+    
+    Args:
+        client: API client instance
+        logger: Logger instance
+        string_transforms: Dictionary of string transformations {source: target}
+        quiet_mode: Whether to suppress console output
+        verbose_mode: Whether to show detailed output
+        max_threads: Maximum number of threads for parallel processing
+    """
+    try:
+        if not quiet_mode:
+            print("Executing tag transformation and target asset enrichment...")
+            print("="*80)
+        
+        # Get global output directory
+        from ..shared import globals
+        if globals.GLOBAL_OUTPUT_DIR:
+            output_dir = globals.GLOBAL_OUTPUT_DIR
+        else:
+            # Look for the most recent adoc-migration-toolkit directory
+            current_dir = Path.cwd()
+            toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+            if toolkit_dirs:
+                # Sort by modification time and get the most recent
+                toolkit_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                output_dir = toolkit_dirs[0]
+            else:
+                output_dir = current_dir
+        
+        # Create tags-migration subdirectory
+        tags_dir = output_dir / "tags-migration"
+        tags_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Define input and output files in tags-migration subdirectory
+        input_file = tags_dir / "tag_assets_output.csv"
+        output_file = tags_dir / "transformed_tag_assets_output.csv"
+        
+        if not quiet_mode:
+            print(f"Input file: {input_file}")
+            print(f"Output file: {output_file}")
+            print("="*80)
+        
+        # Check if input file exists
+        if not input_file.exists():
+            error_msg = f"Input file not found: {input_file}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            print("💡 Please run 'asset-tag-export' first to generate the input file")
+            return
+        
+        # Step 5: Get transformation mappings (interactive if not provided)
+        if not string_transforms:
+            if not quiet_mode:
+                print("Step 5: Getting UID transformation mappings...")
+            string_transforms = get_transformation_mappings_from_user(quiet_mode)
+        else:
+            if not quiet_mode:
+                print("Step 5: Using provided UID transformation mappings...")
+                print(f"Transformations: {string_transforms}")
+        
+        # Step 6: Read and apply transformations
+        if not quiet_mode:
+            print("\nStep 6: Reading and applying transformations...")
+        
+        mappings = read_tag_assets_from_csv(input_file, quiet_mode)
+        if not mappings:
+            error_msg = "No mappings found in input file"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
+        
+        if not quiet_mode:
+            print(f"✅ Read {len(mappings)} mappings from input file")
+        
+        # Apply transformations to create Target_Asset_UID
+        if string_transforms:
+            if not quiet_mode:
+                print(f"Applying {len(string_transforms)} transformations...")
+            for mapping in mappings:
+                source_uid = mapping.get('source_Asset_UID', '')
+                target_uid = transform_asset_uid(source_uid, string_transforms)
+                mapping['Target_Asset_UID'] = target_uid
+            if not quiet_mode:
+                print("✅ Transformations applied successfully!")
+        else:
+            if not quiet_mode:
+                print("ℹ️  No transformations configured - Target UIDs will be identical to Source UIDs")
+            # Add Target_Asset_UID as a copy of source_Asset_UID
+            for mapping in mappings:
+                mapping['Target_Asset_UID'] = mapping.get('source_Asset_UID', '')
+        
+        # Step 7: Fetch target asset data
+        if not quiet_mode:
+            print("\nStep 7: Fetching target asset data...")
+        
+        enriched_mappings = enrich_with_target_assets_from_api(client, logger, mappings, quiet_mode)
+        
+        if not quiet_mode:
+            found_count = sum(1 for m in enriched_mappings if m.get('Target_Asset_ID'))
+            total_count = len(enriched_mappings)
+            print(f"✅ Target asset enrichment completed!")
+            print(f"Found target assets: {found_count}/{total_count}")
+        
+        # Step 8: Save final transformed_tag_assets_output.csv
+        if not quiet_mode:
+            print("\nStep 8: Saving transformed tag assets to CSV...")
+        
+        save_transformed_tag_assets_to_csv(enriched_mappings, output_file, quiet_mode)
+        
+        if not quiet_mode:
+            print("="*80)
+            print("✅ Tag transformation completed successfully!")
+            print(f"📁 Transformed tag assets saved to: {output_file}")
+            print(f"📊 Total mappings: {len(enriched_mappings)}")
+            if string_transforms:
+                print(f"🔄 Transformations applied: {len(string_transforms)}")
+            found_count = sum(1 for m in enriched_mappings if m.get('Target_Asset_ID'))
+            print(f"🎯 Target assets found: {found_count}")
+        
+    except Exception as e:
+        error_msg = f"Tag transformation failed: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise
+
+
+def get_transformation_mappings_from_user(quiet_mode: bool = False) -> dict:
+    """
+    Get transformation mappings from user input interactively.
+    
+    Returns:
+        Dictionary of source-to-target transformations
+    """
+    if quiet_mode:
+        return {}
+    
+    print("\n" + "="*60)
+    print("UID TRANSFORMATION CONFIGURATION")
+    print("="*60)
+    print("Configure source-to-target UID transformations.")
+    print("This will create Target_Asset_UID from source_Asset_UID using exact word matching.")
+    print("Examples:")
+    print("  • 'SNOWFLAKE_SAMPLE_DATA' → 'KRISH_TEST'")
+    print("  • 'KRISH' → 'ATULDB'")
+    print("  • 'PROD_DB' → 'TEST_DB'")
+    print()
+    
+    mappings = {}
+    
+    while True:
+        print("Enter a transformation mapping (or press Enter to finish):")
+        source = input("  Source word to replace: ").strip()
+        
+        if not source:
+            break
+            
+        target = input(f"  Target word for '{source}': ").strip()
+        
+        if not target:
+            print("  ⚠️  Target cannot be empty. Skipping this mapping.")
+            continue
+            
+        mappings[source] = target
+        print(f"  ✅ Added: '{source}' → '{target}'")
+        print()
+    
+    if mappings:
+        print(f"\n✅ Configured {len(mappings)} transformation mappings:")
+        for source, target in mappings.items():
+            print(f"     '{source}' → '{target}'")
+    else:
+        print("\nℹ️  No transformations configured - Target UIDs will be identical to Source UIDs")
+    
+    return mappings
+
+
+def read_tag_assets_from_csv(csv_file: Path, quiet_mode: bool = False) -> List[Dict[str, Any]]:
+    """Read tag asset mappings from CSV file."""
+    mappings = []
+    
+    try:
+        with open(csv_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                mappings.append(dict(row))
+        
+        if not quiet_mode:
+            print(f"✅ Read {len(mappings)} mappings from {csv_file}")
+        
+    except Exception as e:
+        error_msg = f"Error reading CSV file: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        raise
+    
+    return mappings

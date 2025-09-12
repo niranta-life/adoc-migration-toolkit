@@ -19,7 +19,6 @@ pyinstaller-hooks-contrib>=2023.0
 # Development tools (optional, for advanced builds)
 setuptools>=65.0.0
 wheel>=0.38.0
-twine>=4.0.0  # For uploading to PyPI
 
 # Testing dependencies (for build verification)
 pytest>=7.0.0

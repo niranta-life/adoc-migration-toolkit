@@ -23,7 +23,7 @@ from ..shared.api_client import create_api_client
 from .asset_operations import execute_asset_profile_export, execute_asset_profile_export_parallel, execute_asset_profile_import, execute_asset_config_export, execute_asset_config_export_parallel, execute_asset_list_export, execute_asset_list_export_parallel, execute_asset_tag_import, execute_asset_config_import, execute_asset_tag_export
 from .policy_operations import execute_policy_list_export, execute_policy_list_export_parallel, execute_policy_export, execute_policy_export_parallel, execute_policy_import
 from .policy_operations import execute_rule_tag_export, execute_rule_tag_export_parallel
-from .formatter import execute_formatter, parse_formatter_command
+from .formatter import execute_formatter, parse_formatter_command, execute_tag_xfr
 from adoc_migration_toolkit.shared import globals
 
 # Import cross-platform readline wrapper
@@ -426,7 +426,7 @@ def show_command_help(command_name: str):
     
     elif command_name == 'asset-tag-export':
         print(f"\n{BOLD}asset-tag-export{RESET} [--quiet] [--verbose] [--target] [--max-threads <num>]")
-        print("    Description: Export tags for assets from asset-merged-all.csv to asset-import/asset-tag-import-ready.csv")
+        print("    Description: Export tags and assets from source environment (integrated fetch_tags.py functionality)")
         print("    Arguments:")
         print("      --quiet: Suppress console output, show only summary")
         print("      --verbose: Show detailed output including tag details")
@@ -440,21 +440,22 @@ def show_command_help(command_name: str):
         print("      asset-tag-export --max-threads 10")
         print("      asset-tag-export --target --verbose --max-threads 20")
         print("    Behavior:")
-        print("      • Requires asset-merged-all.csv as input (created by transform-and-merge)")
-        print("      • Uses '/catalog-server/api/assets/{asset_id}/tags' endpoint")
-        print("      • Only exports manual tags (autoTagged: false)")
-        print("      • Output: <output-dir>/asset-import/asset-tag-import-ready.csv")
-        print("      • CSV columns: source_uid, target_uid, source_id, tags, error")
-        print("      • Processes only assets with target_uid (existing in target environment)")
-        print("      • Shows progress bar during tag fetching")
+        print("      • Step 1: Fetches all source tags from '/catalog-server/api/assets/tags' endpoint")
+        print("      • Step 2: Fetches assets for all tags with parallel processing")
+        print("      • Step 3: Enriches assets with detailed information (filtered by assembly_id if specified)")
+        print("      • Step 4: Saves enriched tag_assets_output.csv with complete source details")
+        print("      • Output files: tags-migration/tags_output.csv, tags-migration/tag_assets_output.csv")
+        print("      • CSV columns: source_Tag_ID, Source_Tag_Name, source_Asset_ID, source_Assembly_ID, source_Asset_UID, source_Assembly_Name")
+        print("      • Uses source environment authentication")
+        print("      • Shows progress bars during parallel processing")
         print("      • Provides comprehensive statistics upon completion")
-        print("      • Next step: Use asset-tag-import to import tags to target environment")
+        print("      • Next step: Use tag-xfr to transform UIDs and enrich with target data")
     
     elif command_name == 'asset-tag-import':
         print(f"\n{BOLD}asset-tag-import{RESET} [csv_file] [--quiet] [--verbose] [--parallel]")
         print("    Description: Import tags for assets from CSV file")
         print("    Arguments:")
-        print("      csv_file: Path to CSV file (defaults to asset-merged-all.csv)")
+        print("      csv_file: Path to CSV file (defaults to transformed_tag_assets_output.csv)")
         print("    Options:")
         print("      --quiet, -q: Suppress console output, show only summary")
         print("      --verbose, -v: Show detailed output including API calls")
@@ -466,15 +467,39 @@ def show_command_help(command_name: str):
         print("      asset-tag-import --parallel")
         print("      asset-tag-import /path/to/asset-data.csv --verbose --parallel")
         print("    Behavior:")
-        print("      • Reads asset data from asset-merged-all.csv (or specified file)")
-        print("      • Processes each asset to get asset ID from target_uid")
+        print("      • Reads asset data from transformed_tag_assets_output.csv (or specified file)")
+        print("      • Supports multiple CSV formats: transformed_tag_assets_output.csv, asset-tag-import-ready.csv, asset-merged-all.csv")
+        print("      • For transformed format: Uses Target_Asset_ID directly for tag import")
+        print("      • For legacy formats: Gets asset ID from target_uid using API lookup")
         print("      • Imports tags for each asset using POST /catalog-server/api/assets/<id>/tag")
-        print("      • Tags are colon-separated in the CSV file (5th column)")
         print("      • Uses target environment authentication")
         print("      • Shows progress bar in quiet mode")
         print("      • Shows detailed API calls in verbose mode")
         print("      • Parallel mode: Uses up to 5 threads for faster processing")
         print("      • Provides comprehensive statistics upon completion")
+    
+    elif command_name == 'tag-xfr':
+        print(f"\n{BOLD}tag-xfr{RESET} [--string-transform \"A\":\"B\", \"C\":\"D\"] [--quiet] [--verbose] [--max-threads <num>]")
+        print("    Description: Transform tag asset UIDs and enrich with target asset data")
+        print("    Arguments:")
+        print("      --string-transform: String transformations for UID mapping (e.g., \"Snowflake\":\"snowflake_krish_pfizer\", \"SNOWFLAKE_SAMPLE_DATA\":\"KRISH_TEST\")")
+        print("      --quiet: Suppress console output, show only summary")
+        print("      --verbose: Show detailed output including transformation details")
+        print("      --max-threads: Maximum number of threads for parallel processing (default: 5)")
+        print("    Examples:")
+        print("      tag-xfr")
+        print("      tag-xfr --string-transform \"Snowflake\":\"snowflake_krish_pfizer\", \"SNOWFLAKE_SAMPLE_DATA\":\"KRISH_TEST\"")
+        print("      tag-xfr --quiet --max-threads 10")
+        print("      tag-xfr --string-transform \"PROD_DB\":\"DEV_DB\" --verbose")
+        print("    Behavior:")
+        print("      • Requires tag_assets_output.csv as input (created by asset-tag-export)")
+        print("      • Applies UID transformations using word boundary matching")
+        print("      • Fetches target asset data from target environment")
+        print("      • Output: <output-dir>/tags/transformed_tag_assets_output.csv")
+        print("      • CSV columns: source_Tag_ID, Source_Tag_Name, source_Asset_ID, source_Assembly_ID, source_Asset_UID, Target_Asset_UID, Target_Asset_ID, Asset_Type, source_Assembly_Name")
+        print("      • If no transformations provided, prompts for interactive configuration")
+        print("      • Uses target environment for asset data enrichment")
+        print("      • Next step: Use asset-tag-import to apply tags to target assets")
     
 
     
@@ -1053,7 +1078,7 @@ def setup_autocomplete():
     commands = [
         'segments-export', 'segments-import',
         'asset-profile-export', 'asset-profile-import',
-        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-export', 'asset-tag-import',
+        'asset-config-export', 'asset-config-import', 'asset-list-export', 'asset-tag-export', 'asset-tag-import', 'tag-xfr',
         'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
         'vcs-config', 'vcs-init', 'vcs-pull', 'vcs-push',
         'GET', 'PUT',  # REST API commands
@@ -1068,6 +1093,7 @@ def setup_autocomplete():
         'asset-config-import': ['--dry-run', '--quiet', '--verbose', '--parallel'],
                     'asset-list-export': ['--quiet', '--verbose', '--parallel', '--target', '--page-size'],
                     'asset-tag-export': ['--quiet', '--verbose', '--target', '--max-threads'],
+                    'tag-xfr': ['--string-transform', '--quiet', '--verbose', '--max-threads'],
         'asset-profile-export': ['--output-file', '--quiet', '--verbose', '--parallel'],
         'asset-profile-import': ['--dry-run', '--quiet', '--verbose'],
         'verify-profiles': ['--quiet', '--verbose', '--max-threads'],
@@ -1439,7 +1465,7 @@ def run_interactive(args):
                 valid_commands = [
                     'segments-export', 'segments-import',
                     'asset-profile-export', 'asset-profile-import',
-                    'asset-config-export', 'asset-list-export', 'asset-tag-export', 'asset-tag-import',
+                    'asset-config-export', 'asset-list-export', 'asset-tag-export', 'asset-tag-import', 'tag-xfr',
                     'policy-list-export', 'policy-export', 'policy-import', 'policy-xfr', 'rule-tag-export',
                     'vcs-config',
                     'vcs-init',
@@ -1533,8 +1559,15 @@ def run_interactive(args):
                 # Check if it's an asset-tag-export command
                 if command.lower().startswith('asset-tag-export'):
                     from .command_parsing import parse_asset_tag_export_command
-                    quiet_mode, verbose_mode, use_target, max_threads = parse_asset_tag_export_command(command)
-                    execute_asset_tag_export(client, logger, quiet_mode, verbose_mode, use_target, max_threads)
+                    quiet_mode, verbose_mode, use_target, max_threads, assembly_id = parse_asset_tag_export_command(command)
+                    execute_asset_tag_export(client, logger, quiet_mode, verbose_mode, use_target, max_threads, assembly_id)
+                    continue
+                
+                # Check if it's a tag-xfr command
+                if command.lower().startswith('tag-xfr'):
+                    from .command_parsing import parse_tag_xfr_command
+                    string_transforms, quiet_mode, verbose_mode, max_threads = parse_tag_xfr_command(command)
+                    execute_tag_xfr(client, logger, string_transforms, quiet_mode, verbose_mode, max_threads)
                     continue
             
                 
@@ -1577,20 +1610,39 @@ def run_interactive(args):
                     from .command_parsing import parse_asset_tag_import_command
                     csv_file, quiet_mode, verbose_mode, parallel_mode = parse_asset_tag_import_command(command)
                     
-                    # Use default CSV file if not specified
+                    # Use default CSV file if not specified (transformed_tag_assets_output.csv)
                     if not csv_file:
                         if globals.GLOBAL_OUTPUT_DIR:
-                            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "asset-import" / "asset-merged-all.csv")
+                            csv_file = str(globals.GLOBAL_OUTPUT_DIR / "tags-migration" / "transformed_tag_assets_output.csv")
                         else:
-                            # Try to find the latest toolkit directory
+                            # Try to find the output directory
                             current_dir = Path.cwd()
-                            toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
-                            if toolkit_dirs:
-                                toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
-                                latest_toolkit_dir = toolkit_dirs[0]
-                                csv_file = str(latest_toolkit_dir / "asset-import" / "asset-merged-all.csv")
+                            
+                            # First, look for adoc-migration-toolkit directory with data subdirectory
+                            toolkit_dir = current_dir / "adoc-migration-toolkit"
+                            if toolkit_dir.exists():
+                                # Check for data subdirectory with tenant-specific folder
+                                data_dir = toolkit_dir / "data"
+                                if data_dir.exists():
+                                    # Look for tenant-specific folders
+                                    tenant_dirs = [d for d in data_dir.iterdir() if d.is_dir()]
+                                    if tenant_dirs:
+                                        # Use the first tenant directory found
+                                        output_dir = tenant_dirs[0]
+                                        csv_file = str(output_dir / "tags-migration" / "transformed_tag_assets_output.csv")
+                                    else:
+                                        csv_file = str(data_dir / "tags-migration" / "transformed_tag_assets_output.csv")
+                                else:
+                                    csv_file = str(toolkit_dir / "tags-migration" / "transformed_tag_assets_output.csv")
                             else:
-                                csv_file = "asset-merged-all.csv"
+                                # Fall back to looking for adoc-migration-toolkit-* directories
+                                toolkit_dirs = [d for d in current_dir.iterdir() if d.is_dir() and d.name.startswith("adoc-migration-toolkit-")]
+                                if toolkit_dirs:
+                                    toolkit_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+                                    latest_toolkit_dir = toolkit_dirs[0]
+                                    csv_file = str(latest_toolkit_dir / "tags-migration" / "transformed_tag_assets_output.csv")
+                                else:
+                                    csv_file = "transformed_tag_assets_output.csv"
                     
                     execute_asset_tag_import(csv_file, client, logger, quiet_mode, verbose_mode, parallel_mode)
                     continue
@@ -1648,6 +1700,15 @@ def run_interactive(args):
                     input_dir, string_transforms, output_dir, quiet_mode, verbose_mode = parse_asset_formatter_command(command)
                     # Execute regardless of whether string_transforms is empty (direct processing mode)
                     execute_asset_formatter(input_dir, string_transforms, output_dir, quiet_mode, verbose_mode, logger)
+                    continue
+                
+                # Check if it's a tag-xfr command
+                if command.lower().startswith('tag-xfr'):
+                    from .command_parsing import parse_tag_xfr_command
+                    from .formatter import execute_tag_formatter
+                    string_transforms, quiet_mode, verbose_mode = parse_tag_xfr_command(command)
+                    # Execute regardless of whether string_transforms is empty (direct processing mode)
+                    execute_tag_formatter(string_transforms, quiet_mode, verbose_mode, logger, client)
                     continue
                 
                 # Check if it's a profile-check command

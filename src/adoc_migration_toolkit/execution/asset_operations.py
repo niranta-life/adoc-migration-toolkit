@@ -842,19 +842,19 @@ def execute_asset_config_export(csv_file: str, client, logger: logging.Logger, o
                         validation_errors.append(f"Row {row_num}: Expected 3 columns, got {len(row)}")
                         continue
                     
-                    target_uid, config_json_str, source_uid = row
+                    target_uid, asset_config_json_str, source_uid = row
                     
                     # Check for empty values
                     if not target_uid.strip():
                         validation_errors.append(f"Row {row_num}: Empty target_uid value")
                     
-                    if not config_json_str.strip():
+                    if not asset_config_json_str.strip():
                         validation_errors.append(f"Row {row_num}: Empty config_json value")
                         continue
                     
                     # Verify JSON is parsable
                     try:
-                        config_data = json.loads(config_json_str)
+                        config_data = json.loads(asset_config_json_str)
                         
                         # Additional validation: check if it's a valid config response
                         if not isinstance(config_data, dict):
@@ -2256,8 +2256,11 @@ def execute_asset_profile_export_parallel(csv_file: str, client, logger: logging
 def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, parallel_mode: bool = False):
     """Execute the asset-tag-import command.
     
+    This command implements step 9 from fetch_tags.py:
+    9. Apply source tags to target assets (POST API calls)
+    
     Args:
-        csv_file: Path to the CSV file containing asset data
+        csv_file: Path to the CSV file containing asset data (defaults to transformed_tag_assets_output.csv)
         client: API client instance
         logger: Logger instance
         quiet_mode: Whether to suppress console output
@@ -2265,16 +2268,52 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
         parallel_mode: Whether to use parallel processing
     """
     try:
+        # If no CSV file specified, use the default transformed_tag_assets_output.csv
+        if not csv_file:
+            # Get global output directory
+            if globals.GLOBAL_OUTPUT_DIR:
+                output_dir = globals.GLOBAL_OUTPUT_DIR
+            else:
+                # Try to find the output directory
+                current_dir = Path.cwd()
+                
+                # First, look for adoc-migration-toolkit directory with data subdirectory
+                toolkit_dir = current_dir / "adoc-migration-toolkit"
+                if toolkit_dir.exists():
+                    # Check for data subdirectory with tenant-specific folder
+                    data_dir = toolkit_dir / "data"
+                    if data_dir.exists():
+                        # Look for tenant-specific folders
+                        tenant_dirs = [d for d in data_dir.iterdir() if d.is_dir()]
+                        if tenant_dirs:
+                            # Use the first tenant directory found
+                            output_dir = tenant_dirs[0]
+                        else:
+                            output_dir = data_dir
+                    else:
+                        output_dir = toolkit_dir
+                else:
+                    # Fall back to looking for adoc-migration-toolkit-* directories
+                    toolkit_dirs = list(current_dir.glob("adoc-migration-toolkit-*"))
+                    if toolkit_dirs:
+                        # Sort by modification time and get the most recent
+                        toolkit_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                        output_dir = toolkit_dirs[0]
+                    else:
+                        output_dir = current_dir
+            
+            csv_file = str(output_dir / "tags-migration" / "transformed_tag_assets_output.csv")
+        
         # Check if CSV file exists
         csv_path = Path(csv_file)
         if not csv_path.exists():
             error_msg = f"CSV file does not exist: {csv_file}"
             print(f"❌ {error_msg}")
-            print(f"💡 Please run 'transform-and-merge' first to generate the asset-merged-all.csv file")
+            print(f"💡 Please run 'tag-xfr' first to generate the transformed_tag_assets_output.csv file")
             if globals.GLOBAL_OUTPUT_DIR:
-                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv")
+                print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/tags-migration/transformed_tag_assets_output.csv")
             else:
-                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-merged-all.csv")
+                print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/tags-migration/transformed_tag_assets_output.csv")
             logger.error(error_msg)
             return
         
@@ -2283,32 +2322,68 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
         # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
         csv.field_size_limit(sys.maxsize)
         with open(csv_file, 'r', newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            header = next(reader)  # Skip header
+            reader = csv.DictReader(f)
             
-            # Check if this is asset-tag-import-ready.csv format or asset-merged-all.csv format
-            is_tag_import_ready = len(header) >= 5 and header[0] == 'source_uid' and header[1] == 'target_uid'
+            # Check CSV format based on header
+            header = reader.fieldnames
+            is_transformed_format = 'Target_Asset_ID' in header and 'Source_Tag_Name' in header
+            is_tag_import_ready = 'source_uid' in header and 'target_uid' in header and 'tags' in header
+            is_merged_format = 'source_id' in header and 'source_uid' in header and 'target_id' in header
+            
             
             for row in reader:
-                if len(row) >= 5:  # Ensure we have at least 5 columns
-                    if is_tag_import_ready:
-                        # asset-tag-import-ready.csv format: source_uid, target_uid, source_id, tags, error
-                        source_uid = row[0]
-                        target_uid = row[1]
-                        source_id = row[2]
-                        tags_str = row[3]  # 4th column contains tags
-                        error = row[4] if len(row) > 4 else ''
+                if is_transformed_format:
+                    # transformed_tag_assets_output.csv format: source_Tag_ID, Source_Tag_Name, source_Asset_ID, source_Assembly_ID, source_Asset_UID, Target_Asset_UID, Target_Asset_ID, Asset_Type, source_Assembly_Name
+                    target_asset_id = row.get('Target_Asset_ID', '').strip()
+                    tag_name = row.get('Source_Tag_Name', '').strip()
+                    
+                    # Skip rows without target asset ID or tag name
+                    if not target_asset_id or not tag_name:
+                        continue
+                    
+                    # For transformed format, we need to make individual API calls for each tag
+                    asset_data.append({
+                        'target_asset_id': target_asset_id,
+                        'tag_name': tag_name,
+                        'source_asset_id': row.get('source_Asset_ID', ''),
+                        'source_uid': row.get('source_Asset_UID', ''),
+                        'target_uid': row.get('Target_Asset_UID', ''),
+                        'asset_type': row.get('Asset_Type', '')
+                    })
+                    
+                elif is_tag_import_ready:
+                    # asset-tag-import-ready.csv format: source_uid, target_uid, source_id, tags, error
+                    source_uid = row.get('source_uid', '')
+                    target_uid = row.get('target_uid', '')
+                    source_id = row.get('source_id', '')
+                    tags_str = row.get('tags', '')
+                    error = row.get('error', '')
+                    
+                    # Skip rows with errors
+                    if error and error.strip():
+                        continue
+                    
+                    # Parse tags (colon-separated)
+                    tags = []
+                    if tags_str and tags_str.strip():
+                        tags = [tag.strip() for tag in tags_str.split(':') if tag.strip()]
+                    
+                    # Only process assets that have tags
+                    if tags:
+                        asset_data.append({
+                            'source_uid': source_uid,
+                            'source_id': source_id,
+                            'target_uid': target_uid,
+                            'tags': tags
+                        })
                         
-                        # Skip rows with errors
-                        if error and error.strip():
-                            continue
-                    else:
-                        # asset-merged-all.csv format: source_id, source_uid, target_id, target_uid, tags
-                        source_id = row[0]
-                        source_uid = row[1]
-                        target_id = row[2]
-                        target_uid = row[3]
-                        tags_str = row[4]  # 5th column contains tags
+                elif is_merged_format:
+                    # asset-merged-all.csv format: source_id, source_uid, target_id, target_uid, tags
+                    source_id = row.get('source_id', '')
+                    source_uid = row.get('source_uid', '')
+                    target_id = row.get('target_id', '')
+                    target_uid = row.get('target_uid', '')
+                    tags_str = row.get('tags', '')
                     
                     # Parse tags (colon-separated)
                     tags = []
@@ -2328,7 +2403,10 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
             print("❌ No valid asset data found in CSV file")
             if not quiet_mode:
                 print("💡 Make sure the CSV file contains assets with tags and no errors")
-                if is_tag_import_ready:
+                if is_transformed_format:
+                    print("   Expected format: source_Tag_ID, Source_Tag_Name, source_Asset_ID, source_Assembly_ID, source_Asset_UID, Target_Asset_UID, Target_Asset_ID, Asset_Type, source_Assembly_Name")
+                    print("   Only rows with Target_Asset_ID and Source_Tag_Name will be processed")
+                elif is_tag_import_ready:
                     print("   Expected format: source_uid, target_uid, source_id, tags, error")
                     print("   Only rows with tags and no errors will be processed")
                 else:
@@ -2336,8 +2414,12 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
             logger.warning("No valid asset data found in CSV file")
             return
         
-        # Filter out assets with no tags
-        assets_with_tags = [asset for asset in asset_data if asset['tags']]
+        # For transformed format, we already have individual tag entries
+        # For other formats, filter out assets with no tags
+        if is_transformed_format:
+            assets_with_tags = asset_data
+        else:
+            assets_with_tags = [asset for asset in asset_data if asset.get('tags')]
         
         if not assets_with_tags:
             print("ℹ️  No assets with tags found in CSV file")
@@ -2355,10 +2437,13 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
                 print("🚀 PARALLEL MODE - Using multiple threads for faster processing")
             print("="*80)
         
+        # Set default max_threads for parallel processing
+        max_threads = 5
+        
         if parallel_mode:
-            execute_asset_tag_import_parallel(assets_with_tags, client, logger, quiet_mode, verbose_mode)
+            execute_asset_tag_import_parallel(assets_with_tags, client, logger, quiet_mode, verbose_mode, max_threads, is_transformed_format)
         else:
-            execute_asset_tag_import_sequential(assets_with_tags, client, logger, quiet_mode, verbose_mode)
+            execute_asset_tag_import_sequential(assets_with_tags, client, logger, quiet_mode, verbose_mode, is_transformed_format)
         
     except Exception as e:
         error_msg = f"Error in asset-tag-import: {e}"
@@ -2367,7 +2452,7 @@ def execute_asset_tag_import(csv_file: str, client, logger: logging.Logger, quie
         logger.error(error_msg)
 
 
-def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, is_transformed_format: bool = False):
     """Execute asset tag import in sequential mode.
     
     Args:
@@ -2376,6 +2461,7 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        is_transformed_format: Whether the data is in transformed format (individual tag entries)
     """
     total_assets = len(assets_with_tags)
     successful_assets = 0
@@ -2393,83 +2479,35 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
     
     for asset in assets_with_tags:
         try:
-            target_uid = asset['target_uid']
-            tags = asset['tags']
-            
-            if verbose_mode:
-                print(f"\nProcessing asset: {target_uid}")
-                print(f"Tags to import: {tags}")
-                print("-" * 60)
-            
-            # Step 1: Get asset ID from UID
-            if verbose_mode:
-                print(f"GET Request:")
-                print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
-                print(f"  Method: GET")
-                print(f"  Content-Type: application/json")
-                print(f"  Authorization: Bearer [REDACTED]")
-                if hasattr(client, 'tenant') and client.tenant:
-                    print(f"  X-Tenant: {client.tenant}")
-            
-            asset_response = client.make_api_call(
-                endpoint=f"/catalog-server/api/assets?uid={target_uid}",
-                method='GET',
-                use_target_auth=True,
-                use_target_tenant=True
-            )
-            
-            if verbose_mode:
-                print(f"Asset Response:")
-                print(json.dumps(asset_response, indent=2, ensure_ascii=False))
-            
-            # Extract asset ID
-            assets_list = []
-            if asset_response and 'data' in asset_response:
-                if isinstance(asset_response['data'], list):
-                    assets_list = asset_response['data']
-                elif isinstance(asset_response['data'], dict) and 'assets' in asset_response['data']:
-                    assets_list = asset_response['data']['assets']
-            if not assets_list:
-                error_msg = f"No asset found for UID: {target_uid}"
+            if is_transformed_format:
+                # Transformed format: individual tag entries
+                target_asset_id = asset['target_asset_id']
+                tag_name = asset['tag_name']
+                source_uid = asset.get('source_uid', '')
+                target_uid = asset.get('target_uid', '')
+                
                 if verbose_mode:
-                    print(f"❌ {error_msg}")
-                logger.error(error_msg)
-                failed_assets += 1
-                progress_bar.update(1)
-                continue
-            asset_id = assets_list[0].get('id') if assets_list and isinstance(assets_list[0], dict) else None
-            if not asset_id:
-                error_msg = f"No asset ID found for UID: {target_uid}"
-                if verbose_mode:
-                    print(f"❌ {error_msg}")
-                logger.error(error_msg)
-                failed_assets += 1
-                progress_bar.update(1)
-                continue
-            
-            if verbose_mode:
-                print(f"Found asset ID: {asset_id}")
-            
-            # Step 2: Import each tag
-            asset_tags_successful = 0
-            asset_tags_failed = 0
-            
-            for tag in tags:
+                    print(f"\nProcessing tag: {tag_name} for asset ID: {target_asset_id}")
+                    print(f"Source UID: {source_uid}")
+                    print(f"Target UID: {target_uid}")
+                    print("-" * 60)
+                
+                # Import the single tag
                 try:
                     if verbose_mode:
                         print(f"\nPOST Request:")
-                        print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
+                        print(f"  Endpoint: /catalog-server/api/assets/{target_asset_id}/tag")
                         print(f"  Method: POST")
                         print(f"  Content-Type: application/json")
                         print(f"  Authorization: Bearer [REDACTED]")
                         if hasattr(client, 'tenant') and client.tenant:
                             print(f"  X-Tenant: {client.tenant}")
-                        print(f"  Request Body: {{\"name\": \"{tag}\"}}")
+                        print(f"  Request Body: {{\"name\": \"{tag_name}\"}}")
                     
                     tag_response = client.make_api_call(
-                        endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
+                        endpoint=f"/catalog-server/api/assets/{target_asset_id}/tag",
                         method='POST',
-                        json_payload={"name": tag},
+                        json_payload={"name": tag_name},
                         use_target_auth=True,
                         use_target_tenant=True
                     )
@@ -2479,33 +2517,139 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
                         print(json.dumps(tag_response, indent=2, ensure_ascii=False))
                     
                     if tag_response:
-                        asset_tags_successful += 1
+                        successful_assets += 1
                         total_tags_imported += 1
                         if verbose_mode:
-                            print(f"✅ Successfully imported tag: {tag}")
+                            print(f"✅ Successfully imported tag: {tag_name}")
                     else:
-                        asset_tags_failed += 1
+                        failed_assets += 1
                         total_tags_failed += 1
                         if verbose_mode:
-                            print(f"❌ Failed to import tag: {tag}")
+                            print(f"❌ Failed to import tag: {tag_name}")
                 
                 except Exception as e:
-                    error_msg = f"Error importing tag '{tag}' for asset {target_uid}: {e}"
+                    error_msg = f"Failed to import tag {tag_name} for asset {target_asset_id}: {e}"
                     if verbose_mode:
                         print(f"❌ {error_msg}")
                     logger.error(error_msg)
-                    asset_tags_failed += 1
+                    failed_assets += 1
                     total_tags_failed += 1
-            
-            # Update asset statistics
-            if asset_tags_failed == 0:
-                successful_assets += 1
-                if verbose_mode:
-                    print(f"✅ Successfully processed asset: {target_uid} ({asset_tags_successful} tags)")
+                
             else:
-                failed_assets += 1
+                # Legacy format: multiple tags per asset
+                target_uid = asset['target_uid']
+                tags = asset['tags']
+                
                 if verbose_mode:
-                    print(f"⚠️  Partially processed asset: {target_uid} ({asset_tags_successful} successful, {asset_tags_failed} failed)")
+                    print(f"\nProcessing asset: {target_uid}")
+                    print(f"Tags to import: {tags}")
+                    print("-" * 60)
+                
+                # Step 1: Get asset ID from UID
+                if verbose_mode:
+                    print(f"GET Request:")
+                    print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
+                    print(f"  Method: GET")
+                    print(f"  Content-Type: application/json")
+                    print(f"  Authorization: Bearer [REDACTED]")
+                    if hasattr(client, 'tenant') and client.tenant:
+                        print(f"  X-Tenant: {client.tenant}")
+                
+                asset_response = client.make_api_call(
+                    endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                    method='GET',
+                    use_target_auth=True,
+                    use_target_tenant=True
+                )
+                
+                if verbose_mode:
+                    print(f"Asset Response:")
+                    print(json.dumps(asset_response, indent=2, ensure_ascii=False))
+                
+                # Extract asset ID
+                assets_list = []
+                if asset_response and 'data' in asset_response:
+                    if isinstance(asset_response['data'], list):
+                        assets_list = asset_response['data']
+                    elif isinstance(asset_response['data'], dict) and 'assets' in asset_response['data']:
+                        assets_list = asset_response['data']['assets']
+                if not assets_list:
+                    error_msg = f"No asset found for UID: {target_uid}"
+                    if verbose_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_assets += 1
+                    progress_bar.update(1)
+                    continue
+                asset_id = assets_list[0].get('id') if assets_list and isinstance(assets_list[0], dict) else None
+                if not asset_id:
+                    error_msg = f"No asset ID found for UID: {target_uid}"
+                    if verbose_mode:
+                        print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                    failed_assets += 1
+                    progress_bar.update(1)
+                    continue
+                
+                if verbose_mode:
+                    print(f"Found asset ID: {asset_id}")
+                
+                # Step 2: Import each tag
+                asset_tags_successful = 0
+                asset_tags_failed = 0
+                
+                for tag in tags:
+                    try:
+                        if verbose_mode:
+                            print(f"\nPOST Request:")
+                            print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
+                            print(f"  Method: POST")
+                            print(f"  Content-Type: application/json")
+                            print(f"  Authorization: Bearer [REDACTED]")
+                            if hasattr(client, 'tenant') and client.tenant:
+                                print(f"  X-Tenant: {client.tenant}")
+                            print(f"  Request Body: {{\"name\": \"{tag}\"}}")
+                        
+                        tag_response = client.make_api_call(
+                            endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
+                            method='POST',
+                            json_payload={"name": tag},
+                            use_target_auth=True,
+                            use_target_tenant=True
+                        )
+                        
+                        if verbose_mode:
+                            print(f"Tag Response:")
+                            print(json.dumps(tag_response, indent=2, ensure_ascii=False))
+                        
+                        if tag_response:
+                            asset_tags_successful += 1
+                            total_tags_imported += 1
+                            if verbose_mode:
+                                print(f"✅ Successfully imported tag: {tag}")
+                        else:
+                            asset_tags_failed += 1
+                            total_tags_failed += 1
+                            if verbose_mode:
+                                print(f"❌ Failed to import tag: {tag}")
+                    
+                    except Exception as e:
+                        error_msg = f"Error importing tag '{tag}' for asset {target_uid}: {e}"
+                        if verbose_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        asset_tags_failed += 1
+                        total_tags_failed += 1
+                
+                # Update asset statistics
+                if asset_tags_failed == 0:
+                    successful_assets += 1
+                    if verbose_mode:
+                        print(f"✅ Successfully processed asset: {target_uid} ({asset_tags_successful} tags)")
+                else:
+                    failed_assets += 1
+                    if verbose_mode:
+                        print(f"⚠️  Partially processed asset: {target_uid} ({asset_tags_successful} successful, {asset_tags_failed} failed)")
             
             progress_bar.update(1)
             
@@ -2534,7 +2678,7 @@ def execute_asset_tag_import_sequential(assets_with_tags: List[Dict], client, lo
         print(f"✅ Asset tag import completed: {successful_assets}/{total_assets} assets successful, {total_tags_imported} tags imported")
 
 
-def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5):
+def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, max_threads: int = 5, is_transformed_format: bool = False):
     """Execute asset tag import in parallel mode.
     Args:
         assets_with_tags: List of asset data dictionaries
@@ -2542,7 +2686,8 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
         logger: Logger instance
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
-        max_threads: Maximum number of threads to use (default: 5)
+        max_threads: Maximum number of threads for parallel processing
+        is_transformed_format: Whether the data is in transformed format (individual tag entries)
     """
     # Calculate thread configuration
     min_assets_per_thread = 10
@@ -2596,98 +2741,40 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
         successful_assets = 0
         failed_assets = 0
         total_tags_imported = 0
+        total_tags_already_exist = 0
         total_tags_failed = 0
         
         # Process each asset in this thread's range
         for asset in thread_assets:
             try:
-                target_uid = asset['target_uid']
-                tags = asset['tags']
-                
-                if verbose_mode:
-                    thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
-                    print(f"\n{thread_name} - Processing asset: {target_uid}")
-                    print(f"Tags to import: {tags}")
-                    print("-" * 60)
-                
-                # Step 1: Get asset ID from UID
-                if verbose_mode:
-                    print(f"GET Request:")
-                    print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
-                    print(f"  Method: GET")
-                    print(f"  Content-Type: application/json")
-                    print(f"  Authorization: Bearer [REDACTED]")
-                    if hasattr(thread_client, 'tenant') and thread_client.tenant:
-                        print(f"  X-Tenant: {thread_client.tenant}")
-                
-                asset_response = thread_client.make_api_call(
-                    endpoint=f"/catalog-server/api/assets?uid={target_uid}",
-                    method='GET',
-                    use_target_auth=True,
-                    use_target_tenant=True
-                )
-                
-                if verbose_mode:
-                    print(f"Asset Response:")
-                    print(json.dumps(asset_response, indent=2, ensure_ascii=False))
-                
-                # Extract asset ID
-                if not asset_response or 'data' not in asset_response:
-                    error_msg = f"No 'data' field found in asset response for UID: {target_uid}"
+                if is_transformed_format:
+                    # Transformed format: individual tag entries
+                    target_asset_id = asset['target_asset_id']
+                    tag_name = asset['tag_name']
+                    target_uid = asset.get('target_uid', '')
+                    
                     if verbose_mode:
-                        print(f"❌ {error_msg}")
-                    logger.error(error_msg)
-                    failed_assets += 1
-                    progress_bar.update(1)
-                    continue
-                
-                assets_list = []
-                if asset_response and 'data' in asset_response:
-                    if isinstance(asset_response['data'], list):
-                        assets_list = asset_response['data']
-                    elif isinstance(asset_response['data'], dict) and 'assets' in asset_response['data']:
-                        assets_list = asset_response['data']['assets']
-                if not assets_list:
-                    error_msg = f"No asset found for UID: {target_uid}"
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Processing asset: {target_uid}")
+                        print(f"Target Asset ID: {target_asset_id}")
+                        print(f"Tag to import: {tag_name}")
+                        print("-" * 60)
+                    
+                    # Make API call to apply tag to target asset
                     if verbose_mode:
-                        print(f"❌ {error_msg}")
-                    logger.error(error_msg)
-                    failed_assets += 1
-                    progress_bar.update(1)
-                    continue
-                asset_id = assets_list[0].get('id') if assets_list and isinstance(assets_list[0], dict) else None
-                if not asset_id:
-                    error_msg = f"No asset ID found for UID: {target_uid}"
-                    if verbose_mode:
-                        print(f"❌ {error_msg}")
-                    logger.error(error_msg)
-                    failed_assets += 1
-                    progress_bar.update(1)
-                    continue
-                
-                if verbose_mode:
-                    print(f"Found asset ID: {asset_id}")
-                
-                # Step 2: Import each tag
-                asset_tags_successful = 0
-                asset_tags_failed = 0
-                
-                for tag in tags:
+                        print(f"POST Request:")
+                        print(f"  Endpoint: /catalog-server/api/assets/{target_asset_id}/tag")
+                        print(f"  Method: POST")
+                        print(f"  Content-Type: application/json")
+                        if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                            print(f"  X-Tenant: {thread_client.tenant}")
+                        print(f"  Request Body: {{\"name\": \"{tag_name}\"}}")
+                    
                     try:
-                        if verbose_mode:
-                            print(f"\nPOST Request:")
-                            print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
-                            print(f"  Method: POST")
-                            print(f"  Content-Type: application/json")
-                            print(f"  Authorization: Bearer [REDACTED]")
-                            if hasattr(thread_client, 'tenant') and thread_client.tenant:
-                                print(f"  X-Tenant: {thread_client.tenant}")
-                            print(f"  Request Body: {{\"name\": \"{tag}\"}}")
-                        
                         tag_response = thread_client.make_api_call(
-                            endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
+                            endpoint=f"/catalog-server/api/assets/{target_asset_id}/tag",
                             method='POST',
-                            json_payload={"name": tag},
+                            json_payload={"name": tag_name},
                             use_target_auth=True,
                             use_target_tenant=True
                         )
@@ -2696,36 +2783,169 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
                             print(f"Tag Response:")
                             print(json.dumps(tag_response, indent=2, ensure_ascii=False))
                         
-                        if tag_response:
-                            asset_tags_successful += 1
+                        # Check if the response indicates the tag already existed
+                        # Some APIs return success even when tag already exists
+                        if tag_response and isinstance(tag_response, dict):
+                            # Check for indicators that tag already existed
+                            if (tag_response.get('message') and 'already' in tag_response.get('message', '').lower()) or \
+                               (tag_response.get('status') == 'already_exists') or \
+                               (tag_response.get('code') == 409):
+                                successful_assets += 1
+                                total_tags_already_exist += 1
+                                if verbose_mode:
+                                    print(f"🔄 Tag already exists: {tag_name} (skipped)")
+                            else:
+                                successful_assets += 1
+                                total_tags_imported += 1
+                                if verbose_mode:
+                                    print(f"✅ Successfully imported tag: {tag_name}")
+                        else:
+                            # Default to successful import if response is not a dict
+                            successful_assets += 1
                             total_tags_imported += 1
                             if verbose_mode:
-                                print(f"✅ Successfully imported tag: {tag}")
+                                print(f"✅ Successfully imported tag: {tag_name}")
+                            
+                    except Exception as api_error:
+                        # Check if it's a 409 Conflict (tag already exists)
+                        if "409" in str(api_error) or "Conflict" in str(api_error):
+                            successful_assets += 1
+                            total_tags_already_exist += 1
+                            if verbose_mode:
+                                print(f"🔄 Tag already exists: {tag_name} (409 Conflict - skipped)")
                         else:
-                            asset_tags_failed += 1
+                            failed_assets += 1
                             total_tags_failed += 1
                             if verbose_mode:
-                                print(f"❌ Failed to import tag: {tag}")
+                                print(f"❌ Failed to import tag: {tag_name} - {str(api_error)}")
+                
+                else:
+                    # Legacy format: multiple tags per asset
+                    target_uid = asset['target_uid']
+                    tags = asset['tags']
                     
-                    except Exception as e:
-                        error_msg = f"Error importing tag '{tag}' for asset {target_uid}: {e}"
+                    if verbose_mode:
+                        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+                        print(f"\n{thread_name} - Processing asset: {target_uid}")
+                        print(f"Tags to import: {tags}")
+                        print("-" * 60)
+                    
+                    # Step 1: Get asset ID from UID
+                    if verbose_mode:
+                        print(f"GET Request:")
+                        print(f"  Endpoint: /catalog-server/api/assets?uid={target_uid}")
+                        print(f"  Method: GET")
+                        print(f"  Content-Type: application/json")
+                        print(f"  Authorization: Bearer [REDACTED]")
+                        if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                            print(f"  X-Tenant: {thread_client.tenant}")
+                    
+                    asset_response = thread_client.make_api_call(
+                        endpoint=f"/catalog-server/api/assets?uid={target_uid}",
+                        method='GET',
+                        use_target_auth=True,
+                        use_target_tenant=True
+                    )
+                    
+                    if verbose_mode:
+                        print(f"Asset Response:")
+                        print(json.dumps(asset_response, indent=2, ensure_ascii=False))
+                    
+                    # Extract asset ID
+                    if not asset_response or 'data' not in asset_response:
+                        error_msg = f"No 'data' field found in asset response for UID: {target_uid}"
                         if verbose_mode:
                             print(f"❌ {error_msg}")
                         logger.error(error_msg)
-                        asset_tags_failed += 1
-                        total_tags_failed += 1
-                
-                # Update asset statistics
-                if asset_tags_failed == 0:
-                    successful_assets += 1
+                        failed_assets += 1
+                        progress_bar.update(1)
+                        continue
+                    
+                    assets_list = []
+                    if asset_response and 'data' in asset_response:
+                        if isinstance(asset_response['data'], list):
+                            assets_list = asset_response['data']
+                        elif isinstance(asset_response['data'], dict) and 'assets' in asset_response['data']:
+                            assets_list = asset_response['data']['assets']
+                    if not assets_list:
+                        error_msg = f"No asset found for UID: {target_uid}"
+                        if verbose_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        failed_assets += 1
+                        progress_bar.update(1)
+                        continue
+                    asset_id = assets_list[0].get('id') if assets_list and isinstance(assets_list[0], dict) else None
+                    if not asset_id:
+                        error_msg = f"No asset ID found for UID: {target_uid}"
+                        if verbose_mode:
+                            print(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        failed_assets += 1
+                        progress_bar.update(1)
+                        continue
+                    
                     if verbose_mode:
-                        print(f"✅ Successfully processed asset: {target_uid} ({asset_tags_successful} tags)")
-                else:
-                    failed_assets += 1
-                    if verbose_mode:
-                        print(f"⚠️  Partially processed asset: {target_uid} ({asset_tags_successful} successful, {asset_tags_failed} failed)")
-                
-                progress_bar.update(1)
+                        print(f"Found asset ID: {asset_id}")
+                    
+                    # Step 2: Import each tag
+                    asset_tags_successful = 0
+                    asset_tags_failed = 0
+                    
+                    for tag in tags:
+                        try:
+                            if verbose_mode:
+                                print(f"\nPOST Request:")
+                                print(f"  Endpoint: /catalog-server/api/assets/{asset_id}/tag")
+                                print(f"  Method: POST")
+                                print(f"  Content-Type: application/json")
+                                print(f"  Authorization: Bearer [REDACTED]")
+                                if hasattr(thread_client, 'tenant') and thread_client.tenant:
+                                    print(f"  X-Tenant: {thread_client.tenant}")
+                                print(f"  Request Body: {{\"name\": \"{tag}\"}}")
+                            
+                            tag_response = thread_client.make_api_call(
+                                endpoint=f"/catalog-server/api/assets/{asset_id}/tag",
+                                method='POST',
+                                json_payload={"name": tag},
+                                use_target_auth=True,
+                                use_target_tenant=True
+                            )
+                            
+                            if verbose_mode:
+                                print(f"Tag Response:")
+                                print(json.dumps(tag_response, indent=2, ensure_ascii=False))
+                            
+                            if tag_response:
+                                asset_tags_successful += 1
+                                total_tags_imported += 1
+                                if verbose_mode:
+                                    print(f"✅ Successfully imported tag: {tag}")
+                            else:
+                                asset_tags_failed += 1
+                                total_tags_failed += 1
+                                if verbose_mode:
+                                    print(f"❌ Failed to import tag: {tag}")
+                        
+                        except Exception as e:
+                            error_msg = f"Error importing tag '{tag}' for asset {target_uid}: {e}"
+                            if verbose_mode:
+                                print(f"❌ {error_msg}")
+                            logger.error(error_msg)
+                            asset_tags_failed += 1
+                            total_tags_failed += 1
+                    
+                    # Update asset statistics
+                    if asset_tags_failed == 0:
+                        successful_assets += 1
+                        if verbose_mode:
+                            print(f"✅ Successfully processed asset: {target_uid} ({asset_tags_successful} tags)")
+                    else:
+                        failed_assets += 1
+                        if verbose_mode:
+                            print(f"⚠️  Partially processed asset: {target_uid} ({asset_tags_successful} successful, {asset_tags_failed} failed)")
+                    
+                    progress_bar.update(1)
                 
             except Exception as e:
                 error_msg = f"Error processing asset {asset.get('target_uid', 'unknown')}: {e}"
@@ -2742,6 +2962,7 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
             'successful_assets': successful_assets,
             'failed_assets': failed_assets,
             'total_tags_imported': total_tags_imported,
+            'total_tags_already_exist': total_tags_already_exist,
             'total_tags_failed': total_tags_failed
         }
     
@@ -2768,6 +2989,7 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
     total_successful_assets = sum(r['successful_assets'] for r in thread_results)
     total_failed_assets = sum(r['failed_assets'] for r in thread_results)
     total_tags_imported = sum(r['total_tags_imported'] for r in thread_results)
+    total_tags_already_exist = sum(r['total_tags_already_exist'] for r in thread_results)
     total_tags_failed = sum(r['total_tags_failed'] for r in thread_results)
     
     # Print statistics
@@ -2779,11 +3001,13 @@ def execute_asset_tag_import_parallel(assets_with_tags: List[Dict], client, logg
         print(f"Successful assets: {total_successful_assets}")
         print(f"Failed assets: {total_failed_assets}")
         print(f"Total tags imported: {total_tags_imported}")
+        print(f"Total tags already exist: {total_tags_already_exist}")
         print(f"Total tags failed: {total_tags_failed}")
         print(f"Threads used: {num_threads}")
         print("="*80)
     else:
-        print(f"✅ Asset tag import completed: {total_successful_assets}/{len(assets_with_tags)} assets successful, {total_tags_imported} tags imported")
+        total_tags_processed = total_tags_imported + total_tags_already_exist
+        print(f"✅ Asset tag import completed: {total_successful_assets}/{len(assets_with_tags)} assets successful, {total_tags_processed} tags processed ({total_tags_imported} imported, {total_tags_already_exist} already exist)")
 
 
 def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.Logger, output_file: str = None,
@@ -3061,16 +3285,16 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         validation_errors.append(f"Row {row_num}: Expected 6 columns, got {len(row)}")
                         continue
 
-                    target_uid, asset_config_json_str, asset_profile_anomaly_config_json_str, asset_id_to_uid_map_json_str, asset_target_id_to_uid_map_json_str, source_uid = row
+                    target_uid, asset_asset_config_json_str, asset_profile_anomaly_asset_config_json_str, asset_id_to_uid_map_json_str, asset_target_id_to_uid_map_json_str, source_uid = row
 
                     # Check for empty values
                     if not target_uid.strip():
                         validation_errors.append(f"Row {row_num}: Empty target_uid value")
 
-                    if not asset_config_json_str.strip():
+                    if not asset_asset_config_json_str.strip():
                         validation_errors.append(f"Row {row_num}: Empty asset_config_json value")
 
-                    if not asset_profile_anomaly_config_json_str.strip():
+                    if not asset_profile_anomaly_asset_config_json_str.strip():
                         validation_errors.append(f"Row {row_num}: Empty asset_profile_anomaly_config_json value")
                         continue
 
@@ -3083,7 +3307,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
                         continue
                     # Verify JSON is parsable
                     try:
-                        config_data = json.loads(config_json_str)
+                        config_data = json.loads(asset_asset_config_json_str)
 
                         # Additional validation: check if it's a valid config response
                         if not isinstance(config_data, dict):
@@ -3098,7 +3322,7 @@ def execute_asset_config_export_parallel(csv_file: str, client, logger: logging.
 
                     # Verify asset_profile_anomaly_config_json JSON is parsable
                     try:
-                        config_data = json.loads(asset_profile_anomaly_config_json_str)
+                        config_data = json.loads(asset_profile_anomaly_asset_config_json_str)
 
                         # Additional validation: check if it's a valid config response
                         if not isinstance(config_data, dict):
@@ -5563,11 +5787,14 @@ def resolve_duplicates_interactively(asset_data: List[Dict[str, str]], duplicate
         return None
 
 
-def execute_asset_tag_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, max_threads: int = 5):
+def execute_asset_tag_export(client, logger: logging.Logger, quiet_mode: bool = False, verbose_mode: bool = False, use_target: bool = False, max_threads: int = 5, assembly_id: int = None):
     """Execute the asset-tag-export command.
     
-    This command reads asset-merged-all.csv and exports tags for each asset using the tags API.
-    Creates asset-tag-import-ready.csv for importing tags to target environment.
+    This command integrates the fetch_tags.py functionality:
+    1. Fetch all source tags and save to CSV
+    2. Fetch source assets for all tags with parallel processing and save basic CSV
+    3. Enrich assets with detailed information (filtered by assembly_id)
+    4. Save enriched tag_assets_output.csv (complete with all details)
     
     Args:
         client: API client instance
@@ -5576,6 +5803,7 @@ def execute_asset_tag_export(client, logger: logging.Logger, quiet_mode: bool = 
         verbose_mode: Whether to show detailed output
         use_target: Whether to use target environment
         max_threads: Maximum number of threads for parallel processing
+        assembly_id: Assembly ID to filter assets (if None, processes all assemblies)
     """
     try:
         # Determine environment
@@ -5589,6 +5817,9 @@ def execute_asset_tag_export(client, logger: logging.Logger, quiet_mode: bool = 
             print(f"Host: {env_host}")
             if env_tenant:
                 print(f"Tenant: {env_tenant}")
+            if assembly_id:
+                print(f"Assembly ID filter: {assembly_id}")
+            print("="*80)
         
         # Get global output directory
         from ..shared import globals
@@ -5605,277 +5836,555 @@ def execute_asset_tag_export(client, logger: logging.Logger, quiet_mode: bool = 
             else:
                 output_dir = current_dir
         
-        # Define input and output files
-        input_file = output_dir / "asset-import" / "asset-merged-all.csv"
-        output_file = output_dir / "asset-import" / "asset-tag-import-ready.csv"
+        # Create tags-migration subdirectory
+        tags_dir = output_dir / "tags-migration"
+        tags_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Define output files in tags-migration subdirectory
+        tags_output_file = tags_dir / "tags_output.csv"
+        tag_assets_output_file = tags_dir / "tag_assets_output.csv"
         
         if not quiet_mode:
-            print(f"Input file: {input_file}")
-            print(f"Output file: {output_file}")
-            if globals.GLOBAL_OUTPUT_DIR:
-                print(f"Using global output directory: {globals.GLOBAL_OUTPUT_DIR}")
+            print(f"Output directory: {output_dir}")
+            print(f"Tags output file: {tags_output_file}")
+            print(f"Tag assets output file: {tag_assets_output_file}")
             print("="*80)
         
-        # Check if input file exists
-        if not input_file.exists():
-            error_msg = f"Input file not found: {input_file}. Please run 'transform-and-merge' first to create asset-merged-all.csv"
-            if not quiet_mode:
-                print(f"❌ {error_msg}")
-                if globals.GLOBAL_OUTPUT_DIR:
-                    print(f"   Expected location: {globals.GLOBAL_OUTPUT_DIR}/asset-import/asset-merged-all.csv")
-                else:
-                    print(f"   Expected location: adoc-migration-toolkit-YYYYMMDDHHMM/asset-import/asset-merged-all.csv")
-            logger.error(error_msg)
-            return
-        
-        # Read asset data from merged file
+        # Step 1: Fetch all source tags
         if not quiet_mode:
-            print("Reading asset data from asset-merged-all.csv...")
+            print("Step 1: Fetching all source tags...")
         
-        asset_data = []
-        try:
-            with open(input_file, 'r', newline='', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    asset_data.append(row)
-        except Exception as e:
-            error_msg = f"Failed to read input file: {e}"
-            if not quiet_mode:
-                print(f"❌ {error_msg}")
-            logger.error(error_msg)
-            return
+        all_tags = fetch_all_tags_from_api(client, logger, use_target, quiet_mode)
         
-        if not asset_data:
-            error_msg = "No asset data found in input file"
+        if not all_tags:
+            error_msg = "No tags found in source environment"
             if not quiet_mode:
                 print(f"❌ {error_msg}")
             logger.error(error_msg)
             return
         
         if not quiet_mode:
-            print(f"Found {len(asset_data)} assets to process")
+            print(f"✅ Found {len(all_tags)} tags")
         
-        # Filter assets that have target_uid (these are the ones that exist in target)
-        target_assets = [asset for asset in asset_data if asset.get('target_uid') and asset.get('target_uid').strip()]
+        # Save tags to CSV
+        save_tags_to_csv(all_tags, tags_output_file, quiet_mode)
         
+        # Step 2: Fetch source assets for all tags with parallel processing
         if not quiet_mode:
-            print(f"Found {len(target_assets)} assets with target_uid (will be processed)")
-            if len(target_assets) < len(asset_data):
-                print(f"Skipping {len(asset_data) - len(target_assets)} assets without target_uid")
+            print("\nStep 2: Fetching source assets for all tags...")
         
-        if not target_assets:
-            error_msg = "No assets with target_uid found. Cannot export tags."
+        tag_asset_mappings = fetch_assets_for_all_tags_from_api(
+            client, logger, all_tags, use_target, max_threads, quiet_mode
+        )
+        
+        if not tag_asset_mappings:
+            error_msg = "No assets found for any tags"
             if not quiet_mode:
                 print(f"❌ {error_msg}")
             logger.error(error_msg)
             return
         
-        # Process assets in parallel to fetch tags
         if not quiet_mode:
-            print(f"Fetching tags for {len(target_assets)} assets using {max_threads} threads...")
+            print(f"✅ Found {len(tag_asset_mappings)} tag-asset mappings")
         
+        # Step 3: Enrich assets with detailed information (filtered by assembly_id)
+        if not quiet_mode:
+            print("\nStep 3: Enriching assets with detailed information...")
+            if assembly_id:
+                print(f"Filtering for Assembly ID: {assembly_id}")
         
-        # Process assets in parallel with individual thread progress bars
-        tag_results = []
-        successful_count = 0
-        failed_count = 0
+        enriched_mappings = enrich_assets_with_details_from_api(
+            client, logger, tag_asset_mappings, assembly_id, use_target, max_threads, quiet_mode
+        )
         
-        # Calculate thread configuration
-        min_assets_per_thread = 10
-        if len(target_assets) < min_assets_per_thread:
-            num_threads = 1
-            assets_per_thread = len(target_assets)
-        else:
-            num_threads = min(max_threads, (len(target_assets) + min_assets_per_thread - 1) // min_assets_per_thread)
-            assets_per_thread = (len(target_assets) + num_threads - 1) // num_threads
+        if not enriched_mappings:
+            error_msg = "No assets found after enrichment"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            return
         
         if not quiet_mode:
-            print(f"🚀 Starting parallel processing with {num_threads} threads...")
-            print(f"Assets per thread: {assets_per_thread}")
-            print("="*80)
+            print(f"✅ Enriched {len(enriched_mappings)} assets")
+            if assembly_id:
+                print(f"All assets are from Assembly ID: {assembly_id}")
         
-        # Get thread names
-        from .utils import get_thread_names
-        thread_names = get_thread_names()
-        
-        def process_asset_chunk(thread_id, start_index, end_index):
-            """Process a chunk of assets for a specific thread."""
-            # Create a thread-local client instance
-            thread_client = type(client)(
-                host=client.host,
-                access_key=client.access_key,
-                secret_key=client.secret_key,
-                tenant=getattr(client, 'tenant', None)
-            )
-            # Copy target credentials to thread client
-            thread_client.target_access_key = getattr(client, 'target_access_key', None)
-            thread_client.target_secret_key = getattr(client, 'target_secret_key', None)
-            thread_client.target_host = getattr(client, 'target_host', None)
-            thread_client.target_tenant = getattr(client, 'target_tenant', None)
-            
-            # Get assets for this thread
-            thread_assets = target_assets[start_index:end_index]
-            thread_results = []
-            thread_successful = 0
-            thread_failed = 0
-            
-            # Create progress bar for this thread
-            thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
-            progress_bar = create_progress_bar(
-                total=len(thread_assets),
-                desc=thread_name,
-                unit="assets",
-                disable=quiet_mode or verbose_mode
-            )
-            
-            for asset in thread_assets:
-                try:
-                    source_uid = asset.get('source_uid', '')
-                    target_uid = asset.get('target_uid', '')
-                    source_id = asset.get('source_id', '')
-                    
-                    if not source_id:
-                        result = {
-                            'source_uid': source_uid,
-                            'target_uid': target_uid,
-                            'source_id': source_id,
-                            'tags': [],
-                            'error': 'No source_id found'
-                        }
-                        thread_results.append(result)
-                        thread_failed += 1
-                        progress_bar.update(1)
-                        continue
-                    
-                    # Fetch tags using source_id
-                    tags_response = thread_client.make_api_call(
-                        endpoint=f"/catalog-server/api/assets/{source_id}/tags",
-                        method='GET',
-                        use_target_auth=use_target,
-                        use_target_tenant=use_target
-                    )
-                    
-                    tags = []
-                    if tags_response and 'assetTags' in tags_response:
-                        # Extract only non-auto-tagged tags (manual tags)
-                        for tag in tags_response['assetTags']:
-                            if not tag.get('autoTagged', True):  # Only include manually tagged items
-                                tag_name = tag.get('name', '')
-                                if tag_name:
-                                    tags.append(tag_name)
-                    
-                    if verbose_mode and tags:
-                        print(f"  📋 {thread_name} - Asset {source_uid}: Found {len(tags)} manual tags: {', '.join(tags)}")
-                    
-                    result = {
-                        'source_uid': source_uid,
-                        'target_uid': target_uid,
-                        'source_id': source_id,
-                        'tags': tags,
-                        'error': None
-                    }
-                    thread_results.append(result)
-                    thread_successful += 1
-                    
-                except Exception as e:
-                    error_msg = f"Failed to fetch tags for asset {source_uid}: {e}"
-                    if verbose_mode:
-                        print(f"  ⚠️  {thread_name} - {error_msg}")
-                    result = {
-                        'source_uid': source_uid,
-                        'target_uid': target_uid,
-                        'source_id': source_id,
-                        'tags': [],
-                        'error': error_msg
-                    }
-                    thread_results.append(result)
-                    thread_failed += 1
-                
-                progress_bar.update(1)
-            
-            progress_bar.close()
-            
-            return {
-                'thread_id': thread_id,
-                'thread_name': thread_name,
-                'results': thread_results,
-                'successful': thread_successful,
-                'failed': thread_failed
-            }
-        
-        # Submit thread tasks
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = []
-            for i in range(num_threads):
-                start_index = i * assets_per_thread
-                end_index = min((i + 1) * assets_per_thread, len(target_assets))
-                if start_index < len(target_assets):
-                    future = executor.submit(process_asset_chunk, i, start_index, end_index)
-                    futures.append(future)
-            
-            # Collect results
-            for future in futures:
-                thread_result = future.result()
-                tag_results.extend(thread_result['results'])
-                successful_count += thread_result['successful']
-                failed_count += thread_result['failed']
-        
-        # Write results to output file
+        # Step 4: Save enriched tag_assets_output.csv
         if not quiet_mode:
-            print(f"\nWriting tag data to {output_file}...")
+            print("\nStep 4: Saving enriched tag assets to CSV...")
         
-        with open(output_file, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-            
-            # Write header
-            writer.writerow(['source_uid', 'target_uid', 'source_id', 'tags', 'error'])
-            
-            # Write tag data
-            for result in tag_results:
-                tags_str = ':'.join(result['tags']) if result['tags'] else ''
-                writer.writerow([
-                    result['source_uid'],
-                    result['target_uid'],
-                    result['source_id'],
-                    tags_str,
-                    result['error'] or ''
-                ])
+        save_enriched_tag_assets_to_csv(enriched_mappings, tag_assets_output_file, quiet_mode)
         
-        # Summary
         if not quiet_mode:
             print("="*80)
-            print("ASSET TAG EXPORT COMPLETED")
-            print("="*80)
-            print(f"Environment: {env_name}")
-            print(f"Input file: {input_file}")
-            print(f"Output file: {output_file}")
-            print(f"Total assets processed: {len(target_assets)}")
-            print(f"Successful: {successful_count}")
-            print(f"Failed: {failed_count}")
-            print(f"Threads used: {num_threads}")
-            print(f"Assets with tags found: {len([r for r in tag_results if r['tags']])}")
-            print(f"Assets without tags: {len([r for r in tag_results if not r['tags'] and not r['error']])}")
-            
-            # Show assets with tags
-            assets_with_tags = [r for r in tag_results if r['tags']]
-            if assets_with_tags:
-                print(f"\nAssets with manual tags: {len(assets_with_tags)}")
-                if verbose_mode:
-                    for result in assets_with_tags[:10]:  # Show first 10
-                        print(f"  📋 {result['source_uid']}: {', '.join(result['tags'])}")
-                    if len(assets_with_tags) > 10:
-                        print(f"  ... and {len(assets_with_tags) - 10} more")
-            
-            print("\nNext steps:")
-            print("1. Review asset-tag-import-ready.csv")
-            print("2. Use asset-tag-import to import tags to target environment")
-            print("="*80)
-        
-        logger.info(f"Asset tag export completed. Processed {len(target_assets)} assets, {successful_count} successful, {failed_count} failed")
+            print("✅ Asset tag export completed successfully!")
+            print(f"📁 Tags saved to: {tags_output_file}")
+            print(f"📁 Enriched tag assets saved to: {tag_assets_output_file}")
+            print(f"📊 Total enriched assets: {len(enriched_mappings)}")
+            if assembly_id:
+                print(f"🔍 Filtered by Assembly ID: {assembly_id}")
         
     except Exception as e:
         error_msg = f"Asset tag export failed: {e}"
         if not quiet_mode:
             print(f"❌ {error_msg}")
         logger.error(error_msg)
+        raise
+
+
+def fetch_all_tags_from_api(client, logger: logging.Logger, use_target: bool = False, quiet_mode: bool = False):
+    """Fetch all tags from the API with pagination."""
+    all_tags = []
+    page = 0
+    page_size = 20
+    
+    while True:
+        try:
+            # Construct query parameters
+            query_params = [
+                f"page={page}",
+                f"size={page_size}",
+                f"sortBy=updatedAt:DESC",
+                f"strategies=Manual"
+            ]
+            query_string = "&".join(query_params)
+            endpoint = f"/catalog-server/api/assets/tags?{query_string}"
+            
+            # Fetch tags from API
+            response = client.make_api_call(
+                endpoint=endpoint,
+                method='GET',
+                use_target_auth=use_target,
+                use_target_tenant=use_target
+            )
+            
+            if not response or 'tags' not in response:
+                break
+            
+            tags = response.get('tags', [])
+            if not tags:
+                break
+            
+            # Extract tag info
+            for tag in tags:
+                tag_info = {
+                    'id': tag.get('id'),
+                    'name': tag.get('name')
+                }
+                all_tags.append(tag_info)
+            
+            if not quiet_mode:
+                print(f"Fetched page {page}, got {len(tags)} tags. Total so far: {len(all_tags)}")
+            
+            # Check if we've reached the end
+            metadata = response.get('metadata', {})
+            current_count = len(tags)
+            total_count = metadata.get('count', 0)
+            
+            # If we got fewer tags than page size, we're done
+            if current_count < page_size:
+                break
+            
+            page += 1
+            
+        except Exception as e:
+            error_msg = f"Error fetching tags page {page}: {e}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            logger.error(error_msg)
+            break
+    
+    return all_tags
+
+
+def fetch_assets_for_all_tags_from_api(client, logger: logging.Logger, tags, use_target: bool = False, max_threads: int = 5, quiet_mode: bool = False):
+    """Fetch assets for all tags in parallel."""
+    tag_asset_mappings = []
+    total_tags = len(tags)
+    
+    if not quiet_mode:
+        print(f"Fetching assets for {total_tags} tags using {max_threads} parallel workers...")
+    
+    # Calculate thread configuration
+    min_tags_per_thread = 5
+    if total_tags < min_tags_per_thread:
+        num_threads = 1
+        tags_per_thread = total_tags
+    else:
+        num_threads = min(max_threads, (total_tags + min_tags_per_thread - 1) // min_tags_per_thread)
+        tags_per_thread = (total_tags + num_threads - 1) // num_threads
+    
+    if not quiet_mode:
+        print(f"🚀 Starting parallel processing with {num_threads} threads...")
+        print(f"Tags per thread: {tags_per_thread}")
+    
+    # Get thread names
+    from .utils import get_thread_names
+    thread_names = get_thread_names()
+    
+    def process_tag_chunk(thread_id, start_index, end_index):
+        """Process a chunk of tags for a specific thread."""
+        # Create a thread-local client instance
+        thread_client = type(client)(
+            host=client.host,
+            access_key=client.access_key,
+            secret_key=client.secret_key,
+            tenant=getattr(client, 'tenant', None)
+        )
+        # Copy target credentials to thread client
+        thread_client.target_access_key = getattr(client, 'target_access_key', None)
+        thread_client.target_secret_key = getattr(client, 'target_secret_key', None)
+        thread_client.target_host = getattr(client, 'target_host', None)
+        thread_client.target_tenant = getattr(client, 'target_tenant', None)
+        
+        # Get tags for this thread
+        thread_tags = tags[start_index:end_index]
+        thread_results = []
+        
+        # Create progress bar for this thread
+        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+        progress_bar = create_progress_bar(
+            total=len(thread_tags),
+            desc=thread_name,
+            unit="tags",
+            disable=quiet_mode
+        )
+        
+        for tag in thread_tags:
+            try:
+                tag_id = tag['id']
+                tag_name = tag['name']
+                
+                # Fetch assets for this tag
+                asset_ids = fetch_all_assets_for_single_tag(thread_client, tag_id, use_target, quiet_mode)
+                
+                # Create mappings for this tag
+                for asset_id in asset_ids:
+                    mapping = {
+                        'Tag_ID': tag_id,
+                        'Tag_Name': tag_name,
+                        'Asset_ID': asset_id
+                    }
+                    thread_results.append(mapping)
+                
+                if not quiet_mode and asset_ids:
+                    print(f"✅ Tag {tag_id}: Found {len(asset_ids)} assets")
+                elif not quiet_mode:
+                    print(f"ℹ️  Tag {tag_id}: No assets found")
+                
+            except Exception as e:
+                error_msg = f"Error processing tag {tag.get('id', 'unknown')}: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+            
+            progress_bar.update(1)
+        
+        progress_bar.close()
+        return thread_results
+    
+    # Process tags in parallel
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        for i in range(num_threads):
+            start_index = i * tags_per_thread
+            end_index = min((i + 1) * tags_per_thread, total_tags)
+            if start_index < total_tags:
+                future = executor.submit(process_tag_chunk, i, start_index, end_index)
+                futures.append(future)
+        
+        # Collect results
+        for future in futures:
+            try:
+                thread_results = future.result()
+                tag_asset_mappings.extend(thread_results)
+            except Exception as e:
+                error_msg = f"Error in thread processing: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+    
+    return tag_asset_mappings
+
+
+def fetch_all_assets_for_single_tag(client, tag_id: int, use_target: bool = False, quiet_mode: bool = False):
+    """Fetch all assets for a specific tag with pagination."""
+    all_asset_ids = []
+    page = 0
+    page_size = 20
+    
+    while True:
+        try:
+            # Construct query parameters
+            query_params = [
+                f"page={page}",
+                f"size={page_size}",
+                f"sortBy=assetName:DESC"
+            ]
+            query_string = "&".join(query_params)
+            endpoint = f"/catalog-server/api/tags/{tag_id}/assets?{query_string}"
+            
+            # Fetch assets for this tag
+            response = client.make_api_call(
+                endpoint=endpoint,
+                method='GET',
+                use_target_auth=use_target,
+                use_target_tenant=use_target
+            )
+            
+            if not response or 'assetTags' not in response:
+                break
+            
+            asset_tags = response.get('assetTags', [])
+            if not asset_tags:
+                break
+            
+            # Extract asset IDs
+            for asset_tag in asset_tags:
+                asset_id = asset_tag.get('assetId')
+                if asset_id:
+                    all_asset_ids.append(asset_id)
+            
+            # If we got fewer assets than page size, we're done
+            if len(asset_tags) < page_size:
+                break
+            
+            page += 1
+            
+        except Exception as e:
+            error_msg = f"Error fetching assets for tag {tag_id}, page {page}: {e}"
+            if not quiet_mode:
+                print(f"❌ {error_msg}")
+            break
+    
+    return all_asset_ids
+
+
+def enrich_assets_with_details_from_api(client, logger: logging.Logger, mappings, assembly_id: int = None, use_target: bool = False, max_threads: int = 5, quiet_mode: bool = False):
+    """Enrich asset mappings with detailed information in parallel."""
+    enriched_mappings = []
+    total_assets = len(mappings)
+    
+    if not quiet_mode:
+        print(f"Enriching {total_assets} assets with detailed information...")
+        if assembly_id:
+            print(f"Filtering for Assembly ID: {assembly_id}")
+    
+    # Calculate thread configuration
+    min_assets_per_thread = 10
+    if total_assets < min_assets_per_thread:
+        num_threads = 1
+        assets_per_thread = total_assets
+    else:
+        num_threads = min(max_threads, (total_assets + min_assets_per_thread - 1) // min_assets_per_thread)
+        assets_per_thread = (total_assets + num_threads - 1) // num_threads
+    
+    if not quiet_mode:
+        print(f"🚀 Starting parallel processing with {num_threads} threads...")
+        print(f"Assets per thread: {assets_per_thread}")
+    
+    # Get thread names
+    from .utils import get_thread_names
+    thread_names = get_thread_names()
+    
+    def process_asset_chunk(thread_id, start_index, end_index):
+        """Process a chunk of assets for a specific thread."""
+        # Create a thread-local client instance
+        thread_client = type(client)(
+            host=client.host,
+            access_key=client.access_key,
+            secret_key=client.secret_key,
+            tenant=getattr(client, 'tenant', None)
+        )
+        # Copy target credentials to thread client
+        thread_client.target_access_key = getattr(client, 'target_access_key', None)
+        thread_client.target_secret_key = getattr(client, 'target_secret_key', None)
+        thread_client.target_host = getattr(client, 'target_host', None)
+        thread_client.target_tenant = getattr(client, 'target_tenant', None)
+        
+        # Get assets for this thread
+        thread_assets = mappings[start_index:end_index]
+        thread_results = []
+        
+        # Create progress bar for this thread
+        thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
+        progress_bar = create_progress_bar(
+            total=len(thread_assets),
+            desc=thread_name,
+            unit="assets",
+            disable=quiet_mode
+        )
+        
+        for mapping in thread_assets:
+            try:
+                asset_id = mapping['Asset_ID']
+                
+                # Fetch asset details
+                endpoint = f"/catalog-server/api/assets/search?ids={asset_id}"
+                response = thread_client.make_api_call(
+                    endpoint=endpoint,
+                    method='GET',
+                    use_target_auth=use_target,
+                    use_target_tenant=use_target
+                )
+                
+                enrichment_data = extract_asset_enrichment_data(response, assembly_id)
+                
+                # Only return enriched mapping if found in specified assembly
+                if enrichment_data['found']:
+                    enriched_mapping = mapping.copy()
+                    source_uid = enrichment_data['asset_uid']
+                    
+                    enriched_mapping.update({
+                        'Assembly_ID': enrichment_data['assembly_id'],
+                        'Asset_UID': source_uid,
+                        'Asset_Name': enrichment_data['asset_name'],
+                        'Assembly_Name': enrichment_data['assembly_name']
+                    })
+                    
+                    thread_results.append(enriched_mapping)
+                    
+                    if not quiet_mode:
+                        print(f"✅ Asset {asset_id}: Found in Assembly {enrichment_data['assembly_id']} - {enrichment_data['asset_name']}")
+                else:
+                    if not quiet_mode:
+                        print(f"⏭️  Asset {asset_id}: Filtered (not in Assembly {assembly_id})")
+                
+            except Exception as e:
+                error_msg = f"Error enriching asset {mapping.get('Asset_ID', 'unknown')}: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+            
+            progress_bar.update(1)
+        
+        progress_bar.close()
+        return thread_results
+    
+    # Process assets in parallel
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        for i in range(num_threads):
+            start_index = i * assets_per_thread
+            end_index = min((i + 1) * assets_per_thread, total_assets)
+            if start_index < total_assets:
+                future = executor.submit(process_asset_chunk, i, start_index, end_index)
+                futures.append(future)
+        
+        # Collect results
+        for future in futures:
+            try:
+                thread_results = future.result()
+                enriched_mappings.extend(thread_results)
+            except Exception as e:
+                error_msg = f"Error in thread processing: {e}"
+                if not quiet_mode:
+                    print(f"❌ {error_msg}")
+                logger.error(error_msg)
+    
+    return enriched_mappings
+
+
+def extract_asset_enrichment_data(api_response, source_assembly_id: int = None):
+    """Extract asset enrichment data if assemblies.id matches the source assembly we want to migrate."""
+    result = {
+        'found': False,
+        'asset_uid': '',
+        'asset_name': '',
+        'assembly_id': '',
+        'assembly_name': ''
+    }
+    
+    # If no assembly filter specified, return first available assembly
+    if source_assembly_id is None:
+        assemblies = api_response.get('assemblies', [])
+        assets = api_response.get('assets', [])
+        if assemblies and assets:
+            assembly = assemblies[0]
+            asset = assets[0]
+            result.update({
+                'found': True,
+                'asset_uid': asset.get('uid', ''),
+                'asset_name': asset.get('name', ''),
+                'assembly_id': str(assembly.get('id', '')),
+                'assembly_name': assembly.get('name', '')
+            })
+        return result
+    
+    # Check if assemblies contain the source assembly ID we want to migrate
+    assemblies = api_response.get('assemblies', [])
+    source_assembly = None
+    for assembly in assemblies:
+        if assembly.get('id') == source_assembly_id:
+            source_assembly = assembly
+            break
+    
+    if not source_assembly:
+        return result
+    
+    # If source assembly found, extract asset details
+    assets = api_response.get('assets', [])
+    if assets:
+        asset = assets[0]  # Assuming single asset in response
+        if asset.get('assemblyId') == source_assembly_id:
+            result.update({
+                'found': True,
+                'asset_uid': asset.get('uid', ''),
+                'asset_name': asset.get('name', ''),
+                'assembly_id': str(source_assembly_id),
+                'assembly_name': source_assembly.get('name', '')
+            })
+    
+    return result
+
+
+def save_tags_to_csv(tags, output_file, quiet_mode: bool = False):
+    """Save tags to CSV file."""
+    try:
+        with open(output_file, 'w', newline='') as f:
+            f.write("Tag_ID,Tag_Name\n")
+            for tag in tags:
+                f.write(f"{tag['id']},{tag['name']}\n")
+        
+        if not quiet_mode:
+            print(f"✅ Tags saved to {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error saving tags to CSV: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
+        raise
+
+
+def save_enriched_tag_assets_to_csv(mappings, output_file, quiet_mode: bool = False):
+    """Save enriched asset mappings to CSV file with 'source' prefix."""
+    try:
+        with open(output_file, 'w', newline='') as f:
+            # Define field order with 'source' prefix
+            fieldnames = ['source_Tag_ID', 'Source_Tag_Name', 'source_Asset_ID', 'source_Assembly_ID', 'source_Asset_UID', 'source_Assembly_Name']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            
+            # Write header
+            writer.writeheader()
+            
+            # Write data
+            for mapping in mappings:
+                # Map original fields to prefixed fields
+                row = {
+                    'source_Tag_ID': mapping.get('Tag_ID', ''),
+                    'Source_Tag_Name': mapping.get('Tag_Name', ''),
+                    'source_Asset_ID': mapping.get('Asset_ID', ''),
+                    'source_Assembly_ID': mapping.get('Assembly_ID', ''),
+                    'source_Asset_UID': mapping.get('Asset_UID', ''),
+                    'source_Assembly_Name': mapping.get('Assembly_Name', '')
+                }
+                writer.writerow(row)
+        
+        if not quiet_mode:
+            print(f"✅ Enriched tag assets saved to {output_file}")
+        
+    except Exception as e:
+        error_msg = f"Error saving enriched tag assets to CSV: {e}"
+        if not quiet_mode:
+            print(f"❌ {error_msg}")
         raise
