@@ -592,6 +592,7 @@ def show_command_help(command_name: str):
         print("      policy-import *.zip")
         print("      policy-import /path/to/specific-file.zip")
         print("      policy-import *.zip --verbose")
+        print("      policy-import *.zip --apply-config '{\"policyOverride\":false,\"sqlViewOverride\":true}'")
         print("    Behavior:")
         print("      • Uploads ZIP files to '/catalog-server/api/rules/import/policy-definitions/upload-config'")
         print("      • Uses target environment authentication (target access key, secret key, and tenant)")
@@ -604,6 +605,7 @@ def show_command_help(command_name: str):
         print("      • Provides comprehensive summary with aggregated statistics")
         print("      • Tracks UUIDs of imported policy definitions")
         print("      • Reports conflicts (assemblies, policies, SQL views, visual views)")
+        print("      • Supports custom apply config via --apply-config parameter")
     
     elif command_name == 'rule-tag-export':
         print(f"\n{BOLD}rule-tag-export{RESET} [--quiet] [--verbose] [--parallel]")
@@ -1672,9 +1674,9 @@ def run_interactive(args):
                 # Check if it's a policy-import command
                 if command.lower().startswith('policy-import'):
                     from .command_parsing import parse_policy_import_command
-                    file_pattern, quiet_mode, verbose_mode = parse_policy_import_command(command)
+                    file_pattern, quiet_mode, verbose_mode, apply_config = parse_policy_import_command(command)
                     if file_pattern:
-                        execute_policy_import(client, logger, file_pattern, quiet_mode, verbose_mode)
+                        execute_policy_import(client, logger, file_pattern, quiet_mode, verbose_mode, apply_config)
                     continue
                 
                 # Check if it's a rule-tag-export command

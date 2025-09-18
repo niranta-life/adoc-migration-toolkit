@@ -754,24 +754,66 @@ def parse_policy_import_command(command: str) -> tuple:
     """Parse a policy-import command string into components.
     
     Args:
-        command: Command string like "policy-import <file_or_pattern> [--quiet] [--verbose]"
+        command: Command string like "policy-import <file_or_pattern> [--quiet] [--verbose] [--apply-config <json>]"
         
     Returns:
-        Tuple of (file_pattern, quiet_mode, verbose_mode)
+        Tuple of (file_pattern, quiet_mode, verbose_mode, apply_config)
     """
+    # First, handle the --apply-config parameter specially since it contains JSON
+    apply_config = None
+    apply_config_start = command.find('--apply-config')
+    
+    if apply_config_start != -1:
+        # Find the JSON part after --apply-config
+        json_start = apply_config_start + len('--apply-config')
+        # Skip whitespace
+        while json_start < len(command) and command[json_start] in ' \t':
+            json_start += 1
+        
+        if json_start < len(command):
+            # Find the JSON string - look for quotes
+            if command[json_start] in ['"', "'"]:
+                quote_char = command[json_start]
+                json_start += 1  # Skip opening quote
+                json_end = command.find(quote_char, json_start)
+                if json_end == -1:
+                    print(f"❌ Error: Unclosed quote in --apply-config JSON")
+                    return None, False, False, None
+                json_str = command[json_start:json_end]
+            else:
+                # No quotes, find the end of the argument
+                json_end = json_start
+                while json_end < len(command) and command[json_end] not in ' \t':
+                    json_end += 1
+                json_str = command[json_start:json_end]
+            
+            try:
+                apply_config = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                print(f"❌ Error: Invalid JSON in --apply-config: {e}")
+                print(f"  JSON string: '{json_str}'")
+                print(f"  JSON string length: {len(json_str)}")
+                print(f"  JSON string repr: {repr(json_str)}")
+                return None, False, False, None
+            
+            # Remove the --apply-config part from the command for normal parsing
+            command = command[:apply_config_start].strip() + ' ' + command[json_end + 1:].strip()
+    
+    # Now parse the rest of the command normally
     parts = command.strip().split()
     if not parts or parts[0].lower() != 'policy-import':
-        return None, False, False
+        return None, False, False, None
     
     if len(parts) < 2:
-        return None, False, False
+        return None, False, False, None
     
     file_pattern = parts[1]
     quiet_mode = False
     verbose_mode = False
     
     # Check for flags
-    for i in range(2, len(parts)):
+    i = 2
+    while i < len(parts):
         if parts[i] == '--quiet' or parts[i] == '-q':
             quiet_mode = True
         elif parts[i] == '--verbose' or parts[i] == '-v':
@@ -786,11 +828,13 @@ def parse_policy_import_command(command: str) -> tuple:
             print("\nOptions:")
             print("  --quiet, -q        Quiet mode (minimal output)")
             print("  --verbose, -v      Verbose mode (detailed output)")
+            print("  --apply-config     Custom apply config JSON (overrides default settings)")
             print("  --help, -h         Show this help message")
             print("\nExamples:")
             print("  policy-import data/policy-export/*.json")
             print("  policy-import policy-export.zip --quiet")
             print("  policy-import *.json --verbose")
+            print("  policy-import *.zip --apply-config '{\"policyOverride\":false,\"sqlViewOverride\":true}'")
             print("\nFeatures:")
             print("  - Supports file paths and glob patterns")
             print("  - Processes JSON files and ZIP archives")
@@ -798,9 +842,11 @@ def parse_policy_import_command(command: str) -> tuple:
             print("  - Shows progress and detailed statistics")
             print("  - Comprehensive error handling and logging")
             print("="*60)
-            return None, False, False
+            return None, False, False, None
+        else:
+            i += 1
     
-    return file_pattern, quiet_mode, verbose_mode
+    return file_pattern, quiet_mode, verbose_mode, apply_config
 
 def parse_rule_tag_export_command(command: str) -> tuple:
     """Parse the rule-tag-export command and extract arguments.

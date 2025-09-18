@@ -1668,7 +1668,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         logger.error(error_msg)
 
 
-def execute_policy_import(client, logger: logging.Logger, file_pattern: str, quiet_mode: bool = False, verbose_mode: bool = False):
+def execute_policy_import(client, logger: logging.Logger, file_pattern: str, quiet_mode: bool = False, verbose_mode: bool = False, apply_config: dict = None):
     """Execute the policy-import command.
     
     Args:
@@ -1677,6 +1677,7 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
         file_pattern: File path or glob pattern for ZIP files
         quiet_mode: Whether to suppress console output
         verbose_mode: Whether to enable verbose logging
+        apply_config: Custom apply config JSON to override default settings
     """
     try:
         if not quiet_mode:
@@ -1975,15 +1976,30 @@ def execute_policy_import(client, logger: logging.Logger, file_pattern: str, qui
                     print(f"  Method: POST")
                     print(f"  Content-Type: application/json")
                     print(f"  UUID: {upload_uuid}")
+                    print(f"  Payload: {apply_payload}")
                 
                 # Prepare apply config payload
-                apply_payload = {
+                # Start with default values
+                default_apply_payload = {
                     "assemblyMap": {},
                     "policyOverride": True,
                     "sqlViewOverride": True,
                     "visualViewOverride": False,
                     "uuid": upload_uuid
                 }
+                
+                if apply_config:
+                    # Merge custom config with defaults
+                    apply_payload = default_apply_payload.copy()
+                    apply_payload.update(apply_config)  # Override with custom values
+                    apply_payload["uuid"] = upload_uuid  # Ensure UUID is always set
+                    if verbose_mode:
+                        print(f"  Using custom apply config (merged with defaults): {apply_payload}")
+                else:
+                    # Use default apply config
+                    apply_payload = default_apply_payload
+                    if verbose_mode:
+                        print(f"  Using default apply config: {apply_payload}")
                 
                 apply_response = client.make_api_call(
                     endpoint="/catalog-server/api/rules/import/policy-definitions/apply-config",
