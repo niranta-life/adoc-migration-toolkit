@@ -1366,8 +1366,8 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
         
         # Calculate total batches for progress bar using policy-type-specific batch sizes
         total_batches = 0
-        for policy_type, policy_ids in policies_by_category.items():
-            type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+        for category, policy_ids in policies_by_category.items():
+            type_batch_size = policy_batch_sizes.get(category, policy_batch_sizes['default'])
             total_batches += (len(policy_ids) + type_batch_size - 1) // type_batch_size
         
         current_batch = 0
@@ -1379,9 +1379,9 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
             print(f"Status: Initializing...")
         
         batch_idx = 0
-        for policy_type, policy_ids in policies_by_category.items():
+        for category, policy_ids in policies_by_category.items():
             # Get batch size for this specific policy type
-            type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+            type_batch_size = policy_batch_sizes.get(category, policy_batch_sizes['default'])
             
             if not quiet_mode:
                 # Update status line for new policy type (but don't reset progress bar)
@@ -1403,9 +1403,9 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         bar += '░'  # Empty block
                 
                 print(f"\033[2F\033[KExporting: [{bar}] {current_batch}/{total_batches} ({percentage:.1f}%)")
-                print(f"\033[KStatus: Processing {policy_type} ({len(policy_ids)} policies, batch size: {type_batch_size})")
+                print(f"\033[KStatus: Processing {category} ({len(policy_ids)} policies, batch size: {type_batch_size})")
             else:
-                print(f"Processing {policy_type}: {len(policy_ids)} policies (batch size: {type_batch_size})")
+                print(f"Processing {category}: {len(policy_ids)} policies (batch size: {type_batch_size})")
             
             type_total_batches = (len(policy_ids) + type_batch_size - 1) // type_batch_size
             for batch_num in range(type_total_batches):
@@ -1416,7 +1416,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                 
                 # Generate filename with range information
                 # Use the actual policy type name (category) for the filename
-                safe_category = "".join(c for c in policy_type if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_category = "".join(c for c in category if c.isalnum() or c in (' ', '-', '_')).rstrip()
                 safe_category = safe_category.replace(' ', '_').lower()
                 batch_filename = f"{safe_category}-{timestamp}-{start_idx}-{end_idx-1}.zip"
                 output_file = output_dir / batch_filename
@@ -1439,7 +1439,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                     print(f"\n" + "="*80)
                     print(f"🔍 DETAILED REQUEST INFORMATION")
                     print("="*80)
-                    print(f"Policy Type: {policy_type}")
+                    print(f"Policy Type: {category}")
                     print(f"Batch Number: {batch_num + 1}/{type_total_batches}")
                     print(f"Batch Range: {start_idx}-{end_idx-1}")
                     print(f"Policy IDs in Batch: {len(batch_ids)}")
@@ -1505,7 +1505,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                                 logger.warning(f"Version filtering failed for {batch_filename}: {filter_error}")
                         
                         # Store result for this batch
-                        batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                        batch_key = f"{category}_batch_{batch_num + 1}"
                         export_results[batch_key] = {
                             'success': True,
                             'filename': batch_filename,
@@ -1515,13 +1515,13 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         }
                         successful_exports += 1
                     else:
-                        error_msg = f"Empty response for {policy_type} batch {batch_num + 1}"
+                        error_msg = f"Empty response for {category} batch {batch_num + 1}"
                         if verbose_mode:
                             print(f"\n" + "="*80)
                             print(f"❌ ERROR RESPONSE INFORMATION")
                             print("="*80)
                             print(f"Error Type: Empty Response")
-                            print(f"Policy Type: {policy_type}")
+                            print(f"Policy Type: {category}")
                             print(f"Batch Number: {batch_num + 1}")
                             print(f"Expected Content: ZIP file")
                             print(f"Actual Response: None/Empty")
@@ -1533,7 +1533,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         # Mark this batch as failed
                         failed_batch_indices.add(batch_idx)
                         
-                        batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                        batch_key = f"{category}_batch_{batch_num + 1}"
                         export_results[batch_key] = {
                             'success': False,
                             'filename': batch_filename,
@@ -1544,13 +1544,13 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                         failed_exports += 1
                         
                 except Exception as e:
-                    error_msg = f"Failed to export {policy_type} batch {batch_num + 1}: {e}"
+                    error_msg = f"Failed to export {category} batch {batch_num + 1}: {e}"
                     if verbose_mode:
                         print(f"\n" + "="*80)
                         print(f"❌ EXCEPTION RESPONSE INFORMATION")
                         print("="*80)
                         print(f"Error Type: Exception")
-                        print(f"Policy Type: {policy_type}")
+                        print(f"Policy Type: {category}")
                         print(f"Batch Number: {batch_num + 1}")
                         print(f"Exception Type: {type(e).__name__}")
                         print(f"Exception Message: {str(e)}")
@@ -1567,7 +1567,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                     # Mark this batch as failed
                     failed_batch_indices.add(batch_idx)
                     
-                    batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                    batch_key = f"{category}_batch_{batch_num + 1}"
                     export_results[batch_key] = {
                         'success': False,
                         'filename': batch_filename,
@@ -1601,7 +1601,7 @@ def execute_policy_export(client, logger: logging.Logger, quiet_mode: bool = Fal
                     
                     # Move cursor up 2 lines and update both progress bar and status
                     print(f"\033[2F\033[KExporting: [{bar}] {current_batch}/{total_batches} ({percentage:.1f}%)")
-                    print(f"\033[KStatus: Processing {policy_type} batch {batch_num + 1}")
+                    print(f"\033[KStatus: Processing {category} batch {batch_num + 1}")
                 else:
                     print(f"  Batch {batch_num + 1}/{type_total_batches}: {len(batch_ids)} policies")
                     if response:
@@ -2593,8 +2593,8 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
             
             # Create progress bar for this thread using policy-type-specific batch sizes
             total_batches = 0
-            for policy_type, policy_ids in category_items:
-                type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+            for category, policy_ids in category_items:
+                type_batch_size = policy_batch_sizes.get(category, policy_batch_sizes['default'])
                 total_batches += (len(policy_ids) + type_batch_size - 1) // type_batch_size
             thread_names = get_thread_names()
             thread_name = thread_names[thread_id] if thread_id < len(thread_names) else f"Thread {thread_id}"
@@ -2612,9 +2612,9 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
             export_results = {}
             
             # Process each category in this thread's range
-            for policy_type, policy_ids in category_items:
+            for category, policy_ids in category_items:
                 # Get batch size for this specific policy type
-                type_batch_size = policy_batch_sizes.get(policy_type, policy_batch_sizes['default'])
+                type_batch_size = policy_batch_sizes.get(category, policy_batch_sizes['default'])
                 
                 type_total_batches = (len(policy_ids) + type_batch_size - 1) // type_batch_size
                 
@@ -2691,7 +2691,7 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                                     logger.warning(f"Thread {thread_name}: Version filtering failed for {batch_filename}: {filter_error}")
                             
                             # Store result for this batch
-                            batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                            batch_key = f"{category}_batch_{batch_num + 1}"
                             export_results[batch_key] = {
                                 'success': True,
                                 'filename': batch_filename,
@@ -2701,12 +2701,12 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                             }
                             successful_exports += 1
                         else:
-                            error_msg = f"Empty response for {policy_type} batch {batch_num + 1}"
+                            error_msg = f"Empty response for {category} batch {batch_num + 1}"
                             if verbose_mode:
                                 print(f"\n{thread_name} - ❌ {error_msg}")
                             logger.error(f"Thread {thread_name}: {error_msg}")
                             
-                            batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                            batch_key = f"{category}_batch_{batch_num + 1}"
                             export_results[batch_key] = {
                                 'success': False,
                                 'filename': batch_filename,
@@ -2717,12 +2717,12 @@ def execute_policy_export_parallel(client, logger: logging.Logger, quiet_mode: b
                             failed_exports += 1
                             
                     except Exception as e:
-                        error_msg = f"Failed to export {policy_type} batch {batch_num + 1}: {e}"
+                        error_msg = f"Failed to export {category} batch {batch_num + 1}: {e}"
                         if verbose_mode:
                             print(f"\n{thread_name} - ❌ {error_msg}")
                         logger.error(f"Thread {thread_name}: {error_msg}")
                         
-                        batch_key = f"{policy_type}_batch_{batch_num + 1}"
+                        batch_key = f"{category}_batch_{batch_num + 1}"
                         export_results[batch_key] = {
                             'success': False,
                             'filename': batch_filename,
