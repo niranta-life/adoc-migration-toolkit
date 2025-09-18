@@ -563,16 +563,16 @@ def parse_asset_tag_export_command(command: str) -> tuple:
                 raise ValueError(f"Invalid max_threads value: {e}")
             parts.pop(i)  # Remove --max-threads
             parts.pop(i)  # Remove the max_threads value
-        elif parts[i] == '--assembly-id':
+        elif parts[i] == '--assembly-id' or parts[i] == '--assembly_id':
             if i + 1 >= len(parts):
-                raise ValueError("--assembly-id requires a value")
+                raise ValueError(f"{parts[i]} requires a value")
             try:
                 assembly_id = int(parts[i + 1])
                 if assembly_id < 1:
                     raise ValueError("assembly_id must be at least 1")
             except ValueError as e:
                 raise ValueError(f"Invalid assembly_id value: {e}")
-            parts.pop(i)  # Remove --assembly-id
+            parts.pop(i)  # Remove the assembly parameter
             parts.pop(i)  # Remove the assembly_id value
         else:
             i += 1
