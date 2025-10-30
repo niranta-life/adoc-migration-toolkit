@@ -3955,6 +3955,8 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
             writer.writeheader()
             
             for source_row in source_data:
+                # Convert source_id to string to avoid "Python int too large to convert to C long" error on Windows
+                source_row['source_id'] = str(source_row.get('source_id', ''))
                 # Apply string transformations to target_uid (C -> T)
                 original_target_uid = source_row['target_uid']
                 transformed_target_uid = original_target_uid
@@ -4095,6 +4097,11 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         
         # Write merged data to output file
         if merged_data:
+            # Convert all ID fields to strings to avoid "Python int too large to convert to C long" error on Windows
+            for row in merged_data:
+                row['source_id'] = str(row['source_id'])
+                row['target_id'] = str(row['target_id'])
+            
             with open(output_file, 'w', newline='', encoding='utf-8') as f:
                 fieldnames = ['source_id', 'source_uid', 'target_id', 'target_uid', 'tags', 'source_asset_type']
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
