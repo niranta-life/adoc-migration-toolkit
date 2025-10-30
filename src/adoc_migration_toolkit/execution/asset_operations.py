@@ -4002,11 +4002,11 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
 
                 # Write transformed record to temporary file
                 temp_row = {
-                    'source_uid': source_row['source_uid'],  # A
-                    'source_id': source_row['source_id'],    # B
-                    'target_uid': transformed_target_uid,    # T (transformed C or original)
-                    'tags': source_row['tags'],               # D
-                    'asset_type': source_row['asset_type']    # E
+                    'source_uid': str(source_row['source_uid']),  # A
+                    'source_id': str(source_row['source_id']),    # B (already converted to string above)
+                    'target_uid': str(transformed_target_uid),    # T (transformed C or original)
+                    'tags': str(source_row.get('tags', '')),      # D
+                    'asset_type': str(source_row.get('asset_type', ''))    # E
                 }
                 writer.writerow(temp_row)
         if verbose_mode:
@@ -4033,12 +4033,12 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
                     
                     # Create merged record according to specification
                     merged_row = {
-                        'source_id': temp_row['source_id'],      # B
-                        'source_uid': temp_row['source_uid'],    # A
-                        'target_id': target_row['source_id'],    # F
-                        'target_uid': target_row['source_uid'],  # E
-                        'tags': temp_row['tags'],                # D
-                        'source_asset_type': temp_row['asset_type']     # E
+                        'source_id': str(temp_row['source_id']),      # B
+                        'source_uid': str(temp_row['source_uid']),    # A
+                        'target_id': str(target_row['source_id']),    # F
+                        'target_uid': str(target_row['source_uid']),  # E
+                        'tags': str(temp_row.get('tags', '')),        # D
+                        'source_asset_type': str(temp_row.get('asset_type', ''))     # E
                     }
                     merged_data.append(merged_row)
                     
@@ -4097,11 +4097,7 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         
         # Write merged data to output file
         if merged_data:
-            # Convert all ID fields to strings to avoid "Python int too large to convert to C long" error on Windows
-            for row in merged_data:
-                row['source_id'] = str(row['source_id'])
-                row['target_id'] = str(row['target_id'])
-            
+            # All fields are already converted to strings when creating merged_row
             with open(output_file, 'w', newline='', encoding='utf-8') as f:
                 fieldnames = ['source_id', 'source_uid', 'target_id', 'target_uid', 'tags', 'source_asset_type']
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
