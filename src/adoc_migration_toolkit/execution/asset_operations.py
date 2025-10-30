@@ -3910,7 +3910,12 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         # Read source file
         source_data = []
         # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
-        csv.field_size_limit(sys.maxsize)
+        # Use a safe value that works on both Windows and Unix
+        try:
+            csv.field_size_limit(min(sys.maxsize, 2147483647))  # Use 2^31-1 as max to avoid C long overflow on Windows
+        except (OverflowError, ValueError):
+            csv.field_size_limit(2147483647)  # Fallback to safe value
+        
         with open(source_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -3928,7 +3933,12 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         # Read target file
         target_data = {}
         # The below limit is set to fix the error: field larger than field limit (131072), python csv read has a limitation.
-        csv.field_size_limit(sys.maxsize)
+        # Use a safe value that works on both Windows and Unix
+        try:
+            csv.field_size_limit(min(sys.maxsize, 2147483647))  # Use 2^31-1 as max to avoid C long overflow on Windows
+        except (OverflowError, ValueError):
+            csv.field_size_limit(2147483647)  # Fallback to safe value
+        
         with open(target_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -3949,66 +3959,76 @@ def execute_transform_and_merge(string_transforms: dict, quiet_mode: bool, verbo
         temp_source_file = asset_export_dir / "temp_source_transformed.csv"
         transformed_count = 0
 
-        with open(temp_source_file, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = ['source_uid', 'source_id', 'target_uid', 'tags', 'asset_type']
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            for source_row in source_data:
-                # Convert source_id to string to avoid "Python int too large to convert to C long" error on Windows
-                source_row['source_id'] = str(source_row.get('source_id', ''))
-                # Apply string transformations to target_uid (C -> T)
-                original_target_uid = source_row['target_uid']
-                transformed_target_uid = original_target_uid
+        try:
+            with open(temp_source_file, 'w', newline='', encoding='utf-8') as f:
+                fieldnames = ['source_uid', 'source_id', 'target_uid', 'tags', 'asset_type']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
                 
-                # Apply string transformations atomically if provided
-                if string_transforms:
-                    # Phase 1: Replace all source strings with unique placeholders
-                    # This prevents later transformations from affecting earlier ones
-                    placeholders = {}
-                    temp_uid = transformed_target_uid
+                for source_row in source_data:
+                    # Convert source_id to string to avoid "Python int too large to convert to C long" error on Windows
+                    source_row['source_id'] = str(source_row.get('source_id', ''))
+                    # Apply string transformations to target_uid (C -> T)
+                    original_target_uid = source_row['target_uid']
+                    transformed_target_uid = original_target_uid
                     
-                    for source_str, target_str in string_transforms.items():
-                        if source_str != target_str:
-                            # Use exact word boundary matching
-                            if re.search(r'\b' + re.escape(source_str) + r'\b', temp_uid):
-                                # Create a unique placeholder for this transformation
-                                placeholder = f"__TRANSFORM_PLACEHOLDER_{len(placeholders)}__"
-                                placeholders[placeholder] = target_str
-                                # Use regex replacement for exact word boundary matching
-                                temp_uid = re.sub(r'\b' + re.escape(source_str) + r'\b', placeholder, temp_uid)
-                                transformed_count += 1
-                                if verbose_mode:
-                                    print(f"🔄 Phase 1: '{source_str}' -> '{placeholder}' in '{original_target_uid}'")
-                    
-                    # Phase 2: Replace all placeholders with their target strings
-                    for placeholder, target_str in placeholders.items():
-                        temp_uid = temp_uid.replace(placeholder, target_str)
-                        if verbose_mode:
-                            print(f"🔄 Phase 2: '{placeholder}' -> '{target_str}'")
-                    
-                    transformed_target_uid = temp_uid
-                    
-                    if transformed_target_uid != original_target_uid:
-                        if verbose_mode:
-                            print(f"🔄 Final transformation: '{original_target_uid}' -> '{transformed_target_uid}'")
+                    # Apply string transformations atomically if provided
+                    if string_transforms:
+                        # Phase 1: Replace all source strings with unique placeholders
+                        # This prevents later transformations from affecting earlier ones
+                        placeholders = {}
+                        temp_uid = transformed_target_uid
+                        
+                        for source_str, target_str in string_transforms.items():
+                            if source_str != target_str:
+                                # Use exact word boundary matching
+                                if re.search(r'\b' + re.escape(source_str) + r'\b', temp_uid):
+                                    # Create a unique placeholder for this transformation
+                                    placeholder = f"__TRANSFORM_PLACEHOLDER_{len(placeholders)}__"
+                                    placeholders[placeholder] = target_str
+                                    # Use regex replacement for exact word boundary matching
+                                    temp_uid = re.sub(r'\b' + re.escape(source_str) + r'\b', placeholder, temp_uid)
+                                    transformed_count += 1
+                                    if verbose_mode:
+                                        print(f"🔄 Phase 1: '{source_str}' -> '{placeholder}' in '{original_target_uid}'")
+                        
+                        # Phase 2: Replace all placeholders with their target strings
+                        for placeholder, target_str in placeholders.items():
+                            temp_uid = temp_uid.replace(placeholder, target_str)
+                            if verbose_mode:
+                                print(f"🔄 Phase 2: '{placeholder}' -> '{target_str}'")
+                        
+                        transformed_target_uid = temp_uid
+                        
+                        if transformed_target_uid != original_target_uid:
+                            if verbose_mode:
+                                print(f"🔄 Final transformation: '{original_target_uid}' -> '{transformed_target_uid}'")
+                        else:
+                            if verbose_mode:
+                                print(f"⏭️  No transformations applied to '{original_target_uid}'")
                     else:
+                        # No transformations provided - use original UID for direct matching
                         if verbose_mode:
-                            print(f"⏭️  No transformations applied to '{original_target_uid}'")
-                else:
-                    # No transformations provided - use original UID for direct matching
-                    if verbose_mode:
-                        print(f"🔍 Direct matching mode: using original UID '{original_target_uid}'")
+                            print(f"🔍 Direct matching mode: using original UID '{original_target_uid}'")
 
-                # Write transformed record to temporary file
-                temp_row = {
-                    'source_uid': str(source_row['source_uid']),  # A
-                    'source_id': str(source_row['source_id']),    # B (already converted to string above)
-                    'target_uid': str(transformed_target_uid),    # T (transformed C or original)
-                    'tags': str(source_row.get('tags', '')),      # D
-                    'asset_type': str(source_row.get('asset_type', ''))    # E
-                }
-                writer.writerow(temp_row)
+                    # Write transformed record to temporary file
+                    temp_row = {
+                        'source_uid': str(source_row['source_uid']),  # A
+                        'source_id': str(source_row['source_id']),    # B (already converted to string above)
+                        'target_uid': str(transformed_target_uid),    # T (transformed C or original)
+                        'tags': str(source_row.get('tags', '')),      # D
+                        'asset_type': str(source_row.get('asset_type', ''))    # E
+                    }
+                    writer.writerow(temp_row)
+        except Exception as e:
+            error_msg = f"Error writing temporary CSV file: {e}"
+            logger.error(error_msg)
+            print(f"❌ {error_msg}")
+            if verbose_mode:
+                import traceback
+                traceback.print_exc()
+            raise
+        
         if verbose_mode:
             print(f"📄 Created temporary source file: {temp_source_file}")
             print(f"🔄 Applied {transformed_count} transformations")
